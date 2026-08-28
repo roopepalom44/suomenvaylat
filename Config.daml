@@ -6,12 +6,12 @@
         xsi:schemaLocation="http://schemas.esri.com/DADF/Registry file:///C:/Program%20Files/ArcGIS/Pro/bin/ArcGIS.Desktop.Framework.xsd">
 
 	<AddInInfo id="{2aea3c93-c012-4ed4-b416-6b3a844e0204}"
-			   version="1.0"
+			   version="1.0.2"
 			   desktopVersion="3.5.0.57366"
 			   product="ArcGISPro">
 		<Name>suomenvaylat</Name>
 		<Description>Suomenväylät.fi -käynnistin (WFS Lataustyökalu)</Description>
-		<Image>Images/Suomenvaylat32.png</Image>
+		<Image>Images\Suomenvaylat32.png</Image>
 		<Author>RPAL</Author>
 		<Company>Ramboll</Company>
 		<Date>2026-02-25</Date>
@@ -30,8 +30,8 @@
 					   caption=""
 					   appearsOnAddInTab="true"
 					   keytip="TL"
-					   smallImage="Images/Suomenvaylat16.png"
-					   largeImage="Images/Suomenvaylat32.png">
+					   smallImage="Images\Suomenvaylat16.png"
+					   largeImage="Images\Suomenvaylat32.png">
 					<button refID="suomenvaylat_SuomenvaylatButton" size="large" />
 				</group>
 			</groups>
@@ -43,8 +43,8 @@
 						className="OpenSuomenvaylatToolButton"
 						loadOnClick="true"
 						keytip="SV"
-						smallImage="Images/Suomenvaylat16.png"
-						largeImage="Images/Suomenvaylat32.png">
+						smallImage="Images\Suomenvaylat16.png"
+						largeImage="Images\Suomenvaylat32.png">
 					<tooltip heading="Suomenväylät.fi">
 						Avaa lataustyökalun geoprocessing-paneeliin.
 						<disabledText />

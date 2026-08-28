@@ -1753,30 +1753,29 @@ class VaylaWFSDownloader(object):
             service_base = parts[0].strip() or self.kapsi_wms_base
             service_layer = parts[1].strip() or layer_id
 
-        # Kapsi WMS sub-layers (e.g. maastokartta_250k, yleiskartta_1000k) are
-        # scale-dependent and return blank white images when the request pixel
-        # resolution falls outside their zoom range.  The auto-scaling parent
-        # layer (whose name matches the last path segment of the service URL,
-        # e.g. "peruskartta") always picks the correct scale, so prefer it.
-        _scale_parent_layers = {
-            "maastokartta_50k", "maastokartta_100k", "maastokartta_250k",
-            "maastokartta_500k", "yleiskartta_1000k", "yleiskartta_2000k",
-            "yleiskartta_4500k", "yleiskartta_8000k",
-        }
-        if service_layer.lower() in _scale_parent_layers:
-            parent_name = service_base.rstrip("/").split("/")[-1]
-            if parent_name:
-                self._msg("  [INFO] Käytetään ylätasoa '{}' alatason '{}' sijaan mittakaavayhteensopivuuden varmistamiseksi.".format(parent_name, service_layer))
-                service_layer = parent_name
-
         ext = self._boundary_extent_3067(boundary_fc)
 
         # Determine tiling: for large areas, split into a grid so each tile
-        # has a reasonable ground resolution (~50 m/px target).
+        # has a resolution suitable for the selected Kapsi map series.
         extent_w = ext.XMax - ext.XMin
         extent_h = ext.YMax - ext.YMin
         tile_px = 4096
-        target_gsd = 50.0  # metres per pixel target
+        target_gsd_by_layer = {
+            "taustakartta_4m": 4.0,
+            "taustakartta_5k": 1.5,
+            "taustakartta_8m": 8.0,
+            "taustakartta_40k": 12.0,
+            "taustakartta_80k": 24.0,
+            "maastokartta_50k": 15.0,
+            "maastokartta_100k": 30.0,
+            "maastokartta_250k": 75.0,
+            "maastokartta_500k": 150.0,
+            "yleiskartta_1000k": 280.0,
+            "yleiskartta_2000k": 560.0,
+            "yleiskartta_4500k": 1260.0,
+            "yleiskartta_8000k": 2240.0,
+        }
+        target_gsd = target_gsd_by_layer.get(service_layer.lower(), 20.0)
         cols = max(1, int(math.ceil(extent_w / (tile_px * target_gsd))))
         rows = max(1, int(math.ceil(extent_h / (tile_px * target_gsd))))
         # Cap tiles to avoid excessive requests

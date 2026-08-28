@@ -4,7 +4,6 @@ using ArcGIS.Desktop.Framework.Dialogs;
 using System;
 using System.IO;
 using System.Reflection;
-using suomenvaylat.network;
 
 namespace suomenvaylat
 {
@@ -37,8 +36,6 @@ namespace suomenvaylat
                 // Syntaksi: "X:\koko\polku\tyokalu.pyt\PythonLuokanNimi"
                 string toolClassName = "VaylaWFSDownloader";
                 string toolPath = $@"{pytPath}\{toolClassName}";
-
-                LoggerRunner.RecordToolOpening("Suomenväylät");
 
                 // 4) Avaa työkalu
                 Geoprocessing.OpenToolDialog(toolPath, null, null, false);

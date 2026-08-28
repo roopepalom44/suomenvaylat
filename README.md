@@ -22,3 +22,13 @@ Tämä on ArcGIS Pro -laajennus (Add-in), joka tarjoaa työkalut Suomenväylät-
 2. Varmista, että ArcGIS Pro on asennettuna koneelle (SDK-riippuvuudet haetaan asennuskansiosta).
 3. Käännä (Build) projekti.
 4. Käännetty `.esriAddinX`-tiedosto muodostuu `bin`-kansioon ja/tai asentuu automaattisesti ArcGIS Prohon, jos asetukset ovat kunnossa.
+
+### Manuaalinen paketointi
+
+Jos ArcGIS Pron SDK-projektia ei voi kääntää `dotnet build` -komennolla, päivitä olemassa oleva paketti lähdekoodilla suorittamalla PowerShellissä projektin juuressa:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\package-addin.ps1
+```
+
+Skripti korvaa `bin\Debug\net8.0-windows\suomenvaylat.esriAddInX`-paketin sisällön lähteen `Config.daml`- ja `Toolboxes\VaylaWFSDownloader.pyt`-tiedostoilla ja validoi uuden paketin ennen ylikirjoitusta.
