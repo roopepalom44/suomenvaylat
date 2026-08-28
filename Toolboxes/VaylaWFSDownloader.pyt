@@ -462,6 +462,10 @@ class VaylaWFSDownloader(object):
         self._wfs_geometry_field_cache = {}
         self._runtime_workspace = None
         self._runtime_workspace_is_folder = None
+        self._runtime_workspace_validated = False
+        self._runtime_project = None
+        self._runtime_map = None
+        self._runtime_map_loaded = False
         self.mml_wmts_capabilities = "https://avoin-paikkatieto.maanmittauslaitos.fi/geoserver/gwc/service/wmts?SERVICE=WMTS&REQUEST=GetCapabilities"
         self.mml_wms_base = "https://avoin-paikkatieto.maanmittauslaitos.fi/geoserver/wms"
         self.mml_karttakuva_wmts = "https://karttakuva.maanmittauslaitos.fi/maasto/wmts/1.0.0/WMTSCapabilities.xml"
@@ -477,7 +481,7 @@ class VaylaWFSDownloader(object):
         self._run_scratch_folder = None
         self._run_scratch_gdb = None
         self._tool_metrics = None
-        self._keep_scratch_on_error = False
+        self._run_id = None
 
     # ---------------------------
     # LOGGING
@@ -543,6 +547,7 @@ class VaylaWFSDownloader(object):
 
     def _create_run_scratch(self):
         create_start = time.perf_counter()
+        self._run_id = uuid.uuid4().hex[:8]
         run_folder = tempfile.mkdtemp(prefix="suomenvaylat_")
         try:
             arcpy.management.CreateFileGDB(run_folder, "scratch.gdb")
@@ -601,15 +606,40 @@ class VaylaWFSDownloader(object):
         n = self._sanitize_table_name(raw_name)
         if not self._is_filesystem_workspace(workspace):
             try:
-                n = arcpy.ValidateTableName(n, workspace)
+                # File GDB -nimisäännöt ovat samat paikallisessa ja verkko-GDB:ssä.
+                # Validointi paikallista scratch-GDB:tä vasten välttää hitaan
+                # verkko-GDB:n avaamisen pelkkää nimitarkistusta varten.
+                validation_workspace = (
+                    self._scratch_gdb() if self._is_remote_workspace(workspace) else workspace
+                )
+                n = arcpy.ValidateTableName(n, validation_workspace)
             except Exception:
                 pass
         return n
+
+    def _is_remote_workspace(self, workspace: str) -> bool:
+        path = os.path.abspath(str(workspace or ""))
+        if path.startswith("\\\\"):
+            return True
+        drive, _ = os.path.splitdrive(path)
+        if not drive or os.name != "nt":
+            return False
+        try:
+            # DRIVE_REMOTE = 4. Mapped drives (esim. V:) tunnistuvat tällä.
+            return ctypes.windll.kernel32.GetDriveTypeW(drive + "\\") == 4
+        except Exception:
+            return False
 
     def _unique_output_name(self, raw_name: str, workspace: str, max_len: int = 60) -> str:
         """Validoi nimi ja varmista ettei se törmää jo olemassa olevaan
         tulokseen samassa workspacessa (estää hiljaisen ylikirjoituksen)."""
         base = self._validated_name(raw_name, workspace)[:max_len]
+        if self._is_remote_workspace(workspace):
+            # Verkko-GDB:n jokainen Exists-kutsu voi kestää useita sekunteja.
+            # Ajokohtainen tunniste antaa käytännössä yksilöllisen nimen ilman
+            # yhtäkään verkkokyselyä.
+            suffix = "_{}".format(self._run_id or uuid.uuid4().hex[:8])
+            return base[:max_len - len(suffix)] + suffix
         candidate = base
         i = 1
         while arcpy.Exists(self._dataset_output_path(workspace, candidate)):
@@ -620,8 +650,11 @@ class VaylaWFSDownloader(object):
 
     def _add_to_map(self, dataset_path: str):
         try:
-            aprx = arcpy.mp.ArcGISProject("CURRENT")
-            m = aprx.activeMap
+            if not self._runtime_map_loaded:
+                self._runtime_project = arcpy.mp.ArcGISProject("CURRENT")
+                self._runtime_map = self._runtime_project.activeMap
+                self._runtime_map_loaded = True
+            m = self._runtime_map
             if m:
                 m.addDataFromPath(dataset_path)
                 return True, None
@@ -666,12 +699,20 @@ class VaylaWFSDownloader(object):
             final_name = final_name + ".shp"
         return os.path.join(workspace, final_name)
 
-    def _copy_features_compatible(self, source_fc, workspace, out_name, metrics=None):
+    def _copy_features_compatible(self, source_fc, workspace, out_name, metrics=None,
+                                  output_known_absent=False):
         metrics = metrics if metrics is not None else PhaseMetrics()
         out_path = self._dataset_output_path(workspace, out_name)
-        exists_start = time.perf_counter()
-        output_exists = arcpy.Exists(out_path)
-        metrics.add("olemassa olevan tulosaineiston tarkistus", time.perf_counter() - exists_start)
+        if output_known_absent:
+            output_exists = False
+            metrics.skip(
+                "olemassa olevan tulosaineiston tarkistus",
+                "ohitettu (ajokohtainen yksilöllinen nimi)"
+            )
+        else:
+            exists_start = time.perf_counter()
+            output_exists = arcpy.Exists(out_path)
+            metrics.add("olemassa olevan tulosaineiston tarkistus", time.perf_counter() - exists_start)
         if output_exists:
             delete_start = time.perf_counter()
             self._safe_delete(out_path)
@@ -1049,9 +1090,11 @@ class VaylaWFSDownloader(object):
     def _init_workspace_cache(self, workspace: str):
         self._runtime_workspace = workspace
         self._runtime_workspace_is_folder = None
+        self._runtime_workspace_validated = False
         try:
             d = arcpy.Describe(workspace)
             self._runtime_workspace_is_folder = (getattr(d, "workspaceType", "") or "").lower() == "filesystem"
+            self._runtime_workspace_validated = True
         except Exception:
             self._runtime_workspace_is_folder = False
 
@@ -2700,33 +2743,6 @@ class VaylaWFSDownloader(object):
         p_karttakuva_pass.value = self._get_saved_secret("karttakuva_pass")
         p_karttakuva_pass.enabled = False
 
-        p_keep_scratch = arcpy.Parameter(
-            displayName="Säilytä ajokohtainen scratch-aineisto virhetilanteessa",
-            name="keep_scratch_on_error",
-            datatype="GPBoolean",
-            parameterType="Optional",
-            direction="Input"
-        )
-        p_keep_scratch.value = False
-
-        p_clip_cql = arcpy.Parameter(
-            displayName="Leikkaa myös CQL-tulokset tarkasti aluerajaan",
-            name="clip_cql_results",
-            datatype="GPBoolean",
-            parameterType="Optional",
-            direction="Input"
-        )
-        p_clip_cql.value = False
-
-        p_copy_benchmark = arcpy.Parameter(
-            displayName="Mittaa CopyFeatures paikalliseen ja valittuun kohteeseen",
-            name="benchmark_copy",
-            datatype="GPBoolean",
-            parameterType="Optional",
-            direction="Input"
-        )
-        p_copy_benchmark.value = False
-
         return [
             p_wfs_sources,
             p_layer_search, p_layers,
@@ -2734,10 +2750,7 @@ class VaylaWFSDownloader(object):
             p_mml_api_key,
             p_karttapaikka_api_key,
             p_karttakuva_user,
-            p_karttakuva_pass,
-            p_keep_scratch,
-            p_clip_cql,
-            p_copy_benchmark
+            p_karttakuva_pass
         ]
 
     def updateParameters(self, parameters):
@@ -2921,12 +2934,11 @@ class VaylaWFSDownloader(object):
         except Exception:
             original_scratch_workspace = None
         success = False
-        keep_on_error = False
         try:
-            if len(parameters) > 11:
-                raw_keep = parameters[11].value
-                keep_on_error = str(raw_keep).strip().lower() in ("true", "1", "yes")
             scratch_elapsed = self._create_run_scratch()
+            self._runtime_project = None
+            self._runtime_map = None
+            self._runtime_map_loaded = False
             self._tool_metrics.set("työkalun varsinainen käynnistys", scratch_elapsed)
             arcpy.env.overwriteOutput = True
             try:
@@ -2945,7 +2957,7 @@ class VaylaWFSDownloader(object):
             except Exception:
                 pass
             cleanup_elapsed, cleanup_error = self._cleanup_run_scratch(
-                preserve=(not success and keep_on_error)
+                preserve=(not success)
             )
             self._tool_metrics.set("väliaineistojen siivous", cleanup_elapsed)
             if cleanup_error:
@@ -2959,6 +2971,7 @@ class VaylaWFSDownloader(object):
             tool_phases = [
                 "työkalun varsinainen käynnistys",
                 "parametrien lukeminen ja validointi",
+                "kohdetyötilan validointi",
                 "aluerajauksen valmistelu",
                 "tasomääritysten muodostaminen",
                 "kaikkien tasojen käsittely",
@@ -2993,13 +3006,6 @@ class VaylaWFSDownloader(object):
         self._runtime_karttapaikka_api_key = karttapaikka_api_key.strip()
         self._runtime_karttakuva_user = karttakuva_user
         self._runtime_karttakuva_pass = karttakuva_pass
-        clip_cql_results = False
-        benchmark_copy = False
-        if len(parameters) > 12:
-            clip_cql_results = str(parameters[12].value).strip().lower() in ("true", "1", "yes")
-        if len(parameters) > 13:
-            benchmark_copy = str(parameters[13].value).strip().lower() in ("true", "1", "yes")
-
         sel_vals = self._parse_multivalue(extent_value_text)
 
         if extent_type in ["Kunta/Kaupunki", "Maakunta", "Elinvoimakeskus", "Hyvinvointialue"] and not sel_vals:
@@ -3022,7 +3028,12 @@ class VaylaWFSDownloader(object):
                 workspace = self._scratch_gdb()
 
         scratch_gdb = self._scratch_gdb()
+        workspace_validation_start = time.perf_counter()
         self._init_workspace_cache(workspace)
+        self._tool_metrics.set(
+            "kohdetyötilan validointi",
+            time.perf_counter() - workspace_validation_start,
+        )
 
         if extent_type == "Koko Suomi":
             area_label = "Koko_Suomi"
@@ -3196,8 +3207,12 @@ class VaylaWFSDownloader(object):
             cql_split_effective = False
             stage_name = "stage_{}_{}".format(layer_index, uuid.uuid4().hex[:8])
             staged_fc = os.path.join(scratch_gdb, stage_name)
-            proposed_output_name = self._validated_name(
+            output_name_start = time.perf_counter()
+            proposed_output_name = self._unique_output_name(
                 layer_ui_name.rsplit(" - ", 1)[0], workspace
+            )
+            layer_metrics.add(
+                "tulosnimen validointi", time.perf_counter() - output_name_start
             )
             proposed_output_path = self._dataset_output_path(workspace, proposed_output_name)
             if layer_kind == "wfs":
@@ -3531,7 +3546,7 @@ class VaylaWFSDownloader(object):
                     chunks, total_found, used_grid = resilience.execute_with_fallback(_fetch_bbox_once, bbox_str)
                     temp_feature_classes.extend(chunks)
                     cql_split_effective = cql_state["split"]
-                    skip_clip = cql_state["effective"] and used_grid == 1 and not clip_cql_results
+                    skip_clip = cql_state["effective"] and used_grid == 1
                 except Exception as ex:
                     self._error(f"[VIRHE] WFS-pyyntö epäonnistui tasolle '{layer_clean}': {ex}")
                     raise arcpy.ExecuteError
@@ -3596,11 +3611,16 @@ class VaylaWFSDownloader(object):
                 "väliaineistojen poistaminen", time.perf_counter() - temp_cleanup_start
             )
 
+            count_start = time.perf_counter()
+            staged_feature_count = int(arcpy.management.GetCount(staged_fc)[0])
+            layer_metrics.add("kohdemäärän laskenta", time.perf_counter() - count_start)
+
             layer_processing_total = time.perf_counter() - layer_start
 
             staged_outputs.append({
                 "path": staged_fc,
-                "output_name": layer_ui_name.rsplit(" - ", 1)[0],
+                "output_name": proposed_output_name,
+                "output_name_is_final": True,
                 "output_type": "feature",
                 "label": layer_ui_name,
                 "kind": "wfs",
@@ -3613,7 +3633,7 @@ class VaylaWFSDownloader(object):
                 "metrics": layer_metrics,
                 "processing_total_s": layer_processing_total,
                 "requested_mode": requested_mode if layer_kind == "wfs" else layer_kind,
-                "benchmark_copy": benchmark_copy,
+                "feature_count": staged_feature_count,
             })
 
         self._tool_metrics.set(
@@ -3664,49 +3684,34 @@ class VaylaWFSDownloader(object):
             copy_start = time.perf_counter()
             if output["output_type"] == "feature":
                 copy_metrics = output.get("metrics") or PhaseMetrics()
-                target_check_start = time.perf_counter()
-                target_exists = arcpy.Exists(workspace) or os.path.exists(workspace)
-                copy_metrics.add(
-                    "kohde-GDB:n olemassaolon tarkistus",
-                    time.perf_counter() - target_check_start,
-                )
-                if not target_exists:
-                    raise Exception("Tallennuskohdetta ei löydy: {}".format(workspace))
-                name_start = time.perf_counter()
-                output_name = self._unique_output_name(output["output_name"], workspace)
-                copy_metrics.add("tulosnimen validointi", time.perf_counter() - name_start)
-                if output.get("benchmark_copy"):
-                    benchmark_path = os.path.join(
-                        scratch_gdb, "copy_benchmark_{}".format(uuid.uuid4().hex[:8])
-                    )
-                    benchmark_start = time.perf_counter()
-                    arcpy.management.CopyFeatures(output["path"], benchmark_path)
-                    local_copy_s = time.perf_counter() - benchmark_start
-                    copy_metrics.add("CopyFeatures-vertailu paikalliseen GDB:hen", local_copy_s)
-                    self._safe_delete(benchmark_path)
-                    self._msg(
-                        "  [VERTAILU] {}: CopyFeatures paikalliseen scratch-GDB:hen {:.3f} s.".format(
-                            output["label"], local_copy_s
-                        )
+                if self._runtime_workspace_validated:
+                    copy_metrics.skip(
+                        "kohde-GDB:n olemassaolon tarkistus",
+                        "ohitettu (kohde validoitiin ajon alussa)"
                     )
                 else:
-                    copy_metrics.skip(
-                        "CopyFeatures-vertailu paikalliseen GDB:hen", "ei käytetty"
+                    target_check_start = time.perf_counter()
+                    if not (arcpy.Exists(workspace) or os.path.exists(workspace)):
+                        raise Exception("Tallennuskohdetta ei löydy: {}".format(workspace))
+                    copy_metrics.add(
+                        "kohde-GDB:n olemassaolon tarkistus",
+                        time.perf_counter() - target_check_start,
                     )
+                    self._runtime_workspace_validated = True
+                if output.get("output_name_is_final"):
+                    output_name = output["output_name"]
+                else:
+                    name_start = time.perf_counter()
+                    output_name = self._unique_output_name(output["output_name"], workspace)
+                    copy_metrics.add("tulosnimen validointi", time.perf_counter() - name_start)
                 final_path = self._copy_features_compatible(
-                    output["path"], workspace, output_name, copy_metrics
+                    output["path"], workspace, output_name, copy_metrics,
+                    output_known_absent=True,
                 )
-                if output.get("benchmark_copy"):
-                    self._msg(
-                        "  [VERTAILU] {}: CopyFeatures valittuun kohteeseen {:.3f} s ({}).".format(
-                            output["label"],
-                            copy_metrics.get("lopullinen CopyFeatures", 0.0) or 0.0,
-                            workspace,
-                        )
-                    )
-                count_start = time.perf_counter()
-                output["feature_count"] = int(arcpy.management.GetCount(final_path)[0])
-                copy_metrics.add("kohdemäärän laskenta", time.perf_counter() - count_start)
+                if "feature_count" not in output:
+                    count_start = time.perf_counter()
+                    output["feature_count"] = int(arcpy.management.GetCount(output["path"])[0])
+                    copy_metrics.add("kohdemäärän laskenta", time.perf_counter() - count_start)
                 copy_metrics.skip("indeksien luonti", "ei tarpeen")
                 copy_metrics.skip("metatietojen käsittely", "ei käytetty")
                 output["metrics"] = copy_metrics
@@ -3741,7 +3746,7 @@ class VaylaWFSDownloader(object):
         for output in to_add:
             p = output.get("final_path")
             map_start = time.perf_counter()
-            if p and (arcpy.Exists(p) or os.path.exists(p)):
+            if p:
                 added, add_error = self._add_to_map(p)
                 if added:
                     output["map_s"] = time.perf_counter() - map_start
@@ -3772,7 +3777,7 @@ class VaylaWFSDownloader(object):
             "kohde-GDB:n olemassaolon tarkistus", "tulosnimen validointi",
             "olemassa olevan tulosaineiston tarkistus",
             "olemassa olevan tulosaineiston poistaminen", "kenttien käsittely",
-            "CopyFeatures-vertailu paikalliseen GDB:hen", "lopullinen CopyFeatures",
+            "lopullinen CopyFeatures",
             "kohdemäärän laskenta", "indeksien luonti", "metatietojen käsittely",
             "kartalle lisääminen", "väliaineistojen poistaminen",
         ]

@@ -85,6 +85,23 @@ class ToolboxHelperTests(unittest.TestCase):
         self.assertNotIn(" ", url)
         self.assertNotIn("bbox=", url)
 
+    def test_remote_output_name_uses_run_id_without_exists_loop(self):
+        self.tool._runtime_workspace = None
+        self.tool._runtime_workspace_is_folder = None
+        self.tool._run_scratch_gdb = None
+        self.tool._run_id = "abcdef12"
+        name = self.tool._unique_output_name(
+            "Kaiteet", r"\\server\share\results.gdb"
+        )
+        self.assertEqual("Kaiteet_abcdef12", name)
+
+    def test_removed_execution_checkboxes_are_not_in_toolbox(self):
+        source = TOOLBOX.read_text(encoding="utf-8")
+        for parameter_name in (
+            "keep_scratch_on_error", "clip_cql_results", "benchmark_copy"
+        ):
+            self.assertNotIn(parameter_name, source)
+
     def test_fetch_json_records_network_read_and_parse_separately(self):
         class Response:
             status = 200

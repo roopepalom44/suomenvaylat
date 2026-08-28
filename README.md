@@ -49,11 +49,13 @@ WFS- ja rasterikäsittely tehdään ajokohtaisessa paikallisessa scratch-geodata
 
 - CQL `INTERSECTS` on Väylä- ja Digiroad-tasojen ensisijainen hakutapa. Nykyinen 2D-WKT-muunnos säilyy käytössä.
 - Jos yhtenäinen CQL GET ja POST hylätään ja suodatin on pitkä, työkalu yrittää samaa rajausgeometriaa pienempinä CQL-osina. BBOXiin siirrytään vasta näiden yritysten jälkeen.
-- CQL palauttaa oletuksena kokonaiset suunnittelualueeseen leikkaavat geometriat. Valinta **Leikkaa myös CQL-tulokset tarkasti aluerajaan** käynnistää erillisen paikallisen Clip-vaiheen.
+- CQL palauttaa kokonaiset suunnittelualueeseen leikkaavat geometriat; geometrioita ei katkaista rajaan paikallisella Clip-vaiheella.
 - Jokainen WFS-sivu lokitetaan erikseen. Verkkopyyntö, vastauksen lukeminen, JSON-jäsennys, JSON-tiedoston kirjoitus, `JSONToFeatures` ja sivun koko käsittelyaika ovat erillisiä lukuja.
 - Taso- ja työkaluyhteenvedoissa käyttämättömät vaiheet näkyvät tekstinä, eivät harhaanjohtavana nolla-aikana. Vaiheiden summa, Muu-aika ja kokonaisaika raportoidaan erikseen.
-- Valinta **Mittaa CopyFeatures paikalliseen ja valittuun kohteeseen** tekee ylimääräisen paikallisen vertailukopion scratch-GDB:hen, poistaa sen ja vertaa aikaa varsinaiseen kohdekopiointiin. Käytä valintaa vain vertailuajossa, koska se lisää yhden tarkoituksellisen kopioinnin.
-- Scratch-aineisto poistetaan onnistuneen ajon jälkeen. Virhetilanteen aineiston voi säilyttää valinnalla **Säilytä ajokohtainen scratch-aineisto virhetilanteessa**.
+- Ylimääräistä CopyFeatures-vertailukopiota ei tehdä normaalissa ajossa. Kopioinnin suorituskyky näkyy varsinaisen kohdekopioinnin lokista.
+- Scratch-aineisto poistetaan onnistuneen ajon jälkeen ja säilytetään aina virhetilanteessa vianmääritystä varten.
+- Verkko-GDB:n tulosnimelle lisätään ajokohtainen tunniste. Näin nimi pysyy yksilöllisenä ilman useita hitaita `Exists`-kyselyitä verkkoasemalle.
+- Kohdemäärä lasketaan paikallisesta valmiista staging-aineistosta ennen verkkokopiointia. Lopullista verkko-GDB:n tasoa ei avata uudelleen pelkkää laskentaa varten.
 
 `JSONToFeatures`-toteutusta ei ole vaihdettu ilman ArcGIS Prossa tehtävää saman aineiston vertailutestiä. Uusi loki antaa tarvittavat vertailuluvut nykyiselle sivukohtaiselle toteutukselle ennen mahdollista yhdistetyn JSONin tai suoran feature class -kirjoituksen kokeilua.
 
