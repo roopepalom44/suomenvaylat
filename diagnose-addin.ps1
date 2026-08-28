@@ -19,7 +19,7 @@ try {
     [IO.Compression.ZipFile]::ExtractToDirectory($packagePath, $temporaryDirectory)
 
     $configPath = Join-Path $temporaryDirectory 'Config.daml'
-    $assemblyPath = Join-Path $temporaryDirectory 'suomenvaylat.dll'
+    $assemblyPath = Join-Path $temporaryDirectory 'Install\suomenvaylat.dll'
     if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) {
         throw 'Config.daml is missing from the package.'
     }
@@ -116,7 +116,7 @@ try {
         $zip.Dispose()
     }
     Write-Output "Package entries: $($entryNames.Count)"
-    Write-Output "Required entries present: $([bool]($entryNames -contains 'Config.daml' -and $entryNames -contains 'suomenvaylat.dll' -and $entryNames -contains 'Toolboxes\VaylaWFSDownloader.pyt'))"
+    Write-Output "Required entries present: $([bool]($entryNames -contains 'Config.daml' -and $entryNames -contains 'Install\suomenvaylat.dll' -and $entryNames -contains 'Install\Toolboxes\VaylaWFSDownloader.pyt'))"
 
     $addinId = $config.ArcGIS.AddInInfo.id
     $cachePath = Join-Path $env:LOCALAPPDATA "ESRI\ArcGISPro\AssemblyCache\$addinId"
