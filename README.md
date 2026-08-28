@@ -13,7 +13,7 @@ Jos ArcGIS Pro näyttää edelleen `TypeNotFound`-virheen, aja ensin paketin dia
 powershell -ExecutionPolicy Bypass -File .\diagnose-addin.ps1
 ```
 
-Skriptin tuloksesta olennaiset rivit ovat `Assembly identity`, `Type found`, `TYPE MISSING` ja `Loader error`.
+Skriptin tuloksesta olennaiset rivit ovat `Assembly identity`, `Type found`, `TYPE MISSING` ja `Loader error`. Skripti lataa DLL:n muistista, joten diagnostiikan lopussa purettu väliaikaiskansio voidaan poistaa normaalisti.
 
 ## Manuaalinen paketointi ilman MSBuildia
 

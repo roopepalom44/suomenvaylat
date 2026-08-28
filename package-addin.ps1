@@ -64,20 +64,51 @@ if ($assemblyName.Name -ne 'suomenvaylat') {
 }
 Write-Output "Assembly identity: $($assemblyName.FullName)"
 
-$expectedTypes = @('suomenvaylat.Module1', 'suomenvaylat.OpenSuomenvaylatToolButton')
+$configPath = Join-Path $root 'Config.daml'
+[xml]$config = Get-Content -LiteralPath $configPath -Raw
+if ($config.ArcGIS.defaultAssembly -ne 'suomenvaylat.dll') {
+    throw "Config.daml defaultAssembly must be suomenvaylat.dll."
+}
+if ($config.ArcGIS.defaultNamespace -ne 'suomenvaylat') {
+    throw "Config.daml defaultNamespace must be suomenvaylat."
+}
+
+$moduleClass = $config.ArcGIS.modules.insertModule.className
+$buttonClass = ($config.ArcGIS.modules.insertModule.controls.button |
+    Where-Object { $_.id -eq 'suomenvaylat_SuomenvaylatButton' }).className
+$expectedTypes = @($moduleClass, $buttonClass) | ForEach-Object {
+    if ($_ -like '*.*') { $_ } else { "$($config.ArcGIS.defaultNamespace).$_" }
+}
+if ($expectedTypes -contains '' -or $expectedTypes.Count -ne 2) {
+    throw "Config.daml does not define both the module and button class names."
+}
+
 $typesValidated = $false
 try {
-    $assembly = [Reflection.Assembly]::LoadFrom($assemblySource)
-    $missingTypes = @()
-    foreach ($expectedType in $expectedTypes) {
-        if (-not $assembly.GetType($expectedType, $false, $false)) {
-            $missingTypes += $expectedType
+    $assembly = [Reflection.Assembly]::Load([IO.File]::ReadAllBytes($assemblySource))
+    try {
+        $availableTypes = @($assembly.GetTypes())
+        $missingTypes = @()
+        foreach ($expectedType in $expectedTypes) {
+            if (-not ($availableTypes | Where-Object { $_.FullName -eq $expectedType })) {
+                $missingTypes += $expectedType
+            }
+        }
+        if ($missingTypes.Count -gt 0) {
+            throw "Assembly is missing expected CLR type(s): $($missingTypes -join ', ')"
+        }
+        $typesValidated = $true
+    }
+    catch [Reflection.ReflectionTypeLoadException] {
+        $loaderMessages = @($_.Exception.LoaderExceptions | Where-Object { $_ } | ForEach-Object { $_.Message })
+        if ($loaderMessages.Count -eq 0) {
+            throw
+        }
+        Write-Warning "CLR type inspection was blocked by unresolved assembly dependencies. Falling back to metadata string checks."
+        foreach ($loaderMessage in $loaderMessages) {
+            Write-Warning "Loader error: $loaderMessage"
         }
     }
-    if ($missingTypes.Count -gt 0) {
-        throw "Assembly is missing expected CLR type(s): $($missingTypes -join ', ')"
-    }
-    $typesValidated = $true
 }
 catch {
     if ($_.Exception.Message -like 'Assembly is missing expected CLR type(s):*') {
@@ -117,14 +148,6 @@ try {
         if (-not (Test-Path -LiteralPath $item.Source -PathType Leaf)) {
             throw "Package input was not found: $($item.Source)"
         }
-    }
-
-    [xml]$config = Get-Content -LiteralPath (Join-Path $root 'Config.daml') -Raw
-    if ($config.ArcGIS.defaultAssembly -ne 'suomenvaylat.dll') {
-        throw "Config.daml defaultAssembly must be suomenvaylat.dll."
-    }
-    if ($config.ArcGIS.defaultNamespace -ne 'suomenvaylat') {
-        throw "Config.daml defaultNamespace must be suomenvaylat."
     }
 
     New-Item -ItemType Directory -Path $temporaryDirectory -Force | Out-Null

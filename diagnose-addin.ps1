@@ -33,6 +33,8 @@ try {
     $defaultNamespace = $config.ArcGIS.defaultNamespace
     $moduleType = $module.className
     $buttonType = $button.className
+    $moduleFullType = if ($moduleType -like '*.*') { $moduleType } else { "$defaultNamespace.$moduleType" }
+    $buttonFullType = if ($buttonType -like '*.*') { $buttonType } else { "$defaultNamespace.$buttonType" }
 
     Write-Output "Package: $packagePath"
     Write-Output "Add-in id: $($config.ArcGIS.AddInInfo.id)"
@@ -46,17 +48,33 @@ try {
     Write-Output "Assembly identity: $($assemblyName.FullName)"
     Write-Output "Assembly bytes: $((Get-Item -LiteralPath $assemblyPath).Length)"
 
-    $expectedTypes = @($moduleType, $buttonType)
+    $expectedTypes = @($moduleFullType, $buttonFullType)
     $assembly = $null
     try {
-        $assembly = [Reflection.Assembly]::LoadFrom($assemblyPath)
+        $assembly = [Reflection.Assembly]::Load([IO.File]::ReadAllBytes($assemblyPath))
+        $availableTypes = @()
+        $loaderMessages = @()
+        try {
+            $availableTypes = @($assembly.GetTypes())
+        }
+        catch [Reflection.ReflectionTypeLoadException] {
+            $loaderMessages = @($_.Exception.LoaderExceptions | Where-Object { $_ } | ForEach-Object { $_.Message })
+        }
         foreach ($expectedType in $expectedTypes) {
-            $found = $assembly.GetType($expectedType, $false, $false)
+            $found = $availableTypes | Where-Object { $_.FullName -eq $expectedType }
+            if (-not $found -and $loaderMessages.Count -eq 0) {
+                $found = $assembly.GetType($expectedType, $false, $false)
+            }
             if ($found) {
                 Write-Output "Type found: $expectedType"
+            } elseif ($loaderMessages.Count -gt 0) {
+                Write-Output "TYPE NOT CONFIRMED (dependency load failed): $expectedType"
             } else {
                 Write-Output "TYPE MISSING: $expectedType"
             }
+        }
+        foreach ($loaderMessage in $loaderMessages) {
+            Write-Output "Loader error: $loaderMessage"
         }
         Write-Output 'Assembly load: succeeded'
     }
