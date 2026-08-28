@@ -5,7 +5,15 @@ ArcGIS Pro -laajennus Suomenväylät-aineistojen lataamiseen WFS-rajapinnoista.
 ## Vaatimukset
 
 
-`Config.daml` ja C#-lähdekoodi käyttävät samaa painiketyyppiä: `OpenSuomenvaylatToolButton`.
+`Config.daml` ja C#-lähdekoodi käyttävät täysin kvalifioituja tyyppejä `suomenvaylat.Module1` ja `suomenvaylat.OpenSuomenvaylatToolButton`.
+
+Jos ArcGIS Pro näyttää edelleen `TypeNotFound`-virheen, aja ensin paketin diagnostiikka:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\diagnose-addin.ps1
+```
+
+Skriptin tuloksesta olennaiset rivit ovat `Assembly identity`, `Type found`, `TYPE MISSING` ja `Loader error`.
 
 ## Manuaalinen paketointi ilman MSBuildia
 
@@ -15,7 +23,7 @@ Kun C#-osa on jo käännetty esimerkiksi ArcGIS Pron AssemblyCacheen, paketoi ny
 powershell -ExecutionPolicy Bypass -File .\package-addin.ps1
 ```
 
-Skripti etsii ensin `suomenvaylat.dll`-tiedoston bin-kansiosta ja sen jälkeen ArcGIS Pron AssemblyCachesta. Se rakentaa uuden `bin\Debug\net8.0-windows\suomenvaylat.esriAddInX`-paketin tyhjästä, sisältää Python-työkalun ja resurssit sekä validoi paketin sisällön.
+Skripti etsii ensin `suomenvaylat.dll`-tiedoston bin-kansiosta ja sen jälkeen ArcGIS Pron AssemblyCachesta. Se rakentaa uuden `bin\Debug\net8.0-windows\suomenvaylat.esriAddInX`-paketin tyhjästä, sisältää Python-työkalun ja resurssit sekä validoi paketin sisällön. Paketti käyttää versiota `1.0.4`, jotta ArcGIS Pro tunnistaa sen päivitykseksi.
 
 Jos DLL on muualla, anna sen polku:
 
@@ -27,7 +35,7 @@ Skripti ei käännä C#-lähdekoodia. Se on tarkoitettu erityisesti Python-työk
 
 ### TypeNotFound / command unavailable
 
-Jos ArcGIS Pro näyttää virheen `TypeNotFound` tai ilmoittaa komennon olevan unavailable, paketin DLL on yleensä vanha, väärä tai se ei sisällä nykyistä painiketyyppiä. `package-addin.ps1` tarkistaa nyt ennen paketointia, että DLL on managed .NET -assembly ja sisältää tyypit `Module1` sekä `OpenSuomenvaylatToolButton`. Lisäksi Add-in-versiona on `1.0.3`, jotta ArcGIS Pro ei käytä vanhaa saman tunnisteen pakettia.
+Jos ArcGIS Pro näyttää virheen `TypeNotFound` tai ilmoittaa komennon olevan unavailable, paketin DLL on yleensä vanha, väärä tai se ei sisällä nykyistä painiketyyppiä. `package-addin.ps1` tarkistaa nyt assemblyn nimen ja yrittää lukea siitä tyypit `suomenvaylat.Module1` sekä `suomenvaylat.OpenSuomenvaylatToolButton`. Lisäksi Add-in-versiona on `1.0.4`, jotta ArcGIS Pro tunnistaa päivityksen.
 
 Jos tarkistus ilmoittaa väärästä DLL:stä, käännä C#-projekti ArcGIS Pro SDK:n kanssa ja anna tulos suoraan:
 

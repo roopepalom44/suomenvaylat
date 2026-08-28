@@ -58,10 +58,40 @@ catch {
     throw "Assembly is not a valid managed .NET assembly: $assemblySource"
 }
 
-$assemblyText = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($assemblySource))
-foreach ($requiredType in @('Module1', 'OpenSuomenvaylatToolButton')) {
-    if (-not $assemblyText.Contains($requiredType)) {
-        throw "Assembly does not contain the expected add-in type '$requiredType': $assemblySource. Build the current C# project or pass the correct DLL with -AssemblyPath."
+$assemblyName = [Reflection.AssemblyName]::GetAssemblyName($assemblySource)
+if ($assemblyName.Name -ne 'suomenvaylat') {
+    throw "Assembly name '$($assemblyName.Name)' does not match Config.daml defaultAssembly 'suomenvaylat.dll'."
+}
+Write-Output "Assembly identity: $($assemblyName.FullName)"
+
+$expectedTypes = @('suomenvaylat.Module1', 'suomenvaylat.OpenSuomenvaylatToolButton')
+$typesValidated = $false
+try {
+    $assembly = [Reflection.Assembly]::LoadFrom($assemblySource)
+    $missingTypes = @()
+    foreach ($expectedType in $expectedTypes) {
+        if (-not $assembly.GetType($expectedType, $false, $false)) {
+            $missingTypes += $expectedType
+        }
+    }
+    if ($missingTypes.Count -gt 0) {
+        throw "Assembly is missing expected CLR type(s): $($missingTypes -join ', ')"
+    }
+    $typesValidated = $true
+}
+catch {
+    if ($_.Exception.Message -like 'Assembly is missing expected CLR type(s):*') {
+        throw
+    }
+    Write-Warning "CLR type inspection was unavailable in this PowerShell runtime ($($_.Exception.Message)). Falling back to metadata string checks."
+}
+
+if (-not $typesValidated) {
+    $assemblyText = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($assemblySource))
+    foreach ($requiredType in @('Module1', 'OpenSuomenvaylatToolButton')) {
+        if (-not $assemblyText.Contains($requiredType)) {
+            throw "Assembly does not contain the expected add-in type '$requiredType': $assemblySource. Build the current C# project or pass the correct DLL with -AssemblyPath."
+        }
     }
 }
 
@@ -92,6 +122,9 @@ try {
     [xml]$config = Get-Content -LiteralPath (Join-Path $root 'Config.daml') -Raw
     if ($config.ArcGIS.defaultAssembly -ne 'suomenvaylat.dll') {
         throw "Config.daml defaultAssembly must be suomenvaylat.dll."
+    }
+    if ($config.ArcGIS.defaultNamespace -ne 'suomenvaylat') {
+        throw "Config.daml defaultNamespace must be suomenvaylat."
     }
 
     New-Item -ItemType Directory -Path $temporaryDirectory -Force | Out-Null

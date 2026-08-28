@@ -6,7 +6,7 @@
         xsi:schemaLocation="http://schemas.esri.com/DADF/Registry file:///C:/Program%20Files/ArcGIS/Pro/bin/ArcGIS.Desktop.Framework.xsd">
 
 	<AddInInfo id="{2aea3c93-c012-4ed4-b416-6b3a844e0204}"
-			   version="1.0.3"
+			   version="1.0.4"
 			   desktopVersion="3.5.0.57366"
 			   product="ArcGISPro">
 		<Name>suomenvaylat</Name>
@@ -20,7 +20,7 @@
 
 	<modules>
 		<insertModule id="suomenvaylat_Module"
-					  className="Module1"
+					  className="suomenvaylat.Module1"
 					  autoLoad="true"
 					  caption="suomenvaylat">
 
@@ -40,7 +40,7 @@
 			<controls>
 				<button id="suomenvaylat_SuomenvaylatButton"
 						caption="Suomenväylät.fi"
-						className="OpenSuomenvaylatToolButton"
+						className="suomenvaylat.OpenSuomenvaylatToolButton"
 						loadOnClick="true"
 						keytip="SV"
 						smallImage="Images\Suomenvaylat16.png"
