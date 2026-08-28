@@ -957,6 +957,17 @@ class VaylaWFSDownloader(object):
 
         raise ValueError("CQL-rajaus tukee vain Polygon-, Polyline- tai Point-geometriaa.")
 
+    def _wkt_force_2d(self, wkt):
+        """GeoServerin CQL-jäsennin ei hyväksy 'POLYGON Z'-tyyppisiä WKT-merkkijonoja."""
+        if not wkt:
+            return wkt
+        wkt = re.sub(r"^\s*([A-Za-z]+)\s+(?:ZM|Z|M)\s*\(", r"\1 (", wkt)
+        return re.sub(
+            r"-?\d[\d.eE+-]*(?:\s+-?\d[\d.eE+-]*){2,}",
+            lambda m: " ".join(m.group(0).split()[:2]),
+            wkt,
+        )
+
     def _boundary_wkt_3067(self, boundary_fc, for_cql=False):
         geoms = []
         with arcpy.da.SearchCursor(boundary_fc, ["SHAPE@"]) as cur:
@@ -980,6 +991,7 @@ class VaylaWFSDownloader(object):
             except Exception:
                 pass
             merged = self._geometry_to_2d(merged)
+            return self._wkt_force_2d(merged.WKT)
         return merged.WKT
 
     def _export_geometry_only(self, source_fc: str, workspace: str, out_name: str):
