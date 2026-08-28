@@ -1,39 +1,27 @@
-<<<<<<< HEAD
 # Suomenväylät - ArcGIS Pro Add-in
 
-Tämä on ArcGIS Pro -laajennus (Add-in), joka tarjoaa työkalut Suomenväylät-aineiston hyödyntämiseen suoraan ArcGIS Pro -ympäristössä. Se sisältää muun muassa työkalun WFS-rajapintojen lukemiseen.
-
-## Ominaisuudet
-- **Suomenväylät-työkalu:** Avaa Python-pohjaisen geoprosessointityökalun (`VaylaWFSDownloader.pyt`) suoraan ArcGIS Pron käyttöliittymästä.
-- **Integraatio ArcGIS Prohon:** Lisää työkalupainikkeen ArcGIS Pron käyttöliittymään (katso `Config.daml`).
+ArcGIS Pro -laajennus Suomenväylät-aineistojen lataamiseen WFS-rajapinnoista.
 
 ## Vaatimukset
+
 - ArcGIS Pro 3.x
 - .NET 8.0 Desktop Runtime
+- Kerran käännetty `suomenvaylat.dll`, jos käytät manuaalista paketointia
 
-## Projektin rakenne
-- `suomenvaylat.csproj`: Laajennuksen C#-projektitiedosto.
-- `Config.daml`: ArcGIS Pro -käyttöliittymän konfiguraatio (määrittää painikkeet ja välilehdet).
-- `OpenSuomenvaylatToolButton.cs`: C#-koodi, joka vastaa työkalun avaamisesta, kun painiketta klikataan.
-- `Toolboxes/VaylaWFSDownloader.pyt`: Python-työkalupakki (Python Toolbox), joka suorittaa varsinaisen työn (esim. WFS-lataukset).
-- `Suomenvaylat_kayttoohje.pdf`: Projektin käyttöohje.
+## Manuaalinen paketointi ilman MSBuildia
 
-## Asennus ja kääntäminen
-1. Avaa `suomenvaylat.slnx` tai `suomenvaylat.csproj` Visual Studiossa.
-2. Varmista, että ArcGIS Pro on asennettuna koneelle (SDK-riippuvuudet haetaan asennuskansiosta).
-3. Käännä (Build) projekti.
-4. Käännetty `.esriAddinX`-tiedosto muodostuu `bin`-kansioon ja/tai asentuu automaattisesti ArcGIS Prohon, jos asetukset ovat kunnossa.
-
-### Manuaalinen paketointi
-
-Jos ArcGIS Pron SDK-projektia ei voi kääntää `dotnet build` -komennolla, päivitä olemassa oleva paketti lähdekoodilla suorittamalla PowerShellissä projektin juuressa:
+Kun C#-osa on jo käännetty esimerkiksi ArcGIS Pron AssemblyCacheen, paketoi nykyiset lähdetiedostot yhdellä PowerShell-komennolla:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\package-addin.ps1
 ```
 
-Skripti korvaa `bin\Debug\net8.0-windows\suomenvaylat.esriAddInX`-paketin sisällön lähteen `Config.daml`- ja `Toolboxes\VaylaWFSDownloader.pyt`-tiedostoilla ja validoi uuden paketin ennen ylikirjoitusta.
-=======
-# suomenvaylat
-arcgislisäosa eri rajapinnoille
->>>>>>> 70efffbe6ede0aa97c0ad51a8198b216458cec29
+Skripti etsii ensin `suomenvaylat.dll`-tiedoston bin-kansiosta ja sen jälkeen ArcGIS Pron AssemblyCachesta. Se rakentaa uuden `bin\Debug\net8.0-windows\suomenvaylat.esriAddInX`-paketin tyhjästä, sisältää Python-työkalun ja resurssit sekä validoi paketin sisällön.
+
+Jos DLL on muualla, anna sen polku:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\package-addin.ps1 -AssemblyPath "C:\polku\suomenvaylat.dll"
+```
+
+Skripti ei käännä C#-lähdekoodia. Se on tarkoitettu erityisesti Python-työkalun ja sen resurssien päivittämiseen ilman MSBuildia. C#-lähdekoodin muutokset vaativat erillisen .NET/ArcGIS Pro SDK -käännöksen.

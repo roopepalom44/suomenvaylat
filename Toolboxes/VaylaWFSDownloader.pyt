@@ -856,6 +856,47 @@ class VaylaWFSDownloader(object):
             return arcpy.Describe(boundary_fc).extent
         return arcpy.Extent(xmin, ymin, xmax, ymax)
 
+    def _geometry_to_2d(self, geometry):
+        shape_type = (getattr(geometry, "type", "") or "").lower()
+        spatial_reference = getattr(geometry, "spatialReference", None)
+
+        if shape_type == "polygon":
+            parts = arcpy.Array()
+            for part in geometry:
+                ring = arcpy.Array()
+                has_points = False
+                for point in part:
+                    if point is None:
+                        if has_points:
+                            parts.add(ring)
+                            ring = arcpy.Array()
+                            has_points = False
+                    else:
+                        ring.add(arcpy.Point(point.X, point.Y))
+                        has_points = True
+                if has_points:
+                    parts.add(ring)
+            return arcpy.Polygon(parts, spatial_reference, False, False)
+
+        if shape_type == "polyline":
+            parts = arcpy.Array()
+            for part in geometry:
+                path = arcpy.Array()
+                has_points = False
+                for point in part:
+                    if point is not None:
+                        path.add(arcpy.Point(point.X, point.Y))
+                        has_points = True
+                if has_points:
+                    parts.add(path)
+            return arcpy.Polyline(parts, spatial_reference, False, False)
+
+        if shape_type == "point":
+            point = geometry.firstPoint
+            return arcpy.PointGeometry(arcpy.Point(point.X, point.Y), spatial_reference, False, False)
+
+        raise ValueError("CQL-rajaus tukee vain Polygon-, Polyline- tai Point-geometriaa.")
+
     def _boundary_wkt_3067(self, boundary_fc, for_cql=False):
         geoms = []
         with arcpy.da.SearchCursor(boundary_fc, ["SHAPE@"]) as cur:
@@ -878,6 +919,7 @@ class VaylaWFSDownloader(object):
                 merged = merged.generalize(50)
             except Exception:
                 pass
+            merged = self._geometry_to_2d(merged)
         return merged.WKT
 
     def _export_geometry_only(self, source_fc: str, workspace: str, out_name: str):
@@ -2345,7 +2387,7 @@ class VaylaWFSDownloader(object):
         buffer_m = 1000
         bbox_str = f"{ext.XMin - buffer_m},{ext.YMin - buffer_m},{ext.XMax + buffer_m},{ext.YMax + buffer_m}"
 
-        max_features = 10000
+        max_features = 5000  # Vähennetty 10000:sta tehokkaampia HTTP-pyyntöjä varten
         scratch_folder = arcpy.env.scratchFolder
         output_formats = ["application/json", "application/geo+json", "application/json;subtype=geojson", "json"]
         boundary_wkt = self._boundary_wkt_3067(boundary_fc, for_cql=True)
