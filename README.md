@@ -43,4 +43,24 @@ Jos tarkistus ilmoittaa väärästä DLL:stä, käännä C#-projekti ArcGIS Pro 
 powershell -ExecutionPolicy Bypass -File .\package-addin.ps1 -AssemblyPath "C:\polku\suomenvaylat.dll"
 ```
 
-WFS- ja rasterikäsittely tehdään paikallisessa `scratchGDB`-työtilassa. Verkkotyötilaan kopioidaan vasta valmis taso tai rasteri, joten verkkoaseman hitaus ei hidasta jokaista välivaihetta. Lokissa näkyvät nyt jokaisen tason nimi, HTTP-aika, geoprocessing-vaiheiden ajat ja koko ajon kokonaisaika.
+WFS- ja rasterikäsittely tehdään ajokohtaisessa paikallisessa scratch-geodatabasessa. Verkkotyötilaan kopioidaan vasta valmis taso tai rasteri, joten verkkoaseman hitaus ei hidasta jokaista välivaihetta.
+
+## WFS-haun rajaus ja suorituskykyloki
+
+- CQL `INTERSECTS` on Väylä- ja Digiroad-tasojen ensisijainen hakutapa. Nykyinen 2D-WKT-muunnos säilyy käytössä.
+- Jos yhtenäinen CQL GET ja POST hylätään ja suodatin on pitkä, työkalu yrittää samaa rajausgeometriaa pienempinä CQL-osina. BBOXiin siirrytään vasta näiden yritysten jälkeen.
+- CQL palauttaa oletuksena kokonaiset suunnittelualueeseen leikkaavat geometriat. Valinta **Leikkaa myös CQL-tulokset tarkasti aluerajaan** käynnistää erillisen paikallisen Clip-vaiheen.
+- Jokainen WFS-sivu lokitetaan erikseen. Verkkopyyntö, vastauksen lukeminen, JSON-jäsennys, JSON-tiedoston kirjoitus, `JSONToFeatures` ja sivun koko käsittelyaika ovat erillisiä lukuja.
+- Taso- ja työkaluyhteenvedoissa käyttämättömät vaiheet näkyvät tekstinä, eivät harhaanjohtavana nolla-aikana. Vaiheiden summa, Muu-aika ja kokonaisaika raportoidaan erikseen.
+- Valinta **Mittaa CopyFeatures paikalliseen ja valittuun kohteeseen** tekee ylimääräisen paikallisen vertailukopion scratch-GDB:hen, poistaa sen ja vertaa aikaa varsinaiseen kohdekopiointiin. Käytä valintaa vain vertailuajossa, koska se lisää yhden tarkoituksellisen kopioinnin.
+- Scratch-aineisto poistetaan onnistuneen ajon jälkeen. Virhetilanteen aineiston voi säilyttää valinnalla **Säilytä ajokohtainen scratch-aineisto virhetilanteessa**.
+
+`JSONToFeatures`-toteutusta ei ole vaihdettu ilman ArcGIS Prossa tehtävää saman aineiston vertailutestiä. Uusi loki antaa tarvittavat vertailuluvut nykyiselle sivukohtaiselle toteutukselle ennen mahdollista yhdistetyn JSONin tai suoran feature class -kirjoituksen kokeilua.
+
+## Tunnisteiden käsittely
+
+API-avaimet ja salasanat ovat käyttöliittymässä piilotettuja kenttiä. Tallennetut tunnisteet suojataan Windowsin käyttäjäkohtaisella DPAPI-salauksella. Aiemman version selväkieliset arvot migroidaan salattuun muotoon niitä luettaessa. Lokissa WFS-palvelusta näytetään vain sanitisoitu perusosoite ilman query-parametreja, käyttäjätunnusta tai salasanaa.
+
+Jos tunniste on ehtinyt näkyä jaetussa ArcGIS-lokissa, vaihda se palveluntarjoajan hallinnassa. Lokin poistaminen ei yksin peruuta paljastunutta avainta.
+
+ArcGIS Prossa ajettava hyväksymis- ja vertailutestilista on tiedostossa [`docs/ARCGIS_PRO_TESTIT.md`](docs/ARCGIS_PRO_TESTIT.md).
