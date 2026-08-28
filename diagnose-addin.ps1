@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
-    [string]$PackagePath = '.\bin\Debug\net8.0-windows\suomenvaylat.esriAddInX'
+    [string]$PackagePath = '.\bin\Debug\net8.0-windows\suomenvaylat.esriAddInX',
+    [string]$ArcGISProBin = 'C:\Program Files\ArcGIS\Pro\bin'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -47,6 +48,25 @@ try {
     $assemblyName = [Reflection.AssemblyName]::GetAssemblyName($assemblyPath)
     Write-Output "Assembly identity: $($assemblyName.FullName)"
     Write-Output "Assembly bytes: $((Get-Item -LiteralPath $assemblyPath).Length)"
+    Write-Output 'Referenced ArcGIS assemblies:'
+    $metadataAssembly = [Reflection.Assembly]::Load([IO.File]::ReadAllBytes($assemblyPath))
+    $referencedAssemblies = $metadataAssembly.GetReferencedAssemblies()
+    foreach ($reference in ($referencedAssemblies | Where-Object { $_.Name -like 'ArcGIS.*' } | Sort-Object Name)) {
+        Write-Output "  $($reference.FullName)"
+        $installed = Get-ChildItem -LiteralPath $ArcGISProBin -Filter "$($reference.Name).dll" -File -Recurse -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+        if ($installed) {
+            try {
+                $installedIdentity = [Reflection.AssemblyName]::GetAssemblyName($installed.FullName).FullName
+                Write-Output "  Installed: $installedIdentity ($($installed.FullName))"
+            }
+            catch {
+                Write-Output "  Installed assembly could not be inspected: $($installed.FullName)"
+            }
+        } else {
+            Write-Output "  Installed: NOT FOUND under $ArcGISProBin"
+        }
+    }
 
     $expectedTypes = @($moduleFullType, $buttonFullType)
     $assembly = $null
