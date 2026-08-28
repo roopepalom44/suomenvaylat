@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Suomenväylät - ArcGIS Pro Add-in
 
 Tämä on ArcGIS Pro -laajennus (Add-in), joka tarjoaa työkalut Suomenväylät-aineiston hyödyntämiseen suoraan ArcGIS Pro -ympäristössä. Se sisältää muun muassa työkalun WFS-rajapintojen lukemiseen.
@@ -32,3 +33,7 @@ powershell -ExecutionPolicy Bypass -File .\package-addin.ps1
 ```
 
 Skripti korvaa `bin\Debug\net8.0-windows\suomenvaylat.esriAddInX`-paketin sisällön lähteen `Config.daml`- ja `Toolboxes\VaylaWFSDownloader.pyt`-tiedostoilla ja validoi uuden paketin ennen ylikirjoitusta.
+=======
+# suomenvaylat
+arcgislisäosa eri rajapinnoille
+>>>>>>> 70efffbe6ede0aa97c0ad51a8198b216458cec29
