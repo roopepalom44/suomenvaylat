@@ -6,7 +6,7 @@
         xsi:schemaLocation="http://schemas.esri.com/DADF/Registry file:///C:/Program%20Files/ArcGIS/Pro/bin/ArcGIS.Desktop.Framework.xsd">
 
 	<AddInInfo id="{2aea3c93-c012-4ed4-b416-6b3a844e0204}"
-			   version="1.0.2"
+			   version="1.0.3"
 			   desktopVersion="3.5.0.57366"
 			   product="ArcGISPro">
 		<Name>suomenvaylat</Name>
@@ -14,7 +14,7 @@
 		<Image>Images\Suomenvaylat32.png</Image>
 		<Author>RPAL</Author>
 		<Company>Ramboll</Company>
-		<Date>2026-02-25</Date>
+			   <Date>2026-08-28</Date>
 		<Subject>Framework</Subject>
 	</AddInInfo>
 

@@ -44,3 +44,7 @@ TestResult.xml
 .vs/
 bin/
 obj/
+
+# Python cache files
+__pycache__/
+*.py[cod]

@@ -4,9 +4,8 @@ ArcGIS Pro -laajennus Suomenväylät-aineistojen lataamiseen WFS-rajapinnoista.
 
 ## Vaatimukset
 
-- ArcGIS Pro 3.x
-- .NET 8.0 Desktop Runtime
-- Kerran käännetty `suomenvaylat.dll`, jos käytät manuaalista paketointia
+
+`Config.daml` ja C#-lähdekoodi käyttävät samaa painiketyyppiä: `OpenSuomenvaylatToolButton`.
 
 ## Manuaalinen paketointi ilman MSBuildia
 
@@ -25,3 +24,15 @@ powershell -ExecutionPolicy Bypass -File .\package-addin.ps1 -AssemblyPath "C:\p
 ```
 
 Skripti ei käännä C#-lähdekoodia. Se on tarkoitettu erityisesti Python-työkalun ja sen resurssien päivittämiseen ilman MSBuildia. C#-lähdekoodin muutokset vaativat erillisen .NET/ArcGIS Pro SDK -käännöksen.
+
+### TypeNotFound / command unavailable
+
+Jos ArcGIS Pro näyttää virheen `TypeNotFound` tai ilmoittaa komennon olevan unavailable, paketin DLL on yleensä vanha, väärä tai se ei sisällä nykyistä painiketyyppiä. `package-addin.ps1` tarkistaa nyt ennen paketointia, että DLL on managed .NET -assembly ja sisältää tyypit `Module1` sekä `OpenSuomenvaylatToolButton`. Lisäksi Add-in-versiona on `1.0.3`, jotta ArcGIS Pro ei käytä vanhaa saman tunnisteen pakettia.
+
+Jos tarkistus ilmoittaa väärästä DLL:stä, käännä C#-projekti ArcGIS Pro SDK:n kanssa ja anna tulos suoraan:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\package-addin.ps1 -AssemblyPath "C:\polku\suomenvaylat.dll"
+```
+
+WFS- ja rasterikäsittely tehdään paikallisessa `scratchGDB`-työtilassa. Verkkotyötilaan kopioidaan vasta valmis taso tai rasteri, joten verkkoaseman hitaus ei hidasta jokaista välivaihetta. Lokissa näkyvät nyt jokaisen tason nimi, HTTP-aika, geoprocessing-vaiheiden ajat ja koko ajon kokonaisaika.

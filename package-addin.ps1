@@ -51,6 +51,20 @@ function Resolve-AssemblyPath {
 }
 
 $assemblySource = Resolve-AssemblyPath -ExplicitPath $AssemblyPath
+try {
+    [Reflection.AssemblyName]::GetAssemblyName($assemblySource) | Out-Null
+}
+catch {
+    throw "Assembly is not a valid managed .NET assembly: $assemblySource"
+}
+
+$assemblyText = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($assemblySource))
+foreach ($requiredType in @('Module1', 'OpenSuomenvaylatToolButton')) {
+    if (-not $assemblyText.Contains($requiredType)) {
+        throw "Assembly does not contain the expected add-in type '$requiredType': $assemblySource. Build the current C# project or pass the correct DLL with -AssemblyPath."
+    }
+}
+
 $temporaryDirectory = Join-Path $env:TEMP ('suomenvaylat-addin-' + [guid]::NewGuid().ToString('N'))
 $temporaryPackagePath = Join-Path $env:TEMP ('suomenvaylat-' + [guid]::NewGuid().ToString('N') + '.esriAddInX')
 
