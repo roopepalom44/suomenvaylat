@@ -245,6 +245,36 @@ class ToolboxHelperTests(unittest.TestCase):
             MODULE.time.sleep = original_sleep
         self.assertEqual(b"\xff\xd8complete\xff\xd9", raw)
 
+    def test_osm_unknown_geojson_crs_is_defined_as_wgs84(self):
+        original_describe = getattr(MODULE.arcpy, "Describe", None)
+        original_management = getattr(MODULE.arcpy, "management", None)
+        calls = []
+
+        class UnknownSpatialReference:
+            factoryCode = 0
+
+        MODULE.arcpy.Describe = lambda path: types.SimpleNamespace(
+            spatialReference=UnknownSpatialReference()
+        )
+        MODULE.arcpy.SpatialReference = lambda code: code
+        MODULE.arcpy.management = types.SimpleNamespace(
+            DefineProjection=lambda path, sr: calls.append((path, sr))
+        )
+        try:
+            defined = self.tool._define_osm_source_projection("osm_fc")
+        finally:
+            if original_describe is None:
+                del MODULE.arcpy.Describe
+            else:
+                MODULE.arcpy.Describe = original_describe
+            if original_management is None:
+                del MODULE.arcpy.management
+            else:
+                MODULE.arcpy.management = original_management
+
+        self.assertTrue(defined)
+        self.assertEqual([("osm_fc", 4326)], calls)
+
 
 if __name__ == "__main__":
     unittest.main()

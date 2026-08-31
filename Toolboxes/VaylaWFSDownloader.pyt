@@ -993,6 +993,18 @@ class VaylaWFSDownloader(object):
         self._safe_delete(tmp)
         return "{},{},{},{}".format(ext.YMin, ext.XMin, ext.YMax, ext.XMax)
 
+    def _define_osm_source_projection(self, feature_class):
+        """Varmista Overpass-GeoJSON-väliaineiston WGS84-lähde-CRS."""
+        try:
+            source_sr = arcpy.Describe(feature_class).spatialReference
+            source_code = getattr(source_sr, "factoryCode", 0) if source_sr else 0
+        except Exception:
+            source_code = 0
+        if not source_code:
+            arcpy.management.DefineProjection(feature_class, arcpy.SpatialReference(4326))
+            return True
+        return False
+
     def _fetch_osm_feature_chunks(self, layer_id, boundary_fc, max_grid=4):
         bbox_wgs84 = self._extent_bbox_4326(boundary_fc)
         overpass_url = self.wfs_registry.get_endpoint("OpenStreetMap")
@@ -1021,6 +1033,11 @@ class VaylaWFSDownloader(object):
                 os.remove(temp_json_path)
             except Exception:
                 pass
+            # Overpass palauttaa koordinaatit aina WGS84-longitude/latitude-
+            # muodossa, mutta GeoJSON-väliaineistoon ei välttämättä tallennu
+            # CRS-metadataa. Määritä lähde-CRS ennen Projectia, muuten ArcGIS
+            # antaa virheen 000517 (koordinaattijärjestelmää ei ole määritetty).
+            self._define_osm_source_projection(temp_fc)
             projected_fc = os.path.join(self._scratch_gdb(), "osm_prj_{}".format(uuid.uuid4().hex[:10]))
             arcpy.management.Project(temp_fc, projected_fc, boundary_sr)
             self._safe_delete(temp_fc)
