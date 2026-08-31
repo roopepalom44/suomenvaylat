@@ -34,6 +34,9 @@ class ToolboxHelperTests(unittest.TestCase):
     def setUp(self):
         self.tool = MODULE.VaylaWFSDownloader.__new__(MODULE.VaylaWFSDownloader)
         self.tool._wfs_geometry_field_cache = {}
+        self.tool._wfs_sort_candidate_cache = {}
+        self.tool._wfs_sort_field_cache = {}
+        self.tool._verbose_diagnostics = False
 
     def test_sanitized_url_drops_credentials_query_and_fragment(self):
         value = self.tool._sanitize_url(
@@ -139,6 +142,7 @@ class ToolboxHelperTests(unittest.TestCase):
     def test_cql_rejection_does_not_fall_back_when_caller_will_split(self):
         self.tool.heavy_chunk_sources = ["Väylä"]
         self.tool._warn = lambda message: None
+        self.tool._msg = lambda message: None
         self.tool._fetch_wfs_page = lambda **kwargs: (
             None, "request rejected", 414, "text/html"
         )
@@ -150,7 +154,7 @@ class ToolboxHelperTests(unittest.TestCase):
             )
         self.assertEqual("CQL", raised.exception.stats["mode"])
 
-    def test_bbox_page_stats_include_conversion_and_page_total_log(self):
+    def test_bbox_page_stats_are_kept_but_default_log_is_concise(self):
         self.tool.heavy_chunk_sources = ["Väylä"]
         self.tool._msg_lines = []
         self.tool._msg = self.tool._msg_lines.append
@@ -171,7 +175,75 @@ class ToolboxHelperTests(unittest.TestCase):
         self.assertEqual(1, requests)
         self.assertFalse(cql_ok)
         self.assertAlmostEqual(0.125, stats["json_to_features_s"])
-        self.assertTrue(any("sivu yhteensä" in line for line in self.tool._msg_lines))
+        self.assertFalse(any("sivu yhteensä" in line for line in self.tool._msg_lines))
+
+    def test_describe_feature_type_finds_geometry_and_sort_candidate(self):
+        schema = b'''<?xml version="1.0"?>
+        <xsd:schema xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+                    xmlns:gml="http://www.opengis.net/gml/3.2">
+          <xsd:element name="objectid" type="xsd:int"/>
+          <xsd:element name="geom" type="gml:MultiSurfacePropertyType"/>
+        </xsd:schema>'''
+
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return schema
+
+        original = MODULE.urllib.request.urlopen
+        MODULE.urllib.request.urlopen = lambda request, timeout=30: Response()
+        try:
+            self.tool._discover_wfs_schema(
+                "https://example.test/wfs", "test:polygon"
+            )
+        finally:
+            MODULE.urllib.request.urlopen = original
+
+        self.assertEqual("geom", self.tool._get_wfs_geometry_field("test:polygon"))
+        self.assertEqual("objectid", self.tool._wfs_sort_candidate_cache["test:polygon"])
+
+    def test_explicit_sort_is_added_for_wfs_without_primary_key(self):
+        self.tool._wfs_sort_field_cache["liiteri:test"] = "objectid"
+        url = self.tool._build_wfs_getfeature_url(
+            "https://example.test/wfs", "liiteri:test", 5000, 5000,
+            "application/json", bbox_str="1,2,3,4", geometry_only=False,
+        )
+        self.assertIn("sortBy=objectid", url)
+
+    def test_kapsi_retries_incomplete_jpeg(self):
+        class Response:
+            headers = {"Content-Type": "image/jpeg"}
+
+            def __init__(self, fail=False):
+                self.fail = fail
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                if self.fail:
+                    raise MODULE.http.client.IncompleteRead(b"\xff\xd8partial")
+                return b"\xff\xd8complete\xff\xd9"
+
+        responses = iter([Response(True), Response(False)])
+        original_open = MODULE.urllib.request.urlopen
+        original_sleep = MODULE.time.sleep
+        MODULE.urllib.request.urlopen = lambda request, timeout=180: next(responses)
+        MODULE.time.sleep = lambda seconds: None
+        try:
+            raw = self.tool._download_kapsi_image_bytes("https://example.test/map")
+        finally:
+            MODULE.urllib.request.urlopen = original_open
+            MODULE.time.sleep = original_sleep
+        self.assertEqual(b"\xff\xd8complete\xff\xd9", raw)
 
 
 if __name__ == "__main__":

@@ -3,6 +3,7 @@ import arcpy
 import urllib.request
 import urllib.parse
 import urllib.error
+import http.client
 import json
 import os
 import uuid
@@ -460,6 +461,8 @@ class VaylaWFSDownloader(object):
         self._credentials_cache = None
         self._wfs_output_format_cache = {}
         self._wfs_geometry_field_cache = {}
+        self._wfs_sort_candidate_cache = {}
+        self._wfs_sort_field_cache = {}
         self._runtime_workspace = None
         self._runtime_workspace_is_folder = None
         self._runtime_workspace_validated = False
@@ -482,6 +485,8 @@ class VaylaWFSDownloader(object):
         self._run_scratch_gdb = None
         self._tool_metrics = None
         self._run_id = None
+        self._verbose_diagnostics = False
+        self._run_had_layer_failures = False
 
     # ---------------------------
     # LOGGING
@@ -533,6 +538,8 @@ class VaylaWFSDownloader(object):
         return metrics.status.get(name, "ei käytetty")
 
     def _log_phase_summary(self, title, metrics, ordered_names, total_s):
+        if not getattr(self, "_verbose_diagnostics", False):
+            return
         measured = sum(
             metrics.get(name) for name in ordered_names
             if isinstance(metrics.get(name), (int, float))
@@ -1757,6 +1764,9 @@ class VaylaWFSDownloader(object):
             f"&srsName=EPSG:3067"
             f"&count={max_features}&startIndex={start_index}"
         )
+        sort_field = getattr(self, "_wfs_sort_field_cache", {}).get(layer_clean)
+        if sort_field:
+            url += "&sortBy=" + urllib.parse.quote(sort_field, safe="")
         if geometry_only:
             url += "&propertyName=" + self._get_wfs_geometry_field(layer_clean)
         if cql_filter:
@@ -1779,6 +1789,9 @@ class VaylaWFSDownloader(object):
             "count": str(max_features),
             "startIndex": str(start_index),
         }
+        sort_field = getattr(self, "_wfs_sort_field_cache", {}).get(layer_clean)
+        if sort_field:
+            form["sortBy"] = sort_field
         if geometry_only:
             form["propertyName"] = self._get_wfs_geometry_field(layer_clean)
         if cql_filter:
@@ -1808,6 +1821,73 @@ class VaylaWFSDownloader(object):
         if any(l_lower.startswith(prefix) for prefix in ["digiroad:", "liiteri_", "inspire_ps:"]):
             default_field = "geom"
         return self._wfs_geometry_field_cache.get(layer_clean, default_field)
+
+    def _discover_wfs_schema(self, base_wfs, layer_clean, extra_headers=None):
+        """Lue geometriakenttä ja vakaa sivutuskenttä palvelun omasta skeemasta."""
+        if not hasattr(self, "_wfs_sort_candidate_cache"):
+            self._wfs_sort_candidate_cache = {}
+        if not hasattr(self, "_wfs_sort_field_cache"):
+            self._wfs_sort_field_cache = {}
+        if layer_clean in self._wfs_geometry_field_cache and layer_clean in self._wfs_sort_candidate_cache:
+            return
+        query = urllib.parse.urlencode({
+            "service": "WFS",
+            "version": "2.0.0",
+            "request": "DescribeFeatureType",
+            "typeNames": layer_clean,
+        })
+        request_url = "{}{}{}".format(base_wfs, "&" if "?" in base_wfs else "?", query)
+        headers = {"User-Agent": "ArcGISPro-Suomenvaylat/1.0"}
+        headers.update(extra_headers or {})
+        try:
+            req = urllib.request.Request(request_url, headers=headers)
+            with urllib.request.urlopen(req, timeout=30) as response:
+                root = ET.fromstring(response.read())
+        except Exception:
+            return
+
+        geometry_name = None
+        scalar_fields = []
+        geometry_markers = (
+            "geometrypropertytype", "pointpropertytype", "curvepropertytype",
+            "linestringpropertytype", "surfacepropertytype", "polygonpropertytype",
+            "multigeometrypropertytype", "multipointpropertytype",
+            "multicurvepropertytype", "multilinestringpropertytype",
+            "multisurfacepropertytype", "multipolygonpropertytype",
+        )
+        for element in root.iter():
+            if not element.tag.lower().endswith("element"):
+                continue
+            name = (element.attrib.get("name") or "").strip()
+            field_type = (element.attrib.get("type") or "").lower()
+            if not name or not field_type:
+                continue
+            if "gml:" in field_type and any(marker in field_type for marker in geometry_markers):
+                geometry_name = geometry_name or name
+            elif field_type.startswith(("xsd:", "xs:")):
+                scalar_fields.append(name)
+
+        if geometry_name:
+            self._wfs_geometry_field_cache[layer_clean] = geometry_name
+        preferred = None
+        for candidate in ("objectid", "id", "fid", "ogc_fid"):
+            preferred = next((field for field in scalar_fields if field.lower() == candidate), None)
+            if preferred:
+                break
+        if not preferred and scalar_fields:
+            preferred = scalar_fields[0]
+        self._wfs_sort_candidate_cache[layer_clean] = preferred
+
+    def _activate_wfs_stable_sort(self, base_wfs, layer_clean, extra_headers=None):
+        self._discover_wfs_schema(base_wfs, layer_clean, extra_headers)
+        sort_field = self._wfs_sort_candidate_cache.get(layer_clean)
+        if sort_field:
+            self._wfs_sort_field_cache[layer_clean] = sort_field
+        return sort_field
+
+    @staticmethod
+    def _wfs_needs_explicit_sort(raw_text):
+        return "cannot do natural order without a primary key" in (raw_text or "").lower()
 
     def _build_cql_intersects(self, geometry_field, boundary_wkt):
         return "INTERSECTS({}, {})".format(geometry_field, boundary_wkt)
@@ -1858,6 +1938,9 @@ class VaylaWFSDownloader(object):
             attempts = [True] if prefer_post else ([False] if cql_filter else [False, True])
             for use_post in attempts:
                 json_data, raw_text, status, ctype = _try_request(fmt, use_post)
+                if json_data is None and self._wfs_needs_explicit_sort(raw_text):
+                    if self._activate_wfs_stable_sort(base_wfs, layer_clean, extra_headers):
+                        json_data, raw_text, status, ctype = _try_request(fmt, use_post)
                 if json_data is not None:
                     if cached_fmt != fmt:
                         self._wfs_output_format_cache[base_wfs] = fmt
@@ -1927,6 +2010,8 @@ class VaylaWFSDownloader(object):
             stats["gp_json_s"] = stats["json_to_features_s"]
             stats["gp_s"] = stats["json_to_features_s"]
         use_cql = bool(boundary_wkt and self._wfs_supports_cql(source_name))
+        if use_cql:
+            self._discover_wfs_schema(base_wfs, layer_clean, extra_headers)
         geom_field = self._get_wfs_geometry_field(layer_clean)
         cql_filter = self._build_cql_intersects(geom_field, boundary_wkt) if use_cql else None
         if use_cql:
@@ -1961,12 +2046,15 @@ class VaylaWFSDownloader(object):
             )
 
             if json_data is None and active_cql and not cql_disabled and not cql_post_tried:
-                snippet = self._wfs_error_snippet(raw_text)
-                self._warn(
-                    "[VAROITUS] CQL_FILTER GET hylätty (HTTP {}, {}). Yritetään POST-pyyntöä.".format(
-                        status, snippet or ctype
+                if status == 414:
+                    self._msg("  [INFO] CQL GET oli liian pitkä; jatketaan POST-pyynnöllä.")
+                elif getattr(self, "_verbose_diagnostics", False):
+                    snippet = self._wfs_error_snippet(raw_text)
+                    self._warn(
+                        "[VAROITUS] CQL_FILTER GET hylätty (HTTP {}, {}). Yritetään POST-pyyntöä.".format(
+                            status, snippet or ctype
+                        )
                     )
-                )
                 cql_post_tried = True
                 json_data, raw_text, status, ctype = self._fetch_wfs_page(
                     base_wfs=base_wfs,
@@ -2024,9 +2112,10 @@ class VaylaWFSDownloader(object):
                         f.write(self._redact_secrets(raw_text or ""))
                 except Exception:
                     pass
+                reason = self._wfs_error_snippet(raw_text, 350) or ctype or "ei vastaussisältöä"
                 raise Exception(
-                    "WFS-pyyntö epäonnistui (HTTP {}, Content-Type: {}). Virhevastaus: {}".format(
-                        status, ctype, dump_path
+                    "WFS-pyyntö epäonnistui (HTTP {}): {}. Tarkempi vastaus: {}".format(
+                        status, reason, dump_path
                     )
                 )
 
@@ -2034,19 +2123,20 @@ class VaylaWFSDownloader(object):
             if not features:
                 _accumulate_page_timing(page_timing)
                 stats["pages"] += 1
-                self._msg(
-                    "    [EDISTYMINEN] Sivu {}: +0 kohdetta (yhteensä {}), "
-                    "request {:.3f} s, verkko {:.3f} s, luku {:.3f} s, "
-                    "JSON-jäsennys {:.3f} s, JSONToFeatures ei tarpeen, "
-                    "sivu yhteensä {:.3f} s".format(
-                        request_count, total_features,
-                        page_timing.get("requestin muodostaminen", 0.0) or 0.0,
-                        page_timing.get("verkkopyyntö", 0.0) or 0.0,
-                        page_timing.get("vastauksen lukeminen", 0.0) or 0.0,
-                        page_timing.get("JSON-jäsennys", 0.0) or 0.0,
-                        time.perf_counter() - page_start,
+                if getattr(self, "_verbose_diagnostics", False):
+                    self._msg(
+                        "    [EDISTYMINEN] Sivu {}: +0 kohdetta (yhteensä {}), "
+                        "request {:.3f} s, verkko {:.3f} s, luku {:.3f} s, "
+                        "JSON-jäsennys {:.3f} s, JSONToFeatures ei tarpeen, "
+                        "sivu yhteensä {:.3f} s".format(
+                            request_count, total_features,
+                            page_timing.get("requestin muodostaminen", 0.0) or 0.0,
+                            page_timing.get("verkkopyyntö", 0.0) or 0.0,
+                            page_timing.get("vastauksen lukeminen", 0.0) or 0.0,
+                            page_timing.get("JSON-jäsennys", 0.0) or 0.0,
+                            time.perf_counter() - page_start,
+                        )
                     )
-                )
                 break
 
             text_hash = hashlib.md5(raw_text[:8000].encode('utf-8', errors='replace')).hexdigest()
@@ -2063,15 +2153,16 @@ class VaylaWFSDownloader(object):
                         layer_clean
                     )
                 )
-                self._msg(
-                    "    [EDISTYMINEN] Sivu {}: vastaus toisti aiemman sivun; "
-                    "verkko {:.3f} s, luku {:.3f} s, sivu yhteensä {:.3f} s.".format(
-                        request_count,
-                        page_timing.get("verkkopyyntö", 0.0) or 0.0,
-                        page_timing.get("vastauksen lukeminen", 0.0) or 0.0,
-                        time.perf_counter() - page_start,
+                if getattr(self, "_verbose_diagnostics", False):
+                    self._msg(
+                        "    [EDISTYMINEN] Sivu {}: vastaus toisti aiemman sivun; "
+                        "verkko {:.3f} s, luku {:.3f} s, sivu yhteensä {:.3f} s.".format(
+                            request_count,
+                            page_timing.get("verkkopyyntö", 0.0) or 0.0,
+                            page_timing.get("vastauksen lukeminen", 0.0) or 0.0,
+                            time.perf_counter() - page_start,
+                        )
                     )
-                )
                 break
 
             page_fc, conversion_timing = self._json_to_temp_fc(raw_text)
@@ -2097,16 +2188,17 @@ class VaylaWFSDownloader(object):
             json_temp_delete_s = page_timing.get("väliaikaisen JSON-tiedoston poistaminen", 0.0) or 0.0
             _accumulate_page_timing(page_timing)
             page_elapsed = time.perf_counter() - page_start
-            self._msg(
-                "    [EDISTYMINEN] Sivu {}: +{} kohdetta (yhteensä {}), "
-                "request {:.3f} s, verkko {:.3f} s, luku {:.3f} s, "
-                "JSON-jäsennys {:.3f} s, JSON-kirjoitus {:.3f} s, "
-                "JSONToFeatures {:.3f} s, sivu yhteensä {:.3f} s".format(
-                    request_count, got, total_features, request_build_s, network_s,
-                    response_read_s, json_parse_s, json_write_s,
-                    json_to_features_s, page_elapsed,
+            if getattr(self, "_verbose_diagnostics", False):
+                self._msg(
+                    "    [EDISTYMINEN] Sivu {}: +{} kohdetta (yhteensä {}), "
+                    "request {:.3f} s, verkko {:.3f} s, luku {:.3f} s, "
+                    "JSON-jäsennys {:.3f} s, JSON-kirjoitus {:.3f} s, "
+                    "JSONToFeatures {:.3f} s, sivu yhteensä {:.3f} s".format(
+                        request_count, got, total_features, request_build_s, network_s,
+                        response_read_s, json_parse_s, json_write_s,
+                        json_to_features_s, page_elapsed,
+                    )
                 )
-            )
 
             if got < max_features:
                 break
@@ -2380,6 +2472,42 @@ class VaylaWFSDownloader(object):
         with open(prj_path, "w", encoding="utf-8") as handle:
             handle.write(arcpy.SpatialReference(3067).exportToString())
 
+    def _download_kapsi_image_bytes(self, request_url, attempts=3):
+        """Lataa kokonainen JPEG ja yritä katkennutta chunked-vastausta uudelleen."""
+        last_error = None
+        for attempt in range(1, attempts + 1):
+            req = urllib.request.Request(request_url, headers={
+                "User-Agent": "ArcGISPro-KapsiBasemapTool/1.0",
+                "Accept": "image/jpeg",
+                "Accept-Encoding": "identity",
+                "Connection": "close",
+            })
+            try:
+                with urllib.request.urlopen(req, timeout=180) as resp:
+                    raw = resp.read()
+                    ctype = (resp.headers.get("Content-Type", "") or "").lower()
+                    content_length = resp.headers.get("Content-Length")
+                if "xml" in ctype or "html" in ctype or not ctype.startswith("image/"):
+                    raise Exception("palvelu palautti kuvan sijaan sisältötyypin '{}'".format(ctype or "tuntematon"))
+                if content_length and len(raw) != int(content_length):
+                    raise http.client.IncompleteRead(raw, int(content_length) - len(raw))
+                if len(raw) < 4 or not raw.startswith(b"\xff\xd8") or not raw.endswith(b"\xff\xd9"):
+                    raise http.client.IncompleteRead(raw)
+                return raw
+            except (http.client.IncompleteRead, urllib.error.URLError, TimeoutError, OSError) as ex:
+                last_error = ex
+                if attempt < attempts:
+                    time.sleep(0.5 * attempt)
+                    continue
+            except Exception as ex:
+                last_error = ex
+                break
+        raise Exception(
+            "Kapsi WMS -kuvan lataus katkesi {} yrityksen jälkeen: {}".format(
+                attempts, last_error or "tuntematon verkkovirhe"
+            )
+        )
+
     def _download_kapsi_wms_jpeg(self, layer_id: str, boundary_fc: str, workspace: str):
         service_base = self.kapsi_wms_base
         service_layer = layer_id
@@ -2444,12 +2572,7 @@ class VaylaWFSDownloader(object):
                     "BBOX": "{},{},{},{}".format(t_xmin, t_ymin, t_xmax, t_ymax),
                 }
                 request_url = "{}?{}".format(service_base, urllib.parse.urlencode(params))
-                req = urllib.request.Request(request_url, headers={"User-Agent": "ArcGISPro-KapsiBasemapTool/1.0"})
-                with urllib.request.urlopen(req, timeout=180) as resp:
-                    raw = resp.read()
-                    ctype = (resp.headers.get("Content-Type", "") or "").lower()
-                if "xml" in ctype or "html" in ctype:
-                    raise Exception("Kapsi WMS palautti virhesisällön kuvan sijaan.")
+                raw = self._download_kapsi_image_bytes(request_url)
 
                 tile_name = self._validated_name(
                     "Kapsi_{}_tile_{}_{}".format(service_layer, row_i, col_i), raster_dir
@@ -2927,6 +3050,7 @@ class VaylaWFSDownloader(object):
     # ---------------------------
     def execute(self, parameters, messages):
         self._tool_metrics = PhaseMetrics()
+        self._run_had_layer_failures = False
         self._tool_run_start = time.perf_counter()
         original_overwrite = arcpy.env.overwriteOutput
         try:
@@ -2945,9 +3069,10 @@ class VaylaWFSDownloader(object):
                 arcpy.env.scratchWorkspace = self._run_scratch_gdb
             except Exception:
                 pass
-            self._msg("[INFO] Ajokohtainen paikallinen scratch-GDB: {}".format(
-                self._run_scratch_gdb
-            ))
+            if self._verbose_diagnostics:
+                self._msg("[INFO] Ajokohtainen paikallinen scratch-GDB: {}".format(
+                    self._run_scratch_gdb
+                ))
             result = self._execute_impl(parameters, messages)
             success = True
             return result
@@ -2957,7 +3082,7 @@ class VaylaWFSDownloader(object):
             except Exception:
                 pass
             cleanup_elapsed, cleanup_error = self._cleanup_run_scratch(
-                preserve=(not success)
+                preserve=(not success or self._run_had_layer_failures)
             )
             self._tool_metrics.set("väliaineistojen siivous", cleanup_elapsed)
             if cleanup_error:
@@ -3127,6 +3252,19 @@ class VaylaWFSDownloader(object):
         self._tool_metrics.set("aluerajauksen valmistelu", boundary_total)
 
         staged_outputs = []
+        layer_failures = []
+
+        def _record_layer_failure(label, error):
+            self._run_had_layer_failures = True
+            reason = self._redact_secrets(str(error or "tuntematon virhe")).strip()
+            if len(reason) > 600:
+                reason = reason[:600] + "..."
+            layer_failures.append((label, reason))
+            self._warn(
+                "[VAROITUS] Taso '{}' epäonnistui: {} Jatketaan seuraavaan tasoon.".format(
+                    label, reason
+                )
+            )
 
         # Always rebuild mapping from cache so it matches the current source selection
         definitions_start = time.perf_counter()
@@ -3183,7 +3321,7 @@ class VaylaWFSDownloader(object):
             ))
             layer_info = self._lookup_layer_info(layer_ui_name)
             if not layer_info:
-                self._warn("[VAROITUS] Tason määritystä ei löytynyt: {}".format(layer_ui_name))
+                _record_layer_failure(layer_ui_name, "tason määritystä ei löytynyt")
                 continue
 
             layer_clean = layer_info.get("id")
@@ -3192,6 +3330,8 @@ class VaylaWFSDownloader(object):
 
             base_wfs = self._choose_wfs_endpoint(layer_clean, source_name)
             auth_headers = self._build_source_auth_headers(source_name)
+            if layer_kind == "wfs":
+                self._discover_wfs_schema(base_wfs, layer_clean, auth_headers)
             is_heavy = (layer_kind == "wfs" and source_name in self.heavy_chunk_sources and self._is_heavy_layer(layer_clean))
             temp_feature_classes = []
             used_kunta_chunks = False
@@ -3225,14 +3365,15 @@ class VaylaWFSDownloader(object):
                 self._msg("  [TASO] Näyttönimi: {}".format(layer_ui_name))
                 self._msg("  [TASO] Lähde: {}".format(source_name or "(tuntematon)"))
                 self._msg("  [TASO] WFS-palvelu: {}".format(self._sanitize_url(base_wfs)))
-                self._msg("  [TASO] typeName: {}".format(layer_clean))
-                self._msg("  [TASO] Geometriakenttä: {}".format(
-                    self._get_wfs_geometry_field(layer_clean)
-                ))
                 self._msg("  [TASO] Hakutapa: {}".format(requested_mode))
                 self._msg("  [TASO] Sivukoko: {}".format(max_features))
-                self._msg("  [TASO] Paikallinen välitulos: {}".format(staged_fc))
-                self._msg("  [TASO] Lopputulos: {}".format(proposed_output_path))
+                if self._verbose_diagnostics:
+                    self._msg("  [TASO] typeName: {}".format(layer_clean))
+                    self._msg("  [TASO] Geometriakenttä: {}".format(
+                        self._get_wfs_geometry_field(layer_clean)
+                    ))
+                    self._msg("  [TASO] Paikallinen välitulos: {}".format(staged_fc))
+                    self._msg("  [TASO] Lopputulos: {}".format(proposed_output_path))
 
             if layer_kind == "osm":
                 self._msg("  [INFO] Haetaan OpenStreetMap-aineistoa: {}".format(layer_ui_name))
@@ -3240,16 +3381,20 @@ class VaylaWFSDownloader(object):
                     chunks, total_found, used_grid = self._fetch_osm_feature_chunks(layer_clean, boundary_fc)
                     temp_feature_classes.extend(chunks)
                 except Exception as ex:
-                    self._error("[VIRHE] OSM-haku epäonnistui tasolle '{}': {}".format(layer_ui_name, ex))
-                    raise arcpy.ExecuteError
+                    _record_layer_failure(layer_ui_name, ex)
+                    continue
             elif layer_kind == "mml_raster":
                 if not mml_api_key.strip():
-                    self._error("[VIRHE] MML rasteritasot vaativat API-avaimen.")
-                    raise arcpy.ExecuteError
+                    _record_layer_failure(layer_ui_name, "MML-rasteritaso vaatii API-avaimen")
+                    continue
                 download_start = time.perf_counter()
-                out_tif = self._download_wms_geotiff(
-                    layer_clean, boundary_fc, self._scratch_folder(), mml_api_key.strip()
-                )
+                try:
+                    out_tif = self._download_wms_geotiff(
+                        layer_clean, boundary_fc, self._scratch_folder(), mml_api_key.strip()
+                    )
+                except Exception as ex:
+                    _record_layer_failure(layer_ui_name, ex)
+                    continue
                 staged_outputs.append({
                     "path": out_tif,
                     "output_name": os.path.splitext(os.path.basename(out_tif))[0],
@@ -3261,9 +3406,13 @@ class VaylaWFSDownloader(object):
                 continue
             elif layer_kind == "kapsi_wms":
                 download_start = time.perf_counter()
-                out_jpg = self._download_kapsi_wms_jpeg(
-                    layer_clean, boundary_fc, self._scratch_folder()
-                )
+                try:
+                    out_jpg = self._download_kapsi_wms_jpeg(
+                        layer_clean, boundary_fc, self._scratch_folder()
+                    )
+                except Exception as ex:
+                    _record_layer_failure(layer_ui_name, ex)
+                    continue
                 staged_outputs.append({
                     "path": out_jpg,
                     "output_name": os.path.splitext(os.path.basename(out_jpg))[0],
@@ -3275,16 +3424,17 @@ class VaylaWFSDownloader(object):
                 continue
             elif layer_kind == "mml_karttakuva":
                 if not karttakuva_user or not karttakuva_pass:
-                    self._error("[VIRHE] MML Karttakuva vaatii käyttäjätunnuksen ja salasanan.")
-                    raise arcpy.ExecuteError
+                    _record_layer_failure(
+                        layer_ui_name, "MML Karttakuva vaatii käyttäjätunnuksen ja salasanan"
+                    )
+                    continue
                 self._msg("  [INFO] Lisätään MML Karttakuva -WMTS-taso: {}".format(layer_ui_name))
                 try:
                     self._add_karttakuva_wmts_layer(layer_clean, karttakuva_user, karttakuva_pass)
                 except Exception as ex:
-                    self._warn("[VAROITUS] MML Karttakuva -tason automaattinen lisääminen kartalle epäonnistui (ArcGIS Pro ei tukenut suoraa WMTS/WMS-yhteyttä): {}. Voit lisätä MML Karttakuva -palvelun käsin ArcGIS Pron Catalog-ikkunasta osoitteesta {}".format(ex, self.mml_karttakuva_wmts))
-                self._msg("  [INFO] Taso valmis (yhteensä {:.1f} s).".format(
-                    time.perf_counter() - layer_start
-                ))
+                    _record_layer_failure(layer_ui_name, ex)
+                    continue
+                self._msg("  [INFO] Taso valmis.")
                 continue
             elif is_heavy and extent_type in ["Maakunta", "Elinvoimakeskus", "Hyvinvointialue", "Koko Suomi"] and kunnat_sel_fc and arcpy.Exists(kunnat_sel_fc):
                 used_kunta_chunks = True
@@ -3315,10 +3465,11 @@ class VaylaWFSDownloader(object):
                             page_start = time.perf_counter()
                             page_timing = PhaseMetrics()
                             request_count_kunta += 1
-                            if total_kunnat > 0:
-                                self._msg(f"  [INFO] Haetaan kohteet {kunta_name} [{i_kunta}/{total_kunnat}] {start_index} - {start_index + max_features - 1}...")
-                            else:
-                                self._msg(f"  [INFO] Haetaan kohteet {kunta_name} {start_index} - {start_index + max_features - 1}...")
+                            if self._verbose_diagnostics:
+                                if total_kunnat > 0:
+                                    self._msg(f"  [INFO] Haetaan kohteet {kunta_name} [{i_kunta}/{total_kunnat}] {start_index} - {start_index + max_features - 1}...")
+                                else:
+                                    self._msg(f"  [INFO] Haetaan kohteet {kunta_name} {start_index} - {start_index + max_features - 1}...")
 
                             json_data = None
                             raw_text = ""
@@ -3400,21 +3551,22 @@ class VaylaWFSDownloader(object):
                                         layer_metrics.add(phase_name, phase_value)
 
                                 got = len(features)
-                                self._msg(
-                                    "    [EDISTYMINEN] Kunta {} / sivu {}: +{} kohdetta, "
-                                    "request {:.3f} s, verkko {:.3f} s, luku {:.3f} s, "
-                                    "JSON-jäsennys {:.3f} s, JSON-kirjoitus {:.3f} s, "
-                                    "JSONToFeatures {:.3f} s, sivu yhteensä {:.3f} s".format(
-                                        kunta_name, request_count_kunta, got,
-                                        page_timing.get("requestin muodostaminen", 0.0) or 0.0,
-                                        page_timing.get("verkkopyyntö", 0.0) or 0.0,
-                                        page_timing.get("vastauksen lukeminen", 0.0) or 0.0,
-                                        page_timing.get("JSON-jäsennys", 0.0) or 0.0,
-                                        page_timing.get("väliaikaisen JSON-tiedoston kirjoittaminen", 0.0) or 0.0,
-                                        page_timing.get("JSONToFeatures", 0.0) or 0.0,
-                                        time.perf_counter() - page_start,
+                                if self._verbose_diagnostics:
+                                    self._msg(
+                                        "    [EDISTYMINEN] Kunta {} / sivu {}: +{} kohdetta, "
+                                        "request {:.3f} s, verkko {:.3f} s, luku {:.3f} s, "
+                                        "JSON-jäsennys {:.3f} s, JSON-kirjoitus {:.3f} s, "
+                                        "JSONToFeatures {:.3f} s, sivu yhteensä {:.3f} s".format(
+                                            kunta_name, request_count_kunta, got,
+                                            page_timing.get("requestin muodostaminen", 0.0) or 0.0,
+                                            page_timing.get("verkkopyyntö", 0.0) or 0.0,
+                                            page_timing.get("vastauksen lukeminen", 0.0) or 0.0,
+                                            page_timing.get("JSON-jäsennys", 0.0) or 0.0,
+                                            page_timing.get("väliaikaisen JSON-tiedoston kirjoittaminen", 0.0) or 0.0,
+                                            page_timing.get("JSONToFeatures", 0.0) or 0.0,
+                                            time.perf_counter() - page_start,
+                                        )
                                     )
-                                )
 
                                 start_index += len(features)
 
@@ -3489,7 +3641,8 @@ class VaylaWFSDownloader(object):
                                         )
                                     )
                                     for cql_index, cql_piece in enumerate(cql_wkts, 1):
-                                        self._msg("  [INFO] CQL-osa {}/{}...".format(cql_index, len(cql_wkts)))
+                                        if self._verbose_diagnostics:
+                                            self._msg("  [INFO] CQL-osa {}/{}...".format(cql_index, len(cql_wkts)))
                                         try:
                                             part_chunks, part_found, _, part_stats, part_ok = self._fetch_bbox_feature_chunks(
                                                 boundary_wkt=cql_piece,
@@ -3530,29 +3683,28 @@ class VaylaWFSDownloader(object):
                             cql_state["effective"] = True
                         if stats.get("pages"):
                             self._msg(
-                                "  [INFO] WFS-yhteenveto: {} sivua (verkko {:.3f} s, vastauksen luku {:.3f} s, "
-                                "JSON-jäsennys {:.3f} s, JSONToFeatures {:.3f} s, tila {}).".format(
-                                    stats.get("pages"),
-                                    stats.get("network_s", 0.0),
-                                    stats.get("response_read_s", 0.0),
-                                    stats.get("json_parse_s", 0.0),
-                                    stats.get("json_to_features_s", 0.0),
-                                    "CQL_PILKOTTU" if cql_state["split"] else stats.get("mode", "BBOX"),
+                                "  [INFO] WFS-yhteenveto: {} sivua ladattu ({} kohdetta).".format(
+                                    stats.get("pages"), found
                                 )
                             )
                         return chunks, found
 
-                    resilience = ResilienceStrategy(max_batch_size=max_features, progress_callback=self._msg)
+                    resilience = ResilienceStrategy(
+                        max_batch_size=max_features,
+                        progress_callback=self._msg if self._verbose_diagnostics else None,
+                    )
                     chunks, total_found, used_grid = resilience.execute_with_fallback(_fetch_bbox_once, bbox_str)
                     temp_feature_classes.extend(chunks)
                     cql_split_effective = cql_state["split"]
                     skip_clip = cql_state["effective"] and used_grid == 1
                 except Exception as ex:
-                    self._error(f"[VIRHE] WFS-pyyntö epäonnistui tasolle '{layer_clean}': {ex}")
-                    raise arcpy.ExecuteError
+                    for temp_fc in temp_feature_classes:
+                        self._safe_delete(temp_fc)
+                    _record_layer_failure(layer_ui_name, ex)
+                    continue
 
             if not temp_feature_classes:
-                self._warn(f"[VAROITUS] Tasolta '{layer_clean}' ei löytynyt yhtään kohdetta annetulla rajauksella (BBOX={bbox_str}). Tarkista onko tasolla aineistoa ko. alueelle WFS GetFeature -kyselyllä. Ohitetaan tason vienti.")
+                self._msg("  [INFO] Tasolta ei löytynyt kohteita annetulla rajauksella; vienti ohitettiin.")
                 continue
 
             if len(temp_feature_classes) == 1:
@@ -3635,6 +3787,15 @@ class VaylaWFSDownloader(object):
                 "requested_mode": requested_mode if layer_kind == "wfs" else layer_kind,
                 "feature_count": staged_feature_count,
             })
+
+        if layer_failures:
+            self._warn(
+                "[VAROITUS] {} / {} valitusta tasosta epäonnistui: {}. "
+                "Onnistuneet tasot viimeistellään normaalisti.".format(
+                    len(layer_failures), total_layers,
+                    ", ".join(label for label, _ in layer_failures),
+                )
+            )
 
         self._tool_metrics.set(
             "kaikkien tasojen käsittely", time.perf_counter() - all_layers_start
@@ -3803,9 +3964,12 @@ class VaylaWFSDownloader(object):
                 "  [INFO] Tason vaiheajat:", metrics, layer_phase_names, layer_total
             )
 
-        self._msg("[INFO] Lataus valmis! Työkalun sisäinen aika raportoidaan siivouksen jälkeen.")
+        self._msg("[INFO] Lataus valmis.")
 
-        self._msg("\n=== Ajo suoritettu onnistuneesti ===")
+        if layer_failures:
+            self._msg("\n=== Ajo suoritettu osittain: onnistuneet tasot tallennettiin ===")
+        else:
+            self._msg("\n=== Ajo suoritettu onnistuneesti ===")
         return
 
     # ---------------------------
