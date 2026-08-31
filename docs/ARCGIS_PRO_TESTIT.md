@@ -46,3 +46,16 @@ Yhdistetyn JSONin tai suoran feature class -kirjoituksen toteutusta ei pidä ott
 - Virheajossa scratch säilyy aina. Siivousvirhe ei saa peittää varsinaista virhettä.
 - WFS-osoitteessa tai virheilmoituksissa ei saa näkyä API-avainta, käyttäjätunnusta eikä salasanaa.
 - `%APPDATA%\Suomenvaylat\service_credentials.json`-tiedoston arvojen pitää alkaa `dpapi:`; selväkielisiä tunnisteita ei saa jäädä tiedostoon.
+
+## 6. Karttapaikka ja API-avain
+
+1. Valitse lähteeksi **Karttapaikka** ilman API-avainta. Listaan pitää tulla
+   Maanmittauslaitoksen nykyiset INSPIRE WFS -tasot.
+2. Syötä Karttapaikan API-avain. Listan pitää latautua uudelleen ja täydentyä
+   **Maastotiedot (OGC API Features)** -kokoelmilla, kuten `tieviiva` ja
+   `rakennus`. Vanha `(ei osumia – tyhjennä haku)` ei saa jäädä
+   ladattavaksi valinnaksi.
+3. Valitse OGC-taso pienellä rajauksella. Varmista, että koordinaatit
+   projisoidaan EPSG:3067:ään ennen paikallista Clip-vaihetta ja että lokiin
+   tulee OGC-yhteenveto. API-avainta ei saa näkyä lokissa, URL:ssa tai
+   virheilmoituksessa.

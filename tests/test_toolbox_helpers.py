@@ -62,6 +62,150 @@ class ToolboxHelperTests(unittest.TestCase):
             self.tool._format_layer_label("Esterakenne (Digiroad)", "DigiRoad"),
         )
 
+    def test_layer_placeholder_is_not_a_real_selection(self):
+        self.assertTrue(self.tool._is_layer_placeholder("(ei osumia – tyhjennä haku)"))
+        self.assertTrue(self.tool._is_layer_placeholder("(no matches – clear search)"))
+        self.assertFalse(self.tool._is_layer_placeholder("tieviiva - Karttapaikka"))
+
+    def test_karttapaikka_uses_current_mml_endpoints(self):
+        registry = MODULE.WFSSourceRegistry()
+        endpoints = registry.get_endpoints("Karttapaikka")
+        self.assertTrue(endpoints)
+        self.assertTrue(all("inspire-wfs.maanmittauslaitos.fi" in url for url in endpoints))
+        self.assertIn(
+            "https://avoin-paikkatieto.maanmittauslaitos.fi/maastotiedot/features/v1/",
+            registry.get_ogc_endpoint("Karttapaikka"),
+        )
+
+    def test_karttapaikka_auth_is_only_sent_to_ogc_api(self):
+        self.tool._runtime_karttapaikka_api_key = "test-key"
+        self.assertEqual(
+            {},
+            self.tool._build_source_auth_headers("Karttapaikka", layer_kind="wfs"),
+        )
+        headers = self.tool._build_source_auth_headers(
+            "Karttapaikka",
+            endpoint="https://avoin-paikkatieto.maanmittauslaitos.fi/maastotiedot/features/v1/",
+            layer_kind="mml_ogcapi",
+        )
+        self.assertIn("Authorization", headers)
+        self.assertNotIn("test-key", headers["Authorization"])
+
+    def test_secret_cache_key_preserves_api_key_case_without_exposing_it(self):
+        lower = self.tool._secret_cache_key("AbC-123")
+        upper = self.tool._secret_cache_key("aBc-123")
+        self.assertNotEqual(lower, upper)
+        self.assertNotIn("AbC-123", lower)
+
+    def test_ogc_pages_follow_next_link_and_keep_projection_stats(self):
+        pages = [
+            (
+                {
+                    "type": "FeatureCollection",
+                    "features": [{"type": "Feature", "geometry": None, "properties": {}}],
+                    "links": [{"rel": "next", "href": "/next?page=2"}],
+                },
+                '{"features":[{}]}',
+            ),
+            (
+                {
+                    "type": "FeatureCollection",
+                    "features": [{"type": "Feature", "geometry": None, "properties": {}}],
+                    "links": [],
+                },
+                '{"features":[{}]}',
+            ),
+        ]
+        calls = []
+
+        def fake_fetch(url, timeout=60, quiet=False, extra_headers=None, timings=None):
+            calls.append(url)
+            data, raw = pages.pop(0)
+            return data, raw, 200, "application/geo+json"
+
+        conversion = MODULE.PhaseMetrics()
+        conversion.set("JSONToFeatures", 0.2)
+        conversion.set("projektointi", 0.3)
+        self.tool._fetch_json = fake_fetch
+        self.tool._json_to_temp_fc = lambda raw, project_to_epsg=None: ("fc{}".format(len(calls)), conversion)
+        self.tool._warn = lambda message: None
+        chunks, found, stats = self.tool._fetch_ogcapi_feature_chunks(
+            "https://example.test/features/v1/",
+            "tieviiva",
+            "23,61,24,62",
+            1,
+        )
+        self.assertEqual(["fc1", "fc2"], chunks)
+        self.assertEqual(2, found)
+        self.assertEqual(2, stats["pages"])
+        self.assertIn("/next?page=2", calls[1])
+        self.assertAlmostEqual(0.4, stats["json_to_features_s"])
+        self.assertAlmostEqual(0.6, stats["projection_s"])
+
+    def test_empty_layer_list_refetches_after_api_key_change(self):
+        class Filter:
+            def __init__(self):
+                self.list = []
+
+        class Param:
+            def __init__(self, value=None, values=None):
+                self.value = value
+                self.values = values
+                self.filter = Filter()
+                self.enabled = True
+                self.errors = []
+
+            @property
+            def valueAsText(self):
+                if self.values:
+                    return ";".join(str(item[0] if isinstance(item, (list, tuple)) else item)
+                                    for item in self.values)
+                return self.value
+
+            def setErrorMessage(self, message):
+                self.errors.append(message)
+
+            def clearMessage(self):
+                self.errors = []
+
+        self.tool._all_wfs_layers_cache = {}
+        self.tool._layer_mapping = {}
+        self.tool._runtime_mml_api_key = ""
+        self.tool._runtime_karttapaikka_api_key = ""
+        self.tool._runtime_karttakuva_user = ""
+        self.tool._runtime_karttakuva_pass = ""
+        calls = []
+
+        def fake_fetch_layer_list(sources):
+            calls.append(self.tool._runtime_karttapaikka_api_key)
+            return (
+                ["tieviiva (Maastotiedot) - Karttapaikka"]
+                if self.tool._runtime_karttapaikka_api_key else []
+            )
+
+        self.tool._fetch_layer_list = fake_fetch_layer_list
+        self.tool._get_extent_choices = lambda extent_type: []
+        self.tool._warn = lambda message: None
+        parameters = [
+            Param(values=[["Karttapaikka"]]),
+            Param(""),
+            Param(value="(ei osumia – tyhjennä haku)", values=["(ei osumia – tyhjennä haku)"]),
+            Param(None), Param(None), Param(None), Param(None),
+            Param(""), Param(""), Param(""), Param(""),
+        ]
+
+        self.tool.updateParameters(parameters)
+        self.assertEqual([], parameters[2].filter.list)
+        self.assertEqual([], parameters[2].values)
+
+        parameters[8].value = "new-key"
+        self.tool.updateParameters(parameters)
+        self.assertEqual(
+            ["tieviiva (Maastotiedot) - Karttapaikka"],
+            parameters[2].filter.list,
+        )
+        self.assertEqual(["", "new-key"], calls)
+
     def test_kapsi_uses_service_root_for_scale_dependent_layer(self):
         self.assertEqual(
             "taustakartta",

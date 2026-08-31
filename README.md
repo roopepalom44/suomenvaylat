@@ -59,6 +59,21 @@ WFS- ja rasterikäsittely tehdään ajokohtaisessa paikallisessa scratch-geodata
 
 `JSONToFeatures`-toteutusta ei ole vaihdettu ilman ArcGIS Prossa tehtävää saman aineiston vertailutestiä. Uusi loki antaa tarvittavat vertailuluvut nykyiselle sivukohtaiselle toteutukselle ennen mahdollista yhdistetyn JSONin tai suoran feature class -kirjoituksen kokeilua.
 
+## Karttapaikka / Maanmittauslaitos
+
+Karttapaikka-lähde käyttää nykyisiä Maanmittauslaitoksen INSPIRE WFS -palveluja. Vanhat
+`avoin-karttakuva.maanmittauslaitos.fi/inspire/wfs`- ja
+`.../geoserver/maastotiedot/wfs`-osoitteet eivät enää ole käytössä. API-avaimella
+lähde hakee lisäksi nykyisen Maastotiedot OGC API Features -palvelun kokoelmat
+(liikenneverkot, rakennukset ja rakenteet). Kokoelmat haetaan uudelleen aina, kun
+API-avain muuttuu.
+
+INSPIRE WFS -palvelut ovat avoimia ilman API-avainta. Maastotiedot OGC API Features
+-palvelu vaatii Maanmittauslaitoksen API-avaimen; työkalu lähettää sen HTTP Basic
+-tunnistautumisessa käyttäjätunnuksena ja jättää salasanan tyhjäksi. WFS- ja OGC
+-tasot näytetään samaan Karttapaikka-lähteeseen, mutta kummallekin tallennetaan oma
+palveluosoite, jotta rakennusten piste- ja polygoniversiot eivät sekoitu.
+
 ## Tunnisteiden käsittely
 
 API-avaimet ja salasanat ovat käyttöliittymässä piilotettuja kenttiä. Tallennetut tunnisteet suojataan Windowsin käyttäjäkohtaisella DPAPI-salauksella. Aiemman version selväkieliset arvot migroidaan salattuun muotoon niitä luettaessa. Lokissa WFS-palvelusta näytetään vain sanitisoitu perusosoite ilman query-parametreja, käyttäjätunnusta tai salasanaa.

@@ -95,12 +95,25 @@ class WFSSourceRegistry(object):
                 "description": "SYKE INSPIRE Protected Sites"
             },
             "Karttapaikka": {
-                "type": "wfs",
+                "type": "mml_combined",
                 "endpoints": [
-                    "https://avoin-karttakuva.maanmittauslaitos.fi/inspire/wfs",
-                    "https://avoin-paikkatieto.maanmittauslaitos.fi/geoserver/maastotiedot/wfs"
+                    # Maanmittauslaitoksen nykyiset INSPIRE WFS -palvelut.
+                    # Aiemmat avoin-karttakuva.fi- ja geoserver/maastotiedot/wfs-
+                    # osoitteet palauttavat nykyisin 404:n.
+                    "https://inspire-wfs.maanmittauslaitos.fi/inspire-wfs/au/ows",
+                    "https://inspire-wfs.maanmittauslaitos.fi/inspire-wfs/bu_mtk_point",
+                    "https://inspire-wfs.maanmittauslaitos.fi/inspire-wfs/bu_mtk_polygon",
+                    "https://inspire-wfs.maanmittauslaitos.fi/inspire-wfs/cp/ows",
+                    "https://inspire-wfs.maanmittauslaitos.fi/inspire-wfs/gn",
+                    "https://inspire-wfs.maanmittauslaitos.fi/inspire-wfs/hy",
+                    "https://inspire-wfs.maanmittauslaitos.fi/inspire-wfs/mu/ows"
                 ],
-                "description": "MML INSPIRE WFS (voi vaatia tunnukset)"
+                # Maastotietokannan uusi OGC API Features -rajapinta sisältää
+                # myös liikenneverkkoja, rakennuksia ja rakenteita. Se tarvitsee
+                # käyttäjän API-avaimen ja lisätään listaan vain avaimen ollessa
+                # käytettävissä.
+                "ogc_api_endpoint": "https://avoin-paikkatieto.maanmittauslaitos.fi/maastotiedot/features/v1/",
+                "description": "MML INSPIRE WFS + Maastotiedot OGC API Features"
             },
             "MML": {
                 "type": "mml_raster",
@@ -153,6 +166,10 @@ class WFSSourceRegistry(object):
 
     def get_endpoints(self, source_name):
         return list(self.get_source(source_name).get("endpoints") or [])
+
+    def get_ogc_endpoint(self, source_name):
+        """Palauta lähteen mahdollinen OGC API Features -juuri."""
+        return self.get_source(source_name).get("ogc_api_endpoint")
 
     def get_type(self, source_name):
         return self.get_source(source_name).get("type", "wfs")
@@ -531,6 +548,14 @@ class VaylaWFSDownloader(object):
                 text = text.replace(secret, "[PIILOTETTU]")
         return text
 
+    @staticmethod
+    def _secret_cache_key(value):
+        """Palauta tunnisteelle case-sensitive, lokiin sopimaton välimuistiavain."""
+        text = str(value or "")
+        if not text:
+            return ""
+        return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
     def _format_phase(self, metrics, name):
         value = metrics.get(name)
         if isinstance(value, (int, float)):
@@ -697,6 +722,31 @@ class VaylaWFSDownloader(object):
             pass
         return self._parse_multivalue(param.valueAsText)
 
+    @staticmethod
+    def _is_layer_placeholder(value):
+        """Tunnista UI:n tyhjän hakutuloksen viesti, ei oikea tasovalinta."""
+        text = str(value or "").strip().lower()
+        return text.startswith("(ei osumia") or text.startswith("(no matches")
+
+    def _clear_multivalue_param(self, param):
+        """Tyhjennä vanha tasovalinta, kun lähde/haku vaihtuu.
+
+        ArcGIS Pro -versioiden Parameter-toteutuksissa joko ``values`` tai
+        ``value`` on kirjoitettavissa, joten kokeillaan molempia turvallisesti.
+        """
+        cleared = False
+        try:
+            param.values = []
+            cleared = True
+        except Exception:
+            pass
+        try:
+            param.value = None
+            cleared = True
+        except Exception:
+            pass
+        return cleared
+
     def _format_layer_label(self, title, source_name):
         clean_title = re.sub(r"\s*\(\s*digiroad\s*\)", "", str(title or ""), flags=re.IGNORECASE)
         clean_title = re.sub(r"\s+", " ", clean_title).strip()
@@ -851,13 +901,33 @@ class VaylaWFSDownloader(object):
             return self.wfs_digiroad
         return self.wfs_vayla
 
-    def _build_source_auth_headers(self, source_name: str):
+    def _build_source_auth_headers(self, source_name: str, endpoint=None,
+                                   layer_kind=None):
+        """Muodosta tunnisteheaderit palvelutyypin mukaan.
+
+        Karttapaikan vanha WFS-osoite hyväksyi joissakin versioissa Basic-
+        tunnistautumista, mutta nykyiset INSPIRE WFS -osoitteet ovat avoimia.
+        Basic-headerin lähettäminen niihin aiheuttaa 401-vastauksen. Uusi
+        Maastotiedot OGC API Features -rajapinta käyttää samaa API-avainta,
+        mutta sen Basic-header kuuluu vain OGC-pyyntöihin.
+        """
         headers = {}
-        if source_name == "Karttapaikka":
-            key = (self._runtime_karttapaikka_api_key or "").strip()
-            if key:
-                token = base64.b64encode(f"{key}:".encode("utf-8")).decode("ascii")
-                headers["Authorization"] = f"Basic {token}"
+        if source_name != "Karttapaikka":
+            return headers
+
+        key = (getattr(self, "_runtime_karttapaikka_api_key", "") or "").strip()
+        endpoint_text = str(endpoint or "").lower()
+        is_ogc = (
+            layer_kind == "mml_ogcapi"
+            or "/maastotiedot/features/" in endpoint_text
+            or endpoint_text.endswith("/features/v1")
+            or endpoint_text.endswith("/features/v1/")
+        )
+        if key and is_ogc:
+            # MML:n API-avainohjeen mukainen käyttäjätunnus=avain,
+            # salasana tyhjä. Avainta ei lisätä URL:iin eikä lokiin.
+            token = base64.b64encode(f"{key}:".encode("utf-8")).decode("ascii")
+            headers["Authorization"] = f"Basic {token}"
         return headers
 
     def _fetch_wfs_capabilities_with_headers(self, endpoint, headers=None):
@@ -893,13 +963,13 @@ class VaylaWFSDownloader(object):
     def _get_karttapaikka_layers(self):
         layers = []
         seen = set()
-        headers = self._build_source_auth_headers("Karttapaikka")
+        # Nykyiset INSPIRE WFS -palvelut ovat avoimia. Älä lähetä niihin
+        # vanhaa Basic-headeria, koska palvelin vastaa silloin 401:llä.
+        headers = self._build_source_auth_headers("Karttapaikka", layer_kind="wfs")
         for endpoint in self.wfs_registry.get_endpoints("Karttapaikka"):
             try:
                 endpoint_layers = self._fetch_wfs_capabilities_with_headers(endpoint, headers=headers)
             except urllib.error.HTTPError as ex:
-                if ex.code == 401:
-                    raise Exception("Karttapaikka vaatii API-avaimen (401 Unauthorized).")
                 self._warn("[VAROITUS] Karttapaikka GetCapabilities epäonnistui '{}': HTTP {}".format(endpoint, ex.code))
                 continue
             except Exception as ex:
@@ -908,9 +978,86 @@ class VaylaWFSDownloader(object):
 
             for lyr in endpoint_layers:
                 lid = lyr.get("id")
-                if lid and lid not in seen:
-                    seen.add(lid)
-                    layers.append(lyr)
+                # Rakennukset julkaistaan piste- ja polygonipalvelussa samalla
+                # typeName-arvolla. Endpoint kuuluu dedup-avaimeen, jotta
+                # käyttäjä voi valita molemmat geometriaesitykset.
+                seen_key = (endpoint, lid)
+                if lid and seen_key not in seen:
+                    seen.add(seen_key)
+                    layer_entry = dict(lyr)
+                    layer_entry["endpoint"] = endpoint
+                    endpoint_lower = endpoint.lower()
+                    if "bu_mtk_point" in endpoint_lower:
+                        layer_entry["title"] = "{} (piste)".format(
+                            layer_entry.get("title") or lid
+                        )
+                    elif "bu_mtk_polygon" in endpoint_lower:
+                        layer_entry["title"] = "{} (polygoni)".format(
+                            layer_entry.get("title") or lid
+                        )
+                    layers.append(layer_entry)
+
+        # Nykyinen Maastotietokannan OGC API Features -palvelu on API-avaimen
+        # takana ja täydentää INSPIRE WFS -listaa mm. liikenneverkon,
+        # rakennusten ja rakenteiden kohdeluokilla. Jos avainta ei ole, WFS-
+        # tasot voidaan silti näyttää normaalisti ilman varoitusspämmiä.
+        if (getattr(self, "_runtime_karttapaikka_api_key", "") or "").strip():
+            try:
+                ogc_layers = self._get_karttapaikka_ogc_layers()
+            except Exception as ex:
+                self._warn(
+                    "[VAROITUS] Karttapaikan Maastotiedot OGC API -tasojen "
+                    "listaus epäonnistui: {}".format(self._redact_secrets(ex))
+                )
+                ogc_layers = []
+            for lyr in ogc_layers:
+                # WFS- ja OGC-kokoelmat voivat käyttää samaa ihmislukemaa,
+                # mutta tekninen id on eri palvelussa. Pidä molemmat valittavina.
+                layers.append(lyr)
+        return layers
+
+    def _get_karttapaikka_ogc_layers(self):
+        """Hae nykyisen Maastotiedot OGC API Features -palvelun kokoelmat."""
+        endpoint = self.wfs_registry.get_ogc_endpoint("Karttapaikka")
+        if not endpoint:
+            return []
+        base = endpoint.rstrip("/") + "/"
+        request_url = base + "collections"
+        headers = self._build_source_auth_headers(
+            "Karttapaikka", endpoint=endpoint, layer_kind="mml_ogcapi"
+        )
+        data, raw_text, status, content_type = self._fetch_json(
+            request_url,
+            timeout=60,
+            quiet=True,
+            extra_headers=headers,
+        )
+        if not isinstance(data, dict):
+            reason = self._wfs_error_snippet(raw_text, 300) or content_type or "ei vastaussisältöä"
+            if status == 401 or status == 403:
+                reason = "API-avain hylättiin (HTTP {})".format(status)
+            raise Exception(
+                "Maastotiedot OGC API -kokoelmia ei voitu hakea (HTTP {}): {}".format(
+                    status, reason
+                )
+            )
+
+        layers = []
+        for collection in data.get("collections", []) or []:
+            if not isinstance(collection, dict):
+                continue
+            collection_id = str(collection.get("id") or "").strip()
+            if not collection_id:
+                continue
+            title = str(collection.get("title") or collection_id).strip()
+            layers.append({
+                "id": collection_id,
+                "title": "{} (Maastotiedot)".format(title),
+                "source": "Karttapaikka",
+                "kind": "mml_ogcapi",
+                "endpoint": endpoint,
+                "geometry_field": "geometry",
+            })
         return layers
 
     def _get_layer_entries_for_sources(self, source_names):
@@ -980,7 +1127,9 @@ class VaylaWFSDownloader(object):
                     "source": source_name,
                     "id": entry.get("id"),
                     "kind": entry.get("kind", source_type),
-                    "title": title
+                    "title": title,
+                    "endpoint": entry.get("endpoint"),
+                    "geometry_field": entry.get("geometry_field"),
                 }
                 entries.append(unique_label)
 
@@ -1980,7 +2129,7 @@ class VaylaWFSDownloader(object):
             return False
 
 
-    def _json_to_temp_fc(self, raw_text: str):
+    def _json_to_temp_fc(self, raw_text: str, project_to_epsg=None):
         timings = PhaseMetrics()
         temp_json_path = os.path.join(self._scratch_folder(), f"temp_{uuid.uuid4().hex}.json")
         write_start = time.perf_counter()
@@ -1991,6 +2140,21 @@ class VaylaWFSDownloader(object):
         gp_start = time.perf_counter()
         arcpy.conversion.JSONToFeatures(temp_json_path, temp_fc)
         timings.set("JSONToFeatures", time.perf_counter() - gp_start)
+        if project_to_epsg:
+            # OGC API Features palauttaa oletuksena CRS84-GeoJSONin ilman
+            # erillistä crs-jäsenkenttää. Määritä lähde-CRS ennen Projectia
+            # samalla turvallisella tavalla kuin Overpass-GeoJSONille.
+            self._define_osm_source_projection(temp_fc)
+            projected_fc = os.path.join(
+                self._scratch_gdb(), f"projected_{uuid.uuid4().hex}"
+            )
+            project_start = time.perf_counter()
+            arcpy.management.Project(
+                temp_fc, projected_fc, arcpy.SpatialReference(project_to_epsg)
+            )
+            timings.set("projektointi", time.perf_counter() - project_start)
+            self._safe_delete(temp_fc)
+            temp_fc = projected_fc
         delete_start = time.perf_counter()
         try:
             os.remove(temp_json_path)
@@ -1998,6 +2162,155 @@ class VaylaWFSDownloader(object):
             pass
         timings.set("väliaikaisen JSON-tiedoston poistaminen", time.perf_counter() - delete_start)
         return temp_fc, timings
+
+    def _boundary_bbox_wgs84(self, boundary_fc):
+        """Palauta OGC API -haun CRS84-bbox 3067-rajausaineistosta."""
+        merged, _ = self._merged_boundary_geometry(boundary_fc)
+        if merged is None:
+            return None
+        projected = merged.projectAs(arcpy.SpatialReference(4326))
+        extent = projected.extent
+        return "{:.12f},{:.12f},{:.12f},{:.12f}".format(
+            extent.XMin, extent.YMin, extent.XMax, extent.YMax
+        )
+
+    def _fetch_ogcapi_feature_chunks(self, endpoint, collection_id,
+                                     bbox_wgs84, max_features,
+                                     extra_headers=None, max_requests=250):
+        """Hae OGC API Features -kokoelma sivuina paikalliseen scratch-GDB:hen.
+
+        OGC API:n oletus-GeoJSON on CRS84. Se muunnetaan heti JSONToFeaturesin
+        jälkeen EPSG:3067:ään, jotta nykyinen tarkka paikallinen Clip ja muu
+        WFS-käsittely voivat jatkua muuttumattomina.
+        """
+        fetch_start = time.perf_counter()
+        stats = {
+            "request_build_s": 0.0, "network_s": 0.0, "response_read_s": 0.0,
+            "decode_s": 0.0, "json_parse_s": 0.0, "json_write_s": 0.0,
+            "json_to_features_s": 0.0, "projection_s": 0.0,
+            "json_temp_delete_s": 0.0, "pages": 0, "mode": "OGC_API",
+            "fetch_total_s": 0.0,
+        }
+        page_fcs = []
+        total_features = 0
+        current_url = None
+        visited = set()
+        base = str(endpoint or "").rstrip("/")
+        collection_q = urllib.parse.quote(str(collection_id), safe="")
+
+        while len(visited) < max_requests:
+            page_start = time.perf_counter()
+            page_timing = PhaseMetrics()
+            request_build_start = time.perf_counter()
+            if current_url is None:
+                query = urllib.parse.urlencode({
+                    "limit": str(max_features),
+                    "bbox": bbox_wgs84,
+                })
+                current_url = "{}/collections/{}/items?{}".format(
+                    base, collection_q, query
+                )
+            page_timing.add(
+                "requestin muodostaminen",
+                time.perf_counter() - request_build_start,
+            )
+            visited.add(current_url)
+            json_data, raw_text, status, content_type = self._fetch_json(
+                current_url,
+                timeout=120,
+                quiet=True,
+                extra_headers=extra_headers,
+                timings=page_timing,
+            )
+            stats["pages"] += 1
+            if json_data is None:
+                reason = self._wfs_error_snippet(raw_text, 350) or content_type or "ei vastaussisältöä"
+                raise Exception(
+                    "Maastotiedot OGC API -pyyntö epäonnistui (HTTP {}): {}".format(
+                        status, reason
+                    )
+                )
+
+            features = json_data.get("features", []) if isinstance(json_data, dict) else []
+            if not features:
+                for phase_name, stat_name in (
+                    ("requestin muodostaminen", "request_build_s"),
+                    ("verkkopyyntö", "network_s"),
+                    ("vastauksen lukeminen", "response_read_s"),
+                    ("vastauksen dekoodaus", "decode_s"),
+                    ("JSON-jäsennys", "json_parse_s"),
+                ):
+                    stats[stat_name] += page_timing.get(phase_name, 0.0) or 0.0
+                if self._verbose_diagnostics:
+                    self._msg(
+                        "    [EDISTYMINEN] OGC-sivu {}: +0 kohdetta (yhteensä {}), "
+                        "sivu yhteensä {:.3f} s".format(
+                            stats["pages"], total_features,
+                            time.perf_counter() - page_start,
+                        )
+                    )
+                break
+
+            page_fc, conversion_timing = self._json_to_temp_fc(
+                raw_text, project_to_epsg=3067
+            )
+            for timing_name, timing_value in conversion_timing.seconds.items():
+                if not isinstance(timing_value, (int, float)):
+                    continue
+                page_timing.add(timing_name, timing_value)
+                if timing_name == "projektointi":
+                    stats["projection_s"] += timing_value
+                elif timing_name == "JSONToFeatures":
+                    stats["json_to_features_s"] += timing_value
+                elif timing_name == "väliaikaisen JSON-tiedoston kirjoittaminen":
+                    stats["json_write_s"] += timing_value
+                elif timing_name == "väliaikaisen JSON-tiedoston poistaminen":
+                    stats["json_temp_delete_s"] += timing_value
+            if page_fc:
+                page_fcs.append(page_fc)
+            got = len(features)
+            total_features += got
+            for phase_name, stat_name in (
+                ("requestin muodostaminen", "request_build_s"),
+                ("verkkopyyntö", "network_s"),
+                ("vastauksen lukeminen", "response_read_s"),
+                ("vastauksen dekoodaus", "decode_s"),
+                ("JSON-jäsennys", "json_parse_s"),
+            ):
+                stats[stat_name] += page_timing.get(phase_name, 0.0) or 0.0
+
+            if self._verbose_diagnostics:
+                self._msg(
+                    "    [EDISTYMINEN] OGC-sivu {}: +{} kohdetta (yhteensä {}), "
+                    "request {:.3f} s, verkko {:.3f} s, luku {:.3f} s, "
+                    "JSON-jäsennys {:.3f} s, JSONToFeatures {:.3f} s, "
+                    "sivu yhteensä {:.3f} s".format(
+                        stats["pages"], got, total_features,
+                        page_timing.get("requestin muodostaminen", 0.0) or 0.0,
+                        page_timing.get("verkkopyyntö", 0.0) or 0.0,
+                        page_timing.get("vastauksen lukeminen", 0.0) or 0.0,
+                        page_timing.get("JSON-jäsennys", 0.0) or 0.0,
+                        page_timing.get("JSONToFeatures", 0.0) or 0.0,
+                        time.perf_counter() - page_start,
+                    )
+                )
+
+            next_url = None
+            for link in (json_data.get("links", []) if isinstance(json_data, dict) else []) or []:
+                if isinstance(link, dict) and str(link.get("rel", "")).lower() == "next":
+                    next_url = link.get("href")
+                    break
+            if not next_url or next_url in visited:
+                break
+            current_url = urllib.parse.urljoin(current_url, str(next_url))
+
+        if len(visited) >= max_requests:
+            self._warn(
+                "[VAROITUS] Maksimipyyntömäärä saavutettu Maastotiedot-kokoelmassa "
+                "'{}' (max_requests={}).".format(collection_id, max_requests)
+            )
+        stats["fetch_total_s"] = time.perf_counter() - fetch_start
+        return page_fcs, total_features, stats
 
     def _fetch_bbox_feature_chunks(self, base_wfs: str, layer_clean: str, bbox_str: str,
                                    output_formats, max_features: int, max_requests: int = 200,
@@ -2880,7 +3193,7 @@ class VaylaWFSDownloader(object):
         p_mml_api_key.value = self._get_saved_secret("mml_api_key")
 
         p_karttapaikka_api_key = arcpy.Parameter(
-            displayName="Karttapaikka API-avain (vain Karttapaikka-lähteelle)",
+            displayName="Karttapaikka API-avain (Maastotiedot OGC API -tasoille)",
             name="karttapaikka_api_key",
             datatype="GPStringHidden",
             parameterType="Optional",
@@ -2920,6 +3233,7 @@ class VaylaWFSDownloader(object):
 
     def updateParameters(self, parameters):
         try:
+            selected_before = self._parse_multivalue_param(parameters[2])
             source_values = self._parse_multivalue_param(parameters[0])
             if not source_values:
                 source_values = ["Väylä"]
@@ -2958,10 +3272,13 @@ class VaylaWFSDownloader(object):
             parameters[10].enabled = uses_karttakuva
 
             source_key = "{}|mml:{}|kartta:{}|kk:{}:{}".format(
-                "|".join(source_values), self._norm(mml_api_key),
-                self._norm(karttapaikka_api_key),
-                self._norm(karttakuva_user), self._norm(karttakuva_pass)
+                "|".join(source_values), self._secret_cache_key(mml_api_key),
+                self._secret_cache_key(karttapaikka_api_key),
+                self._secret_cache_key(karttakuva_user),
+                self._secret_cache_key(karttakuva_pass)
             )
+            source_key_changed = source_key != getattr(self, "_last_layer_source_key", None)
+            self._last_layer_source_key = source_key
             if source_key not in self._all_wfs_layers_cache:
                 fetch_error = None
                 try:
@@ -2978,7 +3295,22 @@ class VaylaWFSDownloader(object):
                 q = self._norm(layer_search)
                 filtered_layers = [x for x in filtered_layers if q in self._norm(x)]
 
-            parameters[2].filter.list = filtered_layers if filtered_layers else ["(ei osumia – tyhjennä haku)"]
+            # Tyhjää tulosta ei saa lisätä oikeana GPString-valintana. Aiempi
+            # placeholder päätyi muuten execute-vaiheessa ladattavaksi
+            # tasoksi ja aiheutti turhan määritystä ei löytynyt -virheen.
+            parameters[2].filter.list = filtered_layers
+            valid_layers = {self._norm(value) for value in filtered_layers}
+            stale_selection = (
+                not filtered_layers
+                or source_key_changed
+                or any(
+                    self._is_layer_placeholder(value)
+                    or self._norm(value) not in valid_layers
+                    for value in selected_before
+                )
+            )
+            if stale_selection and selected_before:
+                self._clear_multivalue_param(parameters[2])
 
             parameters[4].enabled = False
             parameters[5].enabled = False
@@ -3012,7 +3344,10 @@ class VaylaWFSDownloader(object):
         source_values = self._parse_multivalue_param(parameters[0])
         if not source_values:
             source_values = ["Väylä"]
-        selected_layers = self._parse_multivalue_param(parameters[2])
+        selected_layers = [
+            value for value in self._parse_multivalue_param(parameters[2])
+            if not self._is_layer_placeholder(value)
+        ]
 
         vals = self._parse_multivalue(extent_value_text)
 
@@ -3030,7 +3365,7 @@ class VaylaWFSDownloader(object):
             parameters[5].clearMessage()
 
         layers_text = parameters[2].valueAsText
-        if not layers_text:
+        if not layers_text or not selected_layers:
             parameters[2].setErrorMessage("Valitse vähintään yksi ladattava taso.")
         else:
             parameters[2].clearMessage()
@@ -3051,14 +3386,14 @@ class VaylaWFSDownloader(object):
         if selected_layers:
             for lbl in selected_layers:
                 info = self._layer_mapping.get(lbl)
-                if info and info.get("source") == "Karttapaikka":
+                if info and info.get("kind") == "mml_ogcapi":
                     needs_karttapaikka_key = True
                     break
-        if not needs_karttapaikka_key and "Karttapaikka" in source_values:
-            needs_karttapaikka_key = True
 
         if needs_karttapaikka_key and not karttapaikka_api_key.strip():
-            parameters[8].setErrorMessage("Karttapaikka vaatii API-avaimen.")
+            parameters[8].setErrorMessage(
+                "Karttapaikan Maastotiedot-tasot vaativat API-avaimen."
+            )
         else:
             parameters[8].clearMessage()
 
@@ -3171,7 +3506,10 @@ class VaylaWFSDownloader(object):
         source_names = self._parse_multivalue_param(parameters[0])
         if not source_names:
             source_names = ["Väylä"]
-        layers = (parameters[2].valueAsText.split(';') if parameters[2].valueAsText else [])
+        layers = [
+            value for value in self._parse_multivalue_param(parameters[2])
+            if not self._is_layer_placeholder(value)
+        ]
         extent_type = parameters[3].valueAsText
         extent_value_text = parameters[4].valueAsText
         custom_layer = parameters[5].valueAsText
@@ -3367,13 +3705,17 @@ class VaylaWFSDownloader(object):
                     kunnat_sel_fc = self._select_kunnat_center_in(kunnat_all_fc, boundary_fc)
             self._msg(f"[INFO] Kuntarajaukset valmiina ({time.perf_counter() - kunnat_start:.1f} s).")
 
-        if any((self._lookup_layer_info(lbl.strip().strip("'").strip('"')) or {}).get("source") == "Karttapaikka" for lbl in layers):
-            if not karttapaikka_api_key.strip():
-                self._error("[VIRHE] Karttapaikka-lähde vaatii API-avaimen.")
-                raise arcpy.ExecuteError
+        if any(
+            (self._lookup_layer_info(lbl.strip().strip("'").strip('"')) or {}).get("kind")
+            == "mml_ogcapi"
+            for lbl in layers
+        ) and not karttapaikka_api_key.strip():
+            self._error("[VIRHE] Karttapaikan Maastotiedot-tasot vaativat API-avaimen.")
+            raise arcpy.ExecuteError
 
         all_layers_start = time.perf_counter()
         total_layers = len(layers)
+        ogc_bbox_wgs84 = None
         for layer_index, layer in enumerate(layers, 1):
             layer_ui_name = layer.strip().strip("'").strip('"')
             self._msg("[INFO] Käsitellään taso [{}/{}]: {}".format(
@@ -3388,8 +3730,13 @@ class VaylaWFSDownloader(object):
             source_name = layer_info.get("source")
             layer_kind = layer_info.get("kind")
 
-            base_wfs = self._choose_wfs_endpoint(layer_clean, source_name)
-            auth_headers = self._build_source_auth_headers(source_name)
+            base_wfs = (
+                layer_info.get("endpoint")
+                or self._choose_wfs_endpoint(layer_clean, source_name)
+            )
+            auth_headers = self._build_source_auth_headers(
+                source_name, endpoint=base_wfs, layer_kind=layer_kind
+            )
             if layer_kind == "wfs":
                 self._discover_wfs_schema(base_wfs, layer_clean, auth_headers)
             is_heavy = (layer_kind == "wfs" and source_name in self.heavy_chunk_sources and self._is_heavy_layer(layer_clean))
@@ -3432,6 +3779,20 @@ class VaylaWFSDownloader(object):
                     self._msg("  [TASO] Geometriakenttä: {}".format(
                         self._get_wfs_geometry_field(layer_clean)
                     ))
+                    self._msg("  [TASO] Paikallinen välitulos: {}".format(staged_fc))
+                    self._msg("  [TASO] Lopputulos: {}".format(proposed_output_path))
+            elif layer_kind == "mml_ogcapi":
+                requested_mode = "Maastotiedot OGC API Features + paikallinen Clip"
+                self._msg("  [TASO] Näyttönimi: {}".format(layer_ui_name))
+                self._msg("  [TASO] Lähde: {}".format(source_name or "(tuntematon)"))
+                self._msg("  [TASO] OGC API -palvelu: {}".format(
+                    self._sanitize_url(base_wfs)
+                ))
+                self._msg("  [TASO] Hakutapa: {}".format(requested_mode))
+                self._msg("  [TASO] Sivukoko: {}".format(max_features))
+                if self._verbose_diagnostics:
+                    self._msg("  [TASO] collection: {}".format(layer_clean))
+                    self._msg("  [TASO] Geometriakenttä: geometry")
                     self._msg("  [TASO] Paikallinen välitulos: {}".format(staged_fc))
                     self._msg("  [TASO] Lopputulos: {}".format(proposed_output_path))
 
@@ -3496,6 +3857,63 @@ class VaylaWFSDownloader(object):
                     continue
                 self._msg("  [INFO] Taso valmis.")
                 continue
+            elif layer_kind == "mml_ogcapi":
+                self._msg(
+                    "  [INFO] Haetaan Karttapaikan Maastotiedot-aineistoa "
+                    "(OGC API Features)..."
+                )
+                if not karttapaikka_api_key.strip():
+                    _record_layer_failure(
+                        layer_ui_name,
+                        "Karttapaikan Maastotiedot-taso vaatii API-avaimen",
+                    )
+                    continue
+                try:
+                    if ogc_bbox_wgs84 is None:
+                        bbox_projection_start = time.perf_counter()
+                        ogc_bbox_wgs84 = self._boundary_bbox_wgs84(boundary_fc)
+                        layer_metrics.add(
+                            "projektointi",
+                            time.perf_counter() - bbox_projection_start,
+                        )
+                    if not ogc_bbox_wgs84:
+                        raise Exception("Rajauksesta ei voitu muodostaa OGC API -bboxia.")
+                    chunks, total_found, ogc_stats = self._fetch_ogcapi_feature_chunks(
+                        endpoint=base_wfs,
+                        collection_id=layer_clean,
+                        bbox_wgs84=ogc_bbox_wgs84,
+                        max_features=max_features,
+                        extra_headers=auth_headers,
+                    )
+                    temp_feature_classes.extend(chunks)
+                    layer_http_s += ogc_stats.get("network_s", 0.0)
+                    layer_gp_json_s += ogc_stats.get("json_to_features_s", 0.0)
+                    stat_to_phase = {
+                        "request_build_s": "requestin muodostaminen",
+                        "network_s": "verkkopyyntö",
+                        "response_read_s": "vastauksen lukeminen",
+                        "decode_s": "vastauksen dekoodaus",
+                        "json_parse_s": "JSON-jäsennys",
+                        "json_write_s": "väliaikaisen JSON-tiedoston kirjoittaminen",
+                        "json_to_features_s": "JSONToFeatures",
+                        "projection_s": "projektointi",
+                        "json_temp_delete_s": "väliaikaisen JSON-tiedoston poistaminen",
+                    }
+                    for stat_name, phase_name in stat_to_phase.items():
+                        value = ogc_stats.get(stat_name)
+                        if isinstance(value, (int, float)) and value > 0:
+                            layer_metrics.add(phase_name, value)
+                    self._msg(
+                        "  [INFO] OGC-yhteenveto: {} sivua ladattu ({} kohdetta).".format(
+                            ogc_stats.get("pages", 0), total_found
+                        )
+                    )
+                except Exception as ex:
+                    for temp_fc in temp_feature_classes:
+                        self._safe_delete(temp_fc)
+                    temp_feature_classes = []
+                    _record_layer_failure(layer_ui_name, ex)
+                    continue
             elif is_heavy and extent_type in ["Maakunta", "Elinvoimakeskus", "Hyvinvointialue", "Koko Suomi"] and kunnat_sel_fc and arcpy.Exists(kunnat_sel_fc):
                 used_kunta_chunks = True
                 self._msg(f"[INFO] Raskas taso havaittu -> haetaan kunta kerrallaan ({layer_clean})")
@@ -3844,7 +4262,7 @@ class VaylaWFSDownloader(object):
                 "clip_s": layer_gp_clip_s,
                 "metrics": layer_metrics,
                 "processing_total_s": layer_processing_total,
-                "requested_mode": requested_mode if layer_kind == "wfs" else layer_kind,
+                "requested_mode": requested_mode,
                 "feature_count": staged_feature_count,
             })
 
