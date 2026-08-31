@@ -56,6 +56,21 @@ class ToolboxHelperTests(unittest.TestCase):
         )
         self.assertEqual("[PIILOTETTU] [PIILOTETTU] [PIILOTETTU]", value)
 
+    def test_layer_label_removes_redundant_digiroad_parenthesis(self):
+        self.assertEqual(
+            "Esterakenne - DigiRoad",
+            self.tool._format_layer_label("Esterakenne (Digiroad)", "DigiRoad"),
+        )
+
+    def test_kapsi_uses_service_root_for_scale_dependent_layer(self):
+        self.assertEqual(
+            "taustakartta",
+            self.tool._kapsi_request_layer(
+                "https://tiles.kartat.kapsi.fi/taustakartta",
+                "taustakartta_800k",
+            ),
+        )
+
     @unittest.skipUnless(os.name == "nt", "DPAPI is Windows-only")
     def test_dpapi_secret_round_trip_is_not_plaintext(self):
         encrypted = self.tool._protect_secret("test-secret")

@@ -698,7 +698,9 @@ class VaylaWFSDownloader(object):
         return self._parse_multivalue(param.valueAsText)
 
     def _format_layer_label(self, title, source_name):
-        return "{} - {}".format(title, source_name)
+        clean_title = re.sub(r"\s*\(\s*digiroad\s*\)", "", str(title or ""), flags=re.IGNORECASE)
+        clean_title = re.sub(r"\s+", " ", clean_title).strip()
+        return "{} - {}".format(clean_title, source_name)
 
     def _dataset_output_path(self, workspace, out_name):
         final_name = out_name
@@ -2525,6 +2527,13 @@ class VaylaWFSDownloader(object):
             )
         )
 
+    @staticmethod
+    def _kapsi_request_layer(service_base, selected_layer):
+        service_root = os.path.basename(
+            urllib.parse.urlsplit(service_base or "").path.rstrip("/")
+        )
+        return service_root or selected_layer
+
     def _download_kapsi_wms_jpeg(self, layer_id: str, boundary_fc: str, workspace: str):
         service_base = self.kapsi_wms_base
         service_layer = layer_id
@@ -2532,6 +2541,12 @@ class VaylaWFSDownloader(object):
             parts = layer_id.split("|", 1)
             service_base = parts[0].strip() or self.kapsi_wms_base
             service_layer = parts[1].strip() or layer_id
+
+        # Kapsin Capabilities-listan asteikkotasot (esim. taustakartta_800k)
+        # ovat mittakaavasidonnaisia. Niitä suoraan pyydettäessä MapServer voi
+        # palauttaa tyhjän kuvan. Pyydä palvelun ylätaso, joka valitsee oikean
+        # asteikkotason automaattisesti annetun BBOXin ja pikselikoon perusteella.
+        request_layer = self._kapsi_request_layer(service_base, service_layer)
 
         ext = self._boundary_extent_3067(boundary_fc)
 
@@ -2581,7 +2596,7 @@ class VaylaWFSDownloader(object):
                     "VERSION": "1.1.1",
                     "SERVICE": "WMS",
                     "REQUEST": "GetMap",
-                    "LAYERS": service_layer,
+                    "LAYERS": request_layer,
                     "STYLES": "",
                     "SRS": "EPSG:3067",
                     "WIDTH": str(tile_px),
@@ -2633,6 +2648,16 @@ class VaylaWFSDownloader(object):
                     number_of_bands=3,
                     mosaic_method="LAST",
                 )
+                # JPEG ei kanna geotransformaatiota luotettavasti kaikissa
+                # ArcGIS-versioissa. Kirjoita mosaiikille aina eksplisiittinen
+                # world file ja EPSG:3067-prj.
+                try:
+                    mosaic_desc = arcpy.Describe(out_path)
+                    mosaic_width = int(getattr(mosaic_desc, "width", tile_px * cols))
+                    mosaic_height = int(getattr(mosaic_desc, "height", tile_px * rows))
+                except Exception:
+                    mosaic_width, mosaic_height = tile_px * cols, tile_px * rows
+                self._write_world_file(out_path, ext, mosaic_width, mosaic_height)
                 # Clean up tiles
                 for tp in tile_paths:
                     for ext_s in [".jpg", ".jgw", ".prj"]:
@@ -2913,6 +2938,17 @@ class VaylaWFSDownloader(object):
             parameters[1].enabled = True
             parameters[2].enabled = True
 
+            # Näytä projektin oletusgeodatabase myös silloin, kun ArcGIS Pro
+            # kutsuu updateParameters-metodia ennen kuin p_workspace.value on
+            # ehtinyt siirtyä käyttöliittymään.
+            if not (parameters[6].valueAsText or "").strip():
+                try:
+                    project = arcpy.mp.ArcGISProject("CURRENT")
+                    if project.defaultGeodatabase:
+                        parameters[6].value = project.defaultGeodatabase
+                except Exception:
+                    pass
+
             uses_mml = "MML" in source_values
             uses_karttapaikka = "Karttapaikka" in source_values
             uses_karttakuva = "MML Karttakuva" in source_values
@@ -3186,8 +3222,15 @@ class VaylaWFSDownloader(object):
         admin_boundary_pending = None
         admin_boundary_is_layer = False
         admin_boundary_name = None
+        admin_boundary_existing = False
         if extent_type != "Oma aineisto (Polygon/Polyline)":
             admin_boundary_name = self._validated_name(area_label, workspace)
+            try:
+                admin_boundary_existing = bool(arcpy.Exists(
+                    self._dataset_output_path(workspace, admin_boundary_name)
+                ))
+            except Exception:
+                admin_boundary_existing = False
 
         self._msg(f"[INFO] Noudetaan aluerajaus ({extent_type}: {area_label})...")
         boundary_start = time.perf_counter()
@@ -3846,6 +3889,7 @@ class VaylaWFSDownloader(object):
                 "output_type": "feature",
                 "label": "Aluerajaus ({})".format(area_label),
                 "kind": "boundary",
+                "skip_map": admin_boundary_existing,
                 "layer_start": boundary_output_start,
                 "http_s": 0.0,
                 "json_s": 0.0,
@@ -3923,6 +3967,17 @@ class VaylaWFSDownloader(object):
         map_all_start = time.perf_counter()
         for output in to_add:
             p = output.get("final_path")
+            if output.get("skip_map"):
+                output["map_s"] = None
+                if output.get("metrics"):
+                    output["metrics"].skip(
+                        "kartalle lisääminen",
+                        "ohitettu (sama latausalue on jo työtilassa)",
+                    )
+                self._msg(
+                    "[INFO] Latausalueen rajaus on jo työtilassa; sitä ei lisätty kartalle."
+                )
+                continue
             map_start = time.perf_counter()
             if p:
                 added, add_error = self._add_to_map(p)
