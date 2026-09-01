@@ -493,6 +493,7 @@ class VaylaWFSDownloader(object):
         self._mml_karttakuva_layer_mapping = {}
         self._runtime_karttakuva_user = ""
         self._runtime_karttakuva_pass = ""
+        self._last_source_values = ["Väylä"]
         self._all_kapsi_layers_cache = None
         self._kapsi_layer_mapping = {
             "Ortokuva": "https://tiles.kartat.kapsi.fi/ortokuva|ortokuva"
@@ -702,6 +703,8 @@ class VaylaWFSDownloader(object):
         try:
             raw_values = getattr(param, "values", None)
             if raw_values:
+                if isinstance(raw_values, str):
+                    raw_values = [raw_values]
                 out = []
                 seen = set()
                 for v in raw_values:
@@ -721,6 +724,24 @@ class VaylaWFSDownloader(object):
         except Exception:
             pass
         return self._parse_multivalue(param.valueAsText)
+
+    def _source_values_from_param(self, param, restore_empty=True):
+        """Lue lähteet ja säilytä viimeinen valinta ArcGISin validointikierrosten yli."""
+        source_values = self._parse_multivalue_param(param)
+        if source_values:
+            self._last_source_values = list(source_values)
+            return source_values
+
+        source_values = list(getattr(self, "_last_source_values", None) or ["Väylä"])
+        if restore_empty:
+            try:
+                param.values = list(source_values)
+            except Exception:
+                try:
+                    param.value = ";".join(source_values)
+                except Exception:
+                    pass
+        return source_values
 
     @staticmethod
     def _is_layer_placeholder(value):
@@ -3100,14 +3121,14 @@ class VaylaWFSDownloader(object):
         p_wfs_sources = arcpy.Parameter(
             displayName="Valitse rajapinnat",
             name="wfs_sources",
-            datatype="GPValueTable",
-            parameterType="Optional",
-            direction="Input"
+            datatype="GPString",
+            parameterType="Required",
+            direction="Input",
+            multiValue=True
         )
-        p_wfs_sources.columns = [["GPString", "Rajapinta"]]
-        p_wfs_sources.filters[0].type = "ValueList"
-        p_wfs_sources.filters[0].list = self.wfs_registry.get_sources_list()
-        p_wfs_sources.values = [["Väylä"]]
+        p_wfs_sources.filter.type = "ValueList"
+        p_wfs_sources.filter.list = self.wfs_registry.get_sources_list()
+        p_wfs_sources.values = ["Väylä"]
 
         p_layer_search = arcpy.Parameter(
             displayName="Suodata tasoja kirjoittamalla",
@@ -3127,7 +3148,6 @@ class VaylaWFSDownloader(object):
             multiValue=True
         )
         p_layers.filter.type = "ValueList"
-        p_layers.parameterDependencies = ["wfs_sources", "layer_search", "mml_api_key", "karttapaikka_api_key", "karttakuva_user", "karttakuva_pass"]
         # Lista täytetään laiskasti updateParameters-kutsussa, jotta työkalu-
         # ikkuna avautuu välittömästi ilman synkronista GetCapabilities-kutsua.
         p_layers.filter.list = []
@@ -3234,9 +3254,7 @@ class VaylaWFSDownloader(object):
     def updateParameters(self, parameters):
         try:
             selected_before = self._parse_multivalue_param(parameters[2])
-            source_values = self._parse_multivalue_param(parameters[0])
-            if not source_values:
-                source_values = ["Väylä"]
+            source_values = self._source_values_from_param(parameters[0])
             layer_search = parameters[1].valueAsText or ""
             extent_type = parameters[3].valueAsText
             mml_api_key = (parameters[7].valueAsText or "").strip()
@@ -3341,9 +3359,7 @@ class VaylaWFSDownloader(object):
         karttapaikka_api_key = parameters[8].valueAsText or ""
         karttakuva_user = (parameters[9].valueAsText or "").strip()
         karttakuva_pass = (parameters[10].valueAsText or "").strip()
-        source_values = self._parse_multivalue_param(parameters[0])
-        if not source_values:
-            source_values = ["Väylä"]
+        source_values = self._source_values_from_param(parameters[0], restore_empty=False)
         selected_layers = [
             value for value in self._parse_multivalue_param(parameters[2])
             if not self._is_layer_placeholder(value)
@@ -3503,9 +3519,7 @@ class VaylaWFSDownloader(object):
         self._msg("=== Työkalu käynnistyy ===")
 
         parameter_start = time.perf_counter()
-        source_names = self._parse_multivalue_param(parameters[0])
-        if not source_names:
-            source_names = ["Väylä"]
+        source_names = self._source_values_from_param(parameters[0], restore_empty=False)
         layers = [
             value for value in self._parse_multivalue_param(parameters[2])
             if not self._is_layer_placeholder(value)

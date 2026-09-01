@@ -67,6 +67,26 @@ class ToolboxHelperTests(unittest.TestCase):
         self.assertTrue(self.tool._is_layer_placeholder("(no matches – clear search)"))
         self.assertFalse(self.tool._is_layer_placeholder("tieviiva - Karttapaikka"))
 
+    def test_source_selection_survives_empty_validation_value(self):
+        class Param:
+            def __init__(self, value=None, values=None):
+                self.value = value
+                self.values = values
+
+            @property
+            def valueAsText(self):
+                if self.values:
+                    return ";".join(str(item) for item in self.values)
+                return self.value
+
+        param = Param(values=["Karttapaikka"])
+        self.assertEqual(["Karttapaikka"], self.tool._source_values_from_param(param))
+
+        param.values = []
+        param.value = None
+        self.assertEqual(["Karttapaikka"], self.tool._source_values_from_param(param))
+        self.assertEqual(["Karttapaikka"], param.values)
+
     def test_karttapaikka_uses_current_mml_endpoints(self):
         registry = MODULE.WFSSourceRegistry()
         endpoints = registry.get_endpoints("Karttapaikka")
