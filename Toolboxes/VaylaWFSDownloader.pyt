@@ -734,8 +734,13 @@ class VaylaWFSDownloader(object):
 
         source_values = list(getattr(self, "_last_source_values", None) or ["Väylä"])
         if restore_empty:
+            restored_values = (
+                [[value] for value in source_values]
+                if getattr(param, "datatype", None) == "GPValueTable"
+                else list(source_values)
+            )
             try:
-                param.values = list(source_values)
+                param.values = restored_values
             except Exception:
                 try:
                     param.value = ";".join(source_values)
@@ -3121,14 +3126,14 @@ class VaylaWFSDownloader(object):
         p_wfs_sources = arcpy.Parameter(
             displayName="Valitse rajapinnat",
             name="wfs_sources",
-            datatype="GPString",
+            datatype="GPValueTable",
             parameterType="Required",
-            direction="Input",
-            multiValue=True
+            direction="Input"
         )
-        p_wfs_sources.filter.type = "ValueList"
-        p_wfs_sources.filter.list = self.wfs_registry.get_sources_list()
-        p_wfs_sources.values = ["Väylä"]
+        p_wfs_sources.columns = [["GPString", "Rajapinta"]]
+        p_wfs_sources.filters[0].type = "ValueList"
+        p_wfs_sources.filters[0].list = self.wfs_registry.get_sources_list()
+        p_wfs_sources.values = [["Väylä"]]
 
         p_layer_search = arcpy.Parameter(
             displayName="Suodata tasoja kirjoittamalla",

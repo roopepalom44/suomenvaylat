@@ -69,23 +69,27 @@ class ToolboxHelperTests(unittest.TestCase):
 
     def test_source_selection_survives_empty_validation_value(self):
         class Param:
-            def __init__(self, value=None, values=None):
+            def __init__(self, value=None, values=None, datatype=None):
                 self.value = value
                 self.values = values
+                self.datatype = datatype
 
             @property
             def valueAsText(self):
                 if self.values:
-                    return ";".join(str(item) for item in self.values)
+                    return ";".join(
+                        str(item[0] if isinstance(item, (list, tuple)) else item)
+                        for item in self.values
+                    )
                 return self.value
 
-        param = Param(values=["Karttapaikka"])
+        param = Param(values=[["Karttapaikka"]], datatype="GPValueTable")
         self.assertEqual(["Karttapaikka"], self.tool._source_values_from_param(param))
 
         param.values = []
         param.value = None
         self.assertEqual(["Karttapaikka"], self.tool._source_values_from_param(param))
-        self.assertEqual(["Karttapaikka"], param.values)
+        self.assertEqual([["Karttapaikka"]], param.values)
 
     def test_karttapaikka_uses_current_mml_endpoints(self):
         registry = MODULE.WFSSourceRegistry()
