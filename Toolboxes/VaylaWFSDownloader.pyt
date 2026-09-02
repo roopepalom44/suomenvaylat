@@ -2923,7 +2923,33 @@ class VaylaWFSDownloader(object):
             scale_denominator = max_scale * 0.75
         else:
             scale_denominator = min_scale * 1.25
-        return max(0.1, scale_denominator * 0.00028), True
+        # Kapsin MapServer käyttää oletuksena 72 DPI:tä mittakaavan laskentaan.
+        mapserver_pixel_size_m = 0.0254 / 72.0
+        return max(0.1, scale_denominator * mapserver_pixel_size_m), True
+
+    @staticmethod
+    def _kapsi_exact_tile_axis_bounds(axis_min, axis_max, tile_span, index, count):
+        """Pidä myös reunalaatta täysikokoisena, ettei WMS-taso katoa mittakaavarajalla."""
+        if count == 1:
+            center = (axis_min + axis_max) / 2.0
+            return center - (tile_span / 2.0), center + (tile_span / 2.0)
+        tile_min = min(axis_min + (index * tile_span), axis_max - tile_span)
+        return tile_min, tile_min + tile_span
+
+    def _kapsi_exact_grid_bounds(self, ext, tile_span, cols, rows):
+        x_min, _ = self._kapsi_exact_tile_axis_bounds(
+            ext.XMin, ext.XMax, tile_span, 0, cols
+        )
+        _, x_max = self._kapsi_exact_tile_axis_bounds(
+            ext.XMin, ext.XMax, tile_span, cols - 1, cols
+        )
+        y_min, _ = self._kapsi_exact_tile_axis_bounds(
+            ext.YMin, ext.YMax, tile_span, 0, rows
+        )
+        _, y_max = self._kapsi_exact_tile_axis_bounds(
+            ext.YMin, ext.YMax, tile_span, rows - 1, rows
+        )
+        return x_min, y_min, x_max, y_max
 
     def _download_kapsi_wms_jpeg(self, layer_id: str, boundary_fc: str, workspace: str):
         service_base = self.kapsi_wms_base
@@ -2944,8 +2970,9 @@ class VaylaWFSDownloader(object):
         extent_h = ext.YMax - ext.YMin
         tile_px = 4096
         target_gsd, exact_scale = self._kapsi_target_gsd(layer_ref, service_layer)
-        cols = max(1, int(math.ceil(extent_w / (tile_px * target_gsd))))
-        rows = max(1, int(math.ceil(extent_h / (tile_px * target_gsd))))
+        tile_span = tile_px * target_gsd
+        cols = max(1, int(math.ceil(extent_w / tile_span)))
+        rows = max(1, int(math.ceil(extent_h / tile_span)))
         required_tiles = cols * rows
         if exact_scale and required_tiles > 25:
             raise Exception(
@@ -2960,16 +2987,40 @@ class VaylaWFSDownloader(object):
 
         tile_w = extent_w / cols
         tile_h = extent_h / rows
+        output_ext = ext
+        if exact_scale:
+            output_bounds = self._kapsi_exact_grid_bounds(
+                ext, tile_span, cols, rows
+            )
+
+            class _OutputExt:
+                pass
+
+            output_ext = _OutputExt()
+            (
+                output_ext.XMin,
+                output_ext.YMin,
+                output_ext.XMax,
+                output_ext.YMax,
+            ) = output_bounds
 
         raster_dir = self._raster_folder(workspace)
         tile_paths = []
 
         for row_i in range(rows):
             for col_i in range(cols):
-                t_xmin = ext.XMin + col_i * tile_w
-                t_ymin = ext.YMin + row_i * tile_h
-                t_xmax = t_xmin + tile_w
-                t_ymax = t_ymin + tile_h
+                if exact_scale:
+                    t_xmin, t_xmax = self._kapsi_exact_tile_axis_bounds(
+                        ext.XMin, ext.XMax, tile_span, col_i, cols
+                    )
+                    t_ymin, t_ymax = self._kapsi_exact_tile_axis_bounds(
+                        ext.YMin, ext.YMax, tile_span, row_i, rows
+                    )
+                else:
+                    t_xmin = ext.XMin + col_i * tile_w
+                    t_ymin = ext.YMin + row_i * tile_h
+                    t_xmax = t_xmin + tile_w
+                    t_ymax = t_ymin + tile_h
                 params = {
                     "FORMAT": "image/jpeg",
                     "VERSION": "1.1.1",
@@ -3036,7 +3087,9 @@ class VaylaWFSDownloader(object):
                     mosaic_height = int(getattr(mosaic_desc, "height", tile_px * rows))
                 except Exception:
                     mosaic_width, mosaic_height = tile_px * cols, tile_px * rows
-                self._write_world_file(out_path, ext, mosaic_width, mosaic_height)
+                self._write_world_file(
+                    out_path, output_ext, mosaic_width, mosaic_height
+                )
                 # Clean up tiles
                 for tp in tile_paths:
                     for ext_s in [".jpg", ".jgw", ".prj"]:

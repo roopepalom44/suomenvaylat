@@ -23,7 +23,7 @@ Kun C#-osa on jo käännetty esimerkiksi ArcGIS Pron AssemblyCacheen, paketoi ny
 powershell -ExecutionPolicy Bypass -File .\package-addin.ps1
 ```
 
-Skripti etsii ensin `suomenvaylat.dll`-tiedoston bin-kansiosta ja sen jälkeen ArcGIS Pron AssemblyCachesta. Se rakentaa uuden `bin\Debug\net8.0-windows\suomenvaylat.esriAddInX`-paketin tyhjästä, sisältää Python-työkalun ja resurssit sekä validoi paketin sisällön. Paketti käyttää versiota `1.0.6`, jotta ArcGIS Pro tunnistaa sen päivitykseksi.
+Skripti etsii ensin `suomenvaylat.dll`-tiedoston bin-kansiosta ja sen jälkeen ArcGIS Pron AssemblyCachesta. Se rakentaa uuden `bin\Debug\net8.0-windows\suomenvaylat.esriAddInX`-paketin tyhjästä, sisältää Python-työkalun ja resurssit sekä validoi paketin sisällön. Paketti käyttää versiota `1.0.7`, jotta ArcGIS Pro tunnistaa sen päivitykseksi.
 
 Jos DLL on muualla, anna sen polku:
 
@@ -35,7 +35,7 @@ Skripti ei käännä C#-lähdekoodia. Se on tarkoitettu erityisesti Python-työk
 
 ### TypeNotFound / command unavailable
 
-Jos ArcGIS Pro näyttää virheen `TypeNotFound` tai ilmoittaa komennon olevan unavailable, paketin DLL on yleensä vanha, väärä tai se ei sisällä nykyistä painiketyyppiä. `package-addin.ps1` tarkistaa nyt assemblyn nimen ja yrittää lukea siitä tyypit `suomenvaylat.Module1` sekä `suomenvaylat.OpenSuomenvaylatToolButton`. Lisäksi Add-in-versiona on `1.0.6`, jotta ArcGIS Pro tunnistaa päivityksen.
+Jos ArcGIS Pro näyttää virheen `TypeNotFound` tai ilmoittaa komennon olevan unavailable, paketin DLL on yleensä vanha, väärä tai se ei sisällä nykyistä painiketyyppiä. `package-addin.ps1` tarkistaa nyt assemblyn nimen ja yrittää lukea siitä tyypit `suomenvaylat.Module1` sekä `suomenvaylat.OpenSuomenvaylatToolButton`. Lisäksi Add-in-versiona on `1.0.7`, jotta ArcGIS Pro tunnistaa päivityksen.
 
 Jos tarkistus ilmoittaa väärästä DLL:stä, käännä C#-projekti ArcGIS Pro SDK:n kanssa ja anna tulos suoraan:
 

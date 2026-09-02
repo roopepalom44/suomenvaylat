@@ -316,7 +316,7 @@ class ToolboxHelperTests(unittest.TestCase):
         )
         self.assertTrue(exact_scale)
         self.assertAlmostEqual(
-            (500000.0 * 1200000.0) ** 0.5 * 0.00028,
+            (500000.0 * 1200000.0) ** 0.5 * (0.0254 / 72.0),
             gsd,
         )
 
@@ -346,6 +346,35 @@ class ToolboxHelperTests(unittest.TestCase):
             self.tool._download_kapsi_wms_jpeg(
                 layer_ref, "boundary", "C:\\output"
             )
+
+    def test_kapsi_exact_single_tile_is_padded_to_supported_scale(self):
+        axis_min, axis_max = self.tool._kapsi_exact_tile_axis_bounds(
+            300000.0, 310000.0, 14200.0, 0, 1
+        )
+        self.assertAlmostEqual(297900.0, axis_min)
+        self.assertAlmostEqual(312100.0, axis_max)
+        self.assertAlmostEqual(14200.0, axis_max - axis_min)
+
+    def test_kapsi_exact_last_tile_keeps_full_supported_span(self):
+        first = self.tool._kapsi_exact_tile_axis_bounds(
+            300000.0, 325000.0, 14200.0, 0, 2
+        )
+        last = self.tool._kapsi_exact_tile_axis_bounds(
+            300000.0, 325000.0, 14200.0, 1, 2
+        )
+        self.assertEqual((300000.0, 314200.0), first)
+        self.assertEqual((310800.0, 325000.0), last)
+
+    def test_kapsi_exact_grid_bounds_include_padded_narrow_axis(self):
+        extent = types.SimpleNamespace(
+            XMin=1000.0, YMin=2000.0, XMax=1500.0, YMax=11000.0
+        )
+        self.assertEqual(
+            (-1300.0, 2000.0, 3800.0, 11000.0),
+            self.tool._kapsi_exact_grid_bounds(
+                extent, tile_span=5100.0, cols=1, rows=2
+            ),
+        )
 
     @unittest.skipUnless(os.name == "nt", "DPAPI is Windows-only")
     def test_dpapi_secret_round_trip_is_not_plaintext(self):

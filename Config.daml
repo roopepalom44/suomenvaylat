@@ -6,7 +6,7 @@
         xsi:schemaLocation="http://schemas.esri.com/DADF/Registry file:///C:/Program%20Files/ArcGIS/Pro/bin/ArcGIS.Desktop.Framework.xsd">
 
 	<AddInInfo id="{2aea3c93-c012-4ed4-b416-6b3a844e0204}"
-			   version="1.0.6"
+			   version="1.0.7"
 			   desktopVersion="3.5.0.57366"
 			   product="ArcGISPro">
 		<Name>suomenvaylat</Name>
