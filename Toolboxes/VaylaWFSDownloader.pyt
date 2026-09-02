@@ -2747,6 +2747,7 @@ class VaylaWFSDownloader(object):
 
     def _fetch_kapsi_layer_list(self):
         out = []
+        seen_layer_refs = set()
         self._kapsi_layer_mapping.clear()
         self._kapsi_layer_scale_ranges.clear()
         caps_urls = self.wfs_registry.get_endpoints("Kapsi")
@@ -2801,6 +2802,17 @@ class VaylaWFSDownloader(object):
                     display_core = layer_title if layer_title else layer_name
                     display = "{} ({})".format(display_core, service_name)
                     layer_ref = "{}|{}".format(service_base, layer_name)
+                    if layer_ref in seen_layer_refs:
+                        if (
+                            layer_ref not in self._kapsi_layer_scale_ranges
+                            and (min_scale is not None or max_scale is not None)
+                        ):
+                            self._kapsi_layer_scale_ranges[layer_ref] = (
+                                min_scale,
+                                max_scale,
+                            )
+                        continue
+                    seen_layer_refs.add(layer_ref)
                     unique_display = display
                     counter = 2
                     while unique_display in self._kapsi_layer_mapping and self._kapsi_layer_mapping[unique_display] != layer_ref:
@@ -4435,6 +4447,15 @@ class VaylaWFSDownloader(object):
                 "clip_s": 0.0,
             })
 
+        staged_source_counts = {}
+        for output in staged_outputs:
+            source_path = output.get("path")
+            if source_path:
+                source_key = os.path.normcase(os.path.abspath(str(source_path)))
+                staged_source_counts[source_key] = (
+                    staged_source_counts.get(source_key, 0) + 1
+                )
+
         to_add = []
         if staged_outputs:
             self._msg("[INFO] Kaikki käsittely on valmis. Kopioidaan tulokset kohteeseen vasta nyt...")
@@ -4482,7 +4503,10 @@ class VaylaWFSDownloader(object):
             output["final_path"] = final_path
             to_add.append(output)
             local_delete_start = time.perf_counter()
-            self._remove_local_output(output["path"])
+            source_key = os.path.normcase(os.path.abspath(str(output["path"])))
+            staged_source_counts[source_key] -= 1
+            if staged_source_counts[source_key] <= 0:
+                self._remove_local_output(output["path"])
             if output.get("metrics"):
                 output["metrics"].add(
                     "väliaineistojen poistaminen", time.perf_counter() - local_delete_start

@@ -376,6 +376,55 @@ class ToolboxHelperTests(unittest.TestCase):
             ),
         )
 
+    def test_kapsi_capabilities_do_not_list_same_layer_reference_twice(self):
+        class Registry:
+            def get_endpoints(self, source_name):
+                self.assertEqual("Kapsi", source_name)
+                return [
+                    "https://example.test/ortokuva?SERVICE=WMS&REQUEST=GetCapabilities"
+                ]
+
+            def assertEqual(self, expected, actual):
+                assert expected == actual
+
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return b"""<WMS_Capabilities>
+                    <Capability><Layer>
+                        <Name>ortokuva</Name>
+                        <Title>Maanmittauslaitoksen ortokuvat</Title>
+                        <Layer>
+                            <Name>ortokuva</Name>
+                            <Title>ortokuva</Title>
+                        </Layer>
+                        <Layer>
+                            <Name>ortokuva_overlay</Name>
+                            <Title>ortokuva</Title>
+                        </Layer>
+                    </Layer></Capability>
+                </WMS_Capabilities>"""
+
+        self.tool.wfs_registry = Registry()
+        self.tool._kapsi_layer_mapping = {}
+        self.tool._kapsi_layer_scale_ranges = {}
+        self.tool._warn = lambda message: None
+        original_open = MODULE.urllib.request.urlopen
+        MODULE.urllib.request.urlopen = lambda request, timeout=60: Response()
+        try:
+            layers = self.tool._fetch_kapsi_layer_list()
+        finally:
+            MODULE.urllib.request.urlopen = original_open
+
+        references = [self.tool._kapsi_layer_mapping[layer] for layer in layers]
+        self.assertEqual(len(references), len(set(references)))
+        self.assertEqual(2, len(layers))
+
     @unittest.skipUnless(os.name == "nt", "DPAPI is Windows-only")
     def test_dpapi_secret_round_trip_is_not_plaintext(self):
         encrypted = self.tool._protect_secret("test-secret")
