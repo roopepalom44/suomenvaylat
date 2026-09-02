@@ -230,6 +230,71 @@ class ToolboxHelperTests(unittest.TestCase):
         )
         self.assertEqual(["", "new-key"], calls)
 
+    def test_layer_selection_survives_filter_refresh(self):
+        class Filter:
+            def __init__(self, owner=None):
+                self.owner = owner
+                self._list = []
+                self.assignments = 0
+
+            @property
+            def list(self):
+                return self._list
+
+            @list.setter
+            def list(self, value):
+                self._list = list(value)
+                self.assignments += 1
+                if self.owner is not None:
+                    self.owner.values = []
+                    self.owner.value = None
+
+        class Param:
+            def __init__(self, value=None, values=None, datatype=None, clears_on_filter=False):
+                self.value = value
+                self.values = values
+                self.datatype = datatype
+                self.filter = Filter(self if clears_on_filter else None)
+                self.enabled = True
+
+            @property
+            def valueAsText(self):
+                if self.values:
+                    return ";".join(
+                        str(item[0] if isinstance(item, (list, tuple)) else item)
+                        for item in self.values
+                    )
+                return self.value
+
+        layer_name = "Tiestötiedot - Väylä"
+        parameters = [
+            Param(values=[["Väylä"]], datatype="GPValueTable"),
+            Param(""),
+            Param(values=[layer_name], clears_on_filter=True),
+            Param("Koko Suomi"), Param(None), Param(None), Param("C:\\output.gdb"),
+            Param(""), Param(""), Param(""), Param(""),
+        ]
+        self.tool._all_wfs_layers_cache = {}
+        self.tool._runtime_mml_api_key = ""
+        self.tool._runtime_karttapaikka_api_key = ""
+        self.tool._runtime_karttakuva_user = ""
+        self.tool._runtime_karttakuva_pass = ""
+        self.tool._fetch_layer_list = lambda sources: [layer_name]
+        self.tool._warn = lambda message: None
+
+        self.tool.updateParameters(parameters)
+        self.assertEqual([layer_name], parameters[2].values)
+        self.assertEqual(1, parameters[2].filter.assignments)
+
+        parameters[8].value = "new-key"
+        self.tool.updateParameters(parameters)
+        self.assertEqual([layer_name], parameters[2].values)
+        self.assertEqual(1, parameters[2].filter.assignments)
+
+        self.tool.updateParameters(parameters)
+        self.assertEqual([layer_name], parameters[2].values)
+        self.assertEqual(1, parameters[2].filter.assignments)
+
     def test_kapsi_uses_service_root_for_scale_dependent_layer(self):
         self.assertEqual(
             "taustakartta",

@@ -773,6 +773,19 @@ class VaylaWFSDownloader(object):
             pass
         return cleared
 
+    def _set_multivalue_param(self, param, values):
+        """Aseta monivalinta ArcGIS Pro -versiosta riippumatta."""
+        selected_values = list(values)
+        try:
+            param.values = selected_values
+            return True
+        except Exception:
+            try:
+                param.value = ";".join(selected_values)
+                return True
+            except Exception:
+                return False
+
     def _format_layer_label(self, title, source_name):
         clean_title = re.sub(r"\s*\(\s*digiroad\s*\)", "", str(title or ""), flags=re.IGNORECASE)
         clean_title = re.sub(r"\s+", " ", clean_title).strip()
@@ -3300,8 +3313,6 @@ class VaylaWFSDownloader(object):
                 self._secret_cache_key(karttakuva_user),
                 self._secret_cache_key(karttakuva_pass)
             )
-            source_key_changed = source_key != getattr(self, "_last_layer_source_key", None)
-            self._last_layer_source_key = source_key
             if source_key not in self._all_wfs_layers_cache:
                 fetch_error = None
                 try:
@@ -3321,19 +3332,28 @@ class VaylaWFSDownloader(object):
             # Tyhjää tulosta ei saa lisätä oikeana GPString-valintana. Aiempi
             # placeholder päätyi muuten execute-vaiheessa ladattavaksi
             # tasoksi ja aiheutti turhan määritystä ei löytynyt -virheen.
-            parameters[2].filter.list = filtered_layers
             valid_layers = {self._norm(value) for value in filtered_layers}
-            stale_selection = (
-                not filtered_layers
-                or source_key_changed
-                or any(
-                    self._is_layer_placeholder(value)
-                    or self._norm(value) not in valid_layers
-                    for value in selected_before
-                )
-            )
-            if stale_selection and selected_before:
-                self._clear_multivalue_param(parameters[2])
+            valid_selection = [
+                value for value in selected_before
+                if not self._is_layer_placeholder(value)
+                and self._norm(value) in valid_layers
+            ]
+            try:
+                current_filter = list(parameters[2].filter.list or [])
+            except Exception:
+                current_filter = None
+            filter_changed = current_filter != filtered_layers
+            if filter_changed:
+                parameters[2].filter.list = filtered_layers
+
+            if selected_before:
+                if valid_selection:
+                    # ArcGIS Pro voi tyhjentää GPString-monivalinnan, kun sen
+                    # ValueList päivitetään. Palauta edelleen kelvolliset arvot.
+                    if filter_changed or valid_selection != selected_before:
+                        self._set_multivalue_param(parameters[2], valid_selection)
+                else:
+                    self._clear_multivalue_param(parameters[2])
 
             parameters[4].enabled = False
             parameters[5].enabled = False
