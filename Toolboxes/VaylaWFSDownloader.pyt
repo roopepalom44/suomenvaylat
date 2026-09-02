@@ -498,6 +498,7 @@ class VaylaWFSDownloader(object):
         self._kapsi_layer_mapping = {
             "Ortokuva": "https://tiles.kartat.kapsi.fi/ortokuva|ortokuva"
         }
+        self._kapsi_layer_scale_ranges = {}
         self.kapsi_wms_base = "https://tiles.kartat.kapsi.fi/ortokuva"
         self._run_scratch_folder = None
         self._run_scratch_gdb = None
@@ -2747,6 +2748,7 @@ class VaylaWFSDownloader(object):
     def _fetch_kapsi_layer_list(self):
         out = []
         self._kapsi_layer_mapping.clear()
+        self._kapsi_layer_scale_ranges.clear()
         caps_urls = self.wfs_registry.get_endpoints("Kapsi")
         if not caps_urls:
             raise Exception("Kapsi GetCapabilities-osoite puuttuu.")
@@ -2769,11 +2771,31 @@ class VaylaWFSDownloader(object):
                     continue
                 layer_name = None
                 layer_title = None
+                min_scale = None
+                max_scale = None
                 for child in elem:
                     if child.tag.endswith("Name") and child.text and not layer_name:
                         layer_name = child.text.strip()
                     elif child.tag.endswith("Title") and child.text and not layer_title:
                         layer_title = child.text.strip()
+                    elif child.tag.endswith("MinScaleDenominator") and child.text:
+                        try:
+                            min_scale = float(child.text)
+                        except ValueError:
+                            self._warn(
+                                "[VAROITUS] Kapsi-tason minimimittakaava ei ole numero: {}".format(
+                                    child.text
+                                )
+                            )
+                    elif child.tag.endswith("MaxScaleDenominator") and child.text:
+                        try:
+                            max_scale = float(child.text)
+                        except ValueError:
+                            self._warn(
+                                "[VAROITUS] Kapsi-tason maksimimittakaava ei ole numero: {}".format(
+                                    child.text
+                                )
+                            )
 
                 if layer_name:
                     display_core = layer_title if layer_title else layer_name
@@ -2786,6 +2808,8 @@ class VaylaWFSDownloader(object):
                         counter += 1
 
                     self._kapsi_layer_mapping[unique_display] = layer_ref
+                    if min_scale is not None or max_scale is not None:
+                        self._kapsi_layer_scale_ranges[layer_ref] = (min_scale, max_scale)
                     out.append(unique_display)
 
         if not out:
@@ -2881,10 +2905,25 @@ class VaylaWFSDownloader(object):
 
     @staticmethod
     def _kapsi_request_layer(service_base, selected_layer):
-        service_root = os.path.basename(
-            urllib.parse.urlsplit(service_base or "").path.rstrip("/")
-        )
-        return service_root or selected_layer
+        return selected_layer
+
+    def _kapsi_target_gsd(self, layer_ref, selected_layer):
+        """Palauta valitun mittakaavatason WMS-mittakaavaan sopiva pikselikoko."""
+        if not re.search(r"_\d+(?:k|m)$", selected_layer or "", re.IGNORECASE):
+            return 20.0, False
+
+        scale_range = getattr(self, "_kapsi_layer_scale_ranges", {}).get(layer_ref)
+        if not scale_range:
+            return 20.0, False
+
+        min_scale, max_scale = scale_range
+        if min_scale is not None and max_scale is not None:
+            scale_denominator = math.sqrt(min_scale * max_scale)
+        elif max_scale is not None:
+            scale_denominator = max_scale * 0.75
+        else:
+            scale_denominator = min_scale * 1.25
+        return max(0.1, scale_denominator * 0.00028), True
 
     def _download_kapsi_wms_jpeg(self, layer_id: str, boundary_fc: str, workspace: str):
         service_base = self.kapsi_wms_base
@@ -2894,10 +2933,7 @@ class VaylaWFSDownloader(object):
             service_base = parts[0].strip() or self.kapsi_wms_base
             service_layer = parts[1].strip() or layer_id
 
-        # Kapsin Capabilities-listan asteikkotasot (esim. taustakartta_800k)
-        # ovat mittakaavasidonnaisia. Niitä suoraan pyydettäessä MapServer voi
-        # palauttaa tyhjän kuvan. Pyydä palvelun ylätaso, joka valitsee oikean
-        # asteikkotason automaattisesti annetun BBOXin ja pikselikoon perusteella.
+        layer_ref = "{}|{}".format(service_base, service_layer)
         request_layer = self._kapsi_request_layer(service_base, service_layer)
 
         ext = self._boundary_extent_3067(boundary_fc)
@@ -2907,26 +2943,17 @@ class VaylaWFSDownloader(object):
         extent_w = ext.XMax - ext.XMin
         extent_h = ext.YMax - ext.YMin
         tile_px = 4096
-        target_gsd_by_layer = {
-            "taustakartta_4m": 4.0,
-            "taustakartta_5k": 1.5,
-            "taustakartta_8m": 8.0,
-            "taustakartta_40k": 12.0,
-            "taustakartta_80k": 24.0,
-            "maastokartta_50k": 15.0,
-            "maastokartta_100k": 30.0,
-            "maastokartta_250k": 75.0,
-            "maastokartta_500k": 150.0,
-            "yleiskartta_1000k": 280.0,
-            "yleiskartta_2000k": 560.0,
-            "yleiskartta_4500k": 1260.0,
-            "yleiskartta_8000k": 2240.0,
-        }
-        target_gsd = target_gsd_by_layer.get(service_layer.lower(), 20.0)
+        target_gsd, exact_scale = self._kapsi_target_gsd(layer_ref, service_layer)
         cols = max(1, int(math.ceil(extent_w / (tile_px * target_gsd))))
         rows = max(1, int(math.ceil(extent_h / (tile_px * target_gsd))))
-        # Cap tiles to avoid excessive requests
-        if cols * rows > 25:
+        required_tiles = cols * rows
+        if exact_scale and required_tiles > 25:
+            raise Exception(
+                "Valittu Kapsi-taso '{}' vaatii tällä rajauksella {} kuvalaattaa. "
+                "Rajaa pienempi alue tai valitse epätarkempi mittakaavataso "
+                "(enintään 25 laattaa).".format(service_layer, required_tiles)
+            )
+        if required_tiles > 25:
             scale = math.sqrt(25.0 / (cols * rows))
             cols = max(1, int(cols * scale))
             rows = max(1, int(rows * scale))

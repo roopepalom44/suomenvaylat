@@ -295,14 +295,57 @@ class ToolboxHelperTests(unittest.TestCase):
         self.assertEqual([layer_name], parameters[2].values)
         self.assertEqual(1, parameters[2].filter.assignments)
 
-    def test_kapsi_uses_service_root_for_scale_dependent_layer(self):
+    def test_kapsi_uses_selected_scale_dependent_layer(self):
         self.assertEqual(
-            "taustakartta",
+            "taustakartta_800k",
             self.tool._kapsi_request_layer(
                 "https://tiles.kartat.kapsi.fi/taustakartta",
                 "taustakartta_800k",
             ),
         )
+
+    def test_kapsi_target_gsd_uses_capabilities_scale_range(self):
+        layer_ref = (
+            "https://tiles.kartat.kapsi.fi/taustakartta|taustakartta_800k"
+        )
+        self.tool._kapsi_layer_scale_ranges = {
+            layer_ref: (500000.0, 1200000.0)
+        }
+        gsd, exact_scale = self.tool._kapsi_target_gsd(
+            layer_ref, "taustakartta_800k"
+        )
+        self.assertTrue(exact_scale)
+        self.assertAlmostEqual(
+            (500000.0 * 1200000.0) ** 0.5 * 0.00028,
+            gsd,
+        )
+
+    def test_kapsi_parent_layer_keeps_automatic_resolution(self):
+        layer_ref = "https://tiles.kartat.kapsi.fi/taustakartta|taustakartta"
+        self.tool._kapsi_layer_scale_ranges = {
+            layer_ref: (None, 7000.0)
+        }
+        self.assertEqual(
+            (20.0, False),
+            self.tool._kapsi_target_gsd(layer_ref, "taustakartta"),
+        )
+
+    def test_kapsi_exact_scale_rejects_excessive_tile_count(self):
+        layer_ref = (
+            "https://tiles.kartat.kapsi.fi/taustakartta|taustakartta_5k"
+        )
+        self.tool._kapsi_layer_scale_ranges = {
+            layer_ref: (None, 7000.0)
+        }
+        self.tool._boundary_extent_3067 = lambda boundary: types.SimpleNamespace(
+            XMin=0.0, YMin=0.0, XMax=100000.0, YMax=100000.0
+        )
+        self.tool.kapsi_wms_base = "https://tiles.kartat.kapsi.fi/ortokuva"
+
+        with self.assertRaisesRegex(Exception, "Rajaa pienempi alue"):
+            self.tool._download_kapsi_wms_jpeg(
+                layer_ref, "boundary", "C:\\output"
+            )
 
     @unittest.skipUnless(os.name == "nt", "DPAPI is Windows-only")
     def test_dpapi_secret_round_trip_is_not_plaintext(self):
