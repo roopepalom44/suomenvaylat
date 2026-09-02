@@ -2963,6 +2963,21 @@ class VaylaWFSDownloader(object):
         )
         return x_min, y_min, x_max, y_max
 
+    @staticmethod
+    def _kapsi_tile_batches(cols, rows, batch_size=25):
+        """Jaa laattaruutu peräkkäisiin eriin, joissa on enintään batch_size laattaa."""
+        if cols < 1 or rows < 1 or batch_size < 1:
+            return []
+        cols_per_batch = min(cols, batch_size)
+        rows_per_batch = max(1, batch_size // cols_per_batch)
+        batches = []
+        for row_start in range(0, rows, rows_per_batch):
+            row_end = min(rows, row_start + rows_per_batch)
+            for col_start in range(0, cols, cols_per_batch):
+                col_end = min(cols, col_start + cols_per_batch)
+                batches.append((row_start, row_end, col_start, col_end))
+        return batches
+
     def _download_kapsi_wms_jpeg(self, layer_id: str, boundary_fc: str, workspace: str):
         service_base = self.kapsi_wms_base
         service_layer = layer_id
@@ -2986,16 +3001,18 @@ class VaylaWFSDownloader(object):
         cols = max(1, int(math.ceil(extent_w / tile_span)))
         rows = max(1, int(math.ceil(extent_h / tile_span)))
         required_tiles = cols * rows
-        if exact_scale and required_tiles > 25:
-            raise Exception(
-                "Valittu Kapsi-taso '{}' vaatii tällä rajauksella {} kuvalaattaa. "
-                "Rajaa pienempi alue tai valitse epätarkempi mittakaavataso "
-                "(enintään 25 laattaa).".format(service_layer, required_tiles)
-            )
         if required_tiles > 25:
-            scale = math.sqrt(25.0 / (cols * rows))
-            cols = max(1, int(cols * scale))
-            rows = max(1, int(rows * scale))
+            if exact_scale:
+                self._msg(
+                    "[INFO] Kapsi-taso '{}' jaetaan {} laatan ruudukoksi useaan "
+                    "enintään 25 laatan latauserään.".format(
+                        service_layer, required_tiles
+                    )
+                )
+            else:
+                scale = math.sqrt(25.0 / (cols * rows))
+                cols = max(1, int(cols * scale))
+                rows = max(1, int(rows * scale))
 
         tile_w = extent_w / cols
         tile_h = extent_h / rows
@@ -3018,50 +3035,61 @@ class VaylaWFSDownloader(object):
 
         raster_dir = self._raster_folder(workspace)
         tile_paths = []
+        tile_batches = self._kapsi_tile_batches(cols, rows)
 
-        for row_i in range(rows):
-            for col_i in range(cols):
-                if exact_scale:
-                    t_xmin, t_xmax = self._kapsi_exact_tile_axis_bounds(
-                        ext.XMin, ext.XMax, tile_span, col_i, cols
+        for batch_index, (row_start, row_end, col_start, col_end) in enumerate(
+            tile_batches, 1
+        ):
+            if len(tile_batches) > 1:
+                batch_tiles = (row_end - row_start) * (col_end - col_start)
+                self._msg(
+                    "[INFO] Kapsi-latauserä {}/{} ({} laattaa).".format(
+                        batch_index, len(tile_batches), batch_tiles
                     )
-                    t_ymin, t_ymax = self._kapsi_exact_tile_axis_bounds(
-                        ext.YMin, ext.YMax, tile_span, row_i, rows
-                    )
-                else:
-                    t_xmin = ext.XMin + col_i * tile_w
-                    t_ymin = ext.YMin + row_i * tile_h
-                    t_xmax = t_xmin + tile_w
-                    t_ymax = t_ymin + tile_h
-                params = {
-                    "FORMAT": "image/jpeg",
-                    "VERSION": "1.1.1",
-                    "SERVICE": "WMS",
-                    "REQUEST": "GetMap",
-                    "LAYERS": request_layer,
-                    "STYLES": "",
-                    "SRS": "EPSG:3067",
-                    "WIDTH": str(tile_px),
-                    "HEIGHT": str(tile_px),
-                    "BBOX": "{},{},{},{}".format(t_xmin, t_ymin, t_xmax, t_ymax),
-                }
-                request_url = "{}?{}".format(service_base, urllib.parse.urlencode(params))
-                raw = self._download_kapsi_image_bytes(request_url)
+                )
+            for row_i in range(row_start, row_end):
+                for col_i in range(col_start, col_end):
+                    if exact_scale:
+                        t_xmin, t_xmax = self._kapsi_exact_tile_axis_bounds(
+                            ext.XMin, ext.XMax, tile_span, col_i, cols
+                        )
+                        t_ymin, t_ymax = self._kapsi_exact_tile_axis_bounds(
+                            ext.YMin, ext.YMax, tile_span, row_i, rows
+                        )
+                    else:
+                        t_xmin = ext.XMin + col_i * tile_w
+                        t_ymin = ext.YMin + row_i * tile_h
+                        t_xmax = t_xmin + tile_w
+                        t_ymax = t_ymin + tile_h
+                    params = {
+                        "FORMAT": "image/jpeg",
+                        "VERSION": "1.1.1",
+                        "SERVICE": "WMS",
+                        "REQUEST": "GetMap",
+                        "LAYERS": request_layer,
+                        "STYLES": "",
+                        "SRS": "EPSG:3067",
+                        "WIDTH": str(tile_px),
+                        "HEIGHT": str(tile_px),
+                        "BBOX": "{},{},{},{}".format(t_xmin, t_ymin, t_xmax, t_ymax),
+                    }
+                    request_url = "{}?{}".format(service_base, urllib.parse.urlencode(params))
+                    raw = self._download_kapsi_image_bytes(request_url)
 
-                tile_name = self._validated_name(
-                    "Kapsi_{}_tile_{}_{}".format(service_layer, row_i, col_i), raster_dir
-                ) + ".jpg"
-                tile_path = os.path.join(raster_dir, tile_name)
-                with open(tile_path, "wb") as handle:
-                    handle.write(raw)
+                    tile_name = self._validated_name(
+                        "Kapsi_{}_tile_{}_{}".format(service_layer, row_i, col_i), raster_dir
+                    ) + ".jpg"
+                    tile_path = os.path.join(raster_dir, tile_name)
+                    with open(tile_path, "wb") as handle:
+                        handle.write(raw)
 
-                # Create a simple Extent-like object for the world file
-                class _TileExt:
-                    pass
-                te = _TileExt()
-                te.XMin, te.YMin, te.XMax, te.YMax = t_xmin, t_ymin, t_xmax, t_ymax
-                self._write_world_file(tile_path, te, tile_px, tile_px)
-                tile_paths.append(tile_path)
+                    # Create a simple Extent-like object for the world file
+                    class _TileExt:
+                        pass
+                    te = _TileExt()
+                    te.XMin, te.YMin, te.XMax, te.YMax = t_xmin, t_ymin, t_xmax, t_ymax
+                    self._write_world_file(tile_path, te, tile_px, tile_px)
+                    tile_paths.append(tile_path)
 
         if len(tile_paths) == 1:
             # Single tile – rename to final output name

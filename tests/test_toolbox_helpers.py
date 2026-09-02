@@ -330,22 +330,15 @@ class ToolboxHelperTests(unittest.TestCase):
             self.tool._kapsi_target_gsd(layer_ref, "taustakartta"),
         )
 
-    def test_kapsi_exact_scale_rejects_excessive_tile_count(self):
-        layer_ref = (
-            "https://tiles.kartat.kapsi.fi/taustakartta|taustakartta_5k"
-        )
-        self.tool._kapsi_layer_scale_ranges = {
-            layer_ref: (None, 7000.0)
-        }
-        self.tool._boundary_extent_3067 = lambda boundary: types.SimpleNamespace(
-            XMin=0.0, YMin=0.0, XMax=100000.0, YMax=100000.0
-        )
-        self.tool.kapsi_wms_base = "https://tiles.kartat.kapsi.fi/ortokuva"
-
-        with self.assertRaisesRegex(Exception, "Rajaa pienempi alue"):
-            self.tool._download_kapsi_wms_jpeg(
-                layer_ref, "boundary", "C:\\output"
-            )
+    def test_kapsi_exact_scale_splits_excessive_tile_count_into_batches(self):
+        batches = self.tool._kapsi_tile_batches(7, 7)
+        batch_sizes = [
+            (row_end - row_start) * (col_end - col_start)
+            for row_start, row_end, col_start, col_end in batches
+        ]
+        self.assertEqual(49, sum(batch_sizes))
+        self.assertEqual([21, 21, 7], batch_sizes)
+        self.assertTrue(all(size <= 25 for size in batch_sizes))
 
     def test_kapsi_exact_single_tile_is_padded_to_supported_scale(self):
         axis_min, axis_max = self.tool._kapsi_exact_tile_axis_bounds(
