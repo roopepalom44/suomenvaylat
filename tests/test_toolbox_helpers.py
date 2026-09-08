@@ -242,6 +242,72 @@ class ToolboxHelperTests(unittest.TestCase):
         )
         self.assertEqual(["", "new-key"], calls)
 
+    def test_layer_selection_survives_filter_refresh(self):
+        class Filter:
+            def __init__(self, owner=None):
+                self.owner = owner
+                self._list = []
+                self.assignments = 0
+
+            @property
+            def list(self):
+                return self._list
+
+            @list.setter
+            def list(self, value):
+                self._list = list(value)
+                self.assignments += 1
+                if self.owner is not None:
+                    self.owner.values = []
+                    self.owner.value = None
+
+        class Param:
+            def __init__(self, value=None, values=None, datatype=None, clears_on_filter=False):
+                self.value = value
+                self.values = values
+                self.datatype = datatype
+                self.filter = Filter(self if clears_on_filter else None)
+                self.enabled = True
+
+            @property
+            def valueAsText(self):
+                if self.values:
+                    return ";".join(
+                        str(item[0] if isinstance(item, (list, tuple)) else item)
+                        for item in self.values
+                    )
+                return self.value
+
+        layer_name = "Tiestötiedot - Väylä"
+        parameters = [
+            Param(values=[["Väylä"]], datatype="GPValueTable"),
+            Param(""),
+            Param(values=[layer_name], clears_on_filter=True),
+            Param("Koko Suomi"), Param(None), Param(None), Param("C:\\output.gdb"),
+            Param(""), Param(""), Param(""), Param(""),
+        ]
+        self.tool._all_wfs_layers_cache = {}
+        self.tool._layer_mapping = {}
+        self.tool._runtime_mml_api_key = ""
+        self.tool._runtime_karttapaikka_api_key = ""
+        self.tool._runtime_karttakuva_user = ""
+        self.tool._runtime_karttakuva_pass = ""
+        self.tool._fetch_layer_list = lambda sources: [layer_name]
+        self.tool._get_extent_choices = lambda extent_type: []
+        self.tool._warn = lambda message: None
+        self.tool.updateParameters(parameters)
+        self.assertEqual([layer_name], parameters[2].values)
+        self.assertEqual(1, parameters[2].filter.assignments)
+
+        parameters[8].value = "new-key"
+        self.tool.updateParameters(parameters)
+        self.assertEqual([layer_name], parameters[2].values)
+        self.assertEqual(1, parameters[2].filter.assignments)
+
+        self.tool.updateParameters(parameters)
+        self.assertEqual([layer_name], parameters[2].values)
+        self.assertEqual(1, parameters[2].filter.assignments)
+
     def test_valid_layer_selection_survives_first_source_key_update(self):
         class Filter:
             def __init__(self):
@@ -257,8 +323,10 @@ class ToolboxHelperTests(unittest.TestCase):
             @property
             def valueAsText(self):
                 if self.values:
-                    return ";".join(str(item[0] if isinstance(item, (list, tuple)) else item)
-                                    for item in self.values)
+                    return ";".join(
+                        str(item[0] if isinstance(item, (list, tuple)) else item)
+                        for item in self.values
+                    )
                 return self.value
 
         layer = "Peruskartta (peruskartta) - Kapsi"
@@ -403,14 +471,128 @@ class ToolboxHelperTests(unittest.TestCase):
             self.tool._runtime_map.calls,
         )
 
-    def test_kapsi_uses_service_root_for_scale_dependent_layer(self):
+    def test_kapsi_uses_selected_scale_dependent_layer(self):
         self.assertEqual(
-            "taustakartta",
+            "taustakartta_800k",
             self.tool._kapsi_request_layer(
                 "https://tiles.kartat.kapsi.fi/taustakartta",
                 "taustakartta_800k",
             ),
         )
+
+    def test_kapsi_target_gsd_uses_capabilities_scale_range(self):
+        layer_ref = (
+            "https://tiles.kartat.kapsi.fi/taustakartta|taustakartta_800k"
+        )
+        self.tool._kapsi_layer_scale_ranges = {
+            layer_ref: (500000.0, 1200000.0)
+        }
+        gsd, exact_scale = self.tool._kapsi_target_gsd(
+            layer_ref, "taustakartta_800k"
+        )
+        self.assertTrue(exact_scale)
+        self.assertAlmostEqual(
+            (500000.0 * 1200000.0) ** 0.5 * (0.0254 / 72.0),
+            gsd,
+        )
+
+    def test_kapsi_parent_layer_keeps_automatic_resolution(self):
+        layer_ref = "https://tiles.kartat.kapsi.fi/taustakartta|taustakartta"
+        self.tool._kapsi_layer_scale_ranges = {
+            layer_ref: (None, 7000.0)
+        }
+        self.assertEqual(
+            (20.0, False),
+            self.tool._kapsi_target_gsd(layer_ref, "taustakartta"),
+        )
+
+    def test_kapsi_exact_scale_splits_excessive_tile_count_into_batches(self):
+        batches = self.tool._kapsi_tile_batches(7, 7)
+        batch_sizes = [
+            (row_end - row_start) * (col_end - col_start)
+            for row_start, row_end, col_start, col_end in batches
+        ]
+        self.assertEqual(49, sum(batch_sizes))
+        self.assertEqual([21, 21, 7], batch_sizes)
+        self.assertTrue(all(size <= 25 for size in batch_sizes))
+
+    def test_kapsi_exact_single_tile_is_padded_to_supported_scale(self):
+        axis_min, axis_max = self.tool._kapsi_exact_tile_axis_bounds(
+            300000.0, 310000.0, 14200.0, 0, 1
+        )
+        self.assertAlmostEqual(297900.0, axis_min)
+        self.assertAlmostEqual(312100.0, axis_max)
+        self.assertAlmostEqual(14200.0, axis_max - axis_min)
+
+    def test_kapsi_exact_last_tile_keeps_full_supported_span(self):
+        first = self.tool._kapsi_exact_tile_axis_bounds(
+            300000.0, 325000.0, 14200.0, 0, 2
+        )
+        last = self.tool._kapsi_exact_tile_axis_bounds(
+            300000.0, 325000.0, 14200.0, 1, 2
+        )
+        self.assertEqual((300000.0, 314200.0), first)
+        self.assertEqual((310800.0, 325000.0), last)
+
+    def test_kapsi_exact_grid_bounds_include_padded_narrow_axis(self):
+        extent = types.SimpleNamespace(
+            XMin=1000.0, YMin=2000.0, XMax=1500.0, YMax=11000.0
+        )
+        self.assertEqual(
+            (-1300.0, 2000.0, 3800.0, 11000.0),
+            self.tool._kapsi_exact_grid_bounds(
+                extent, tile_span=5100.0, cols=1, rows=2
+            ),
+        )
+
+    def test_kapsi_capabilities_do_not_list_same_layer_reference_twice(self):
+        class Registry:
+            def get_endpoints(self, source_name):
+                self.assertEqual("Kapsi", source_name)
+                return [
+                    "https://example.test/ortokuva?SERVICE=WMS&REQUEST=GetCapabilities"
+                ]
+
+            def assertEqual(self, expected, actual):
+                assert expected == actual
+
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return b"""<WMS_Capabilities>
+                    <Capability><Layer>
+                        <Name>ortokuva</Name>
+                        <Title>Maanmittauslaitoksen ortokuvat</Title>
+                        <Layer>
+                            <Name>ortokuva</Name>
+                            <Title>ortokuva</Title>
+                        </Layer>
+                        <Layer>
+                            <Name>ortokuva_overlay</Name>
+                            <Title>ortokuva</Title>
+                        </Layer>
+                    </Layer></Capability>
+                </WMS_Capabilities>"""
+
+        self.tool.wfs_registry = Registry()
+        self.tool._kapsi_layer_mapping = {}
+        self.tool._kapsi_layer_scale_ranges = {}
+        self.tool._warn = lambda message: None
+        original_open = MODULE.urllib.request.urlopen
+        MODULE.urllib.request.urlopen = lambda request, timeout=60: Response()
+        try:
+            layers = self.tool._fetch_kapsi_layer_list()
+        finally:
+            MODULE.urllib.request.urlopen = original_open
+
+        references = [self.tool._kapsi_layer_mapping[layer] for layer in layers]
+        self.assertEqual(len(references), len(set(references)))
+        self.assertEqual(2, len(layers))
 
     @unittest.skipUnless(os.name == "nt", "DPAPI is Windows-only")
     def test_dpapi_secret_round_trip_is_not_plaintext(self):

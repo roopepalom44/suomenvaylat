@@ -529,6 +529,7 @@ class VaylaWFSDownloader(object):
         self._kapsi_layer_mapping = {
             "Ortokuva": "https://tiles.kartat.kapsi.fi/ortokuva|ortokuva"
         }
+        self._kapsi_layer_scale_ranges = {}
         self.kapsi_wms_base = "https://tiles.kartat.kapsi.fi/ortokuva"
         self._run_scratch_folder = None
         self._run_scratch_gdb = None
@@ -2930,7 +2931,9 @@ class VaylaWFSDownloader(object):
 
     def _fetch_kapsi_layer_list(self):
         out = []
+        seen_layer_refs = set()
         self._kapsi_layer_mapping.clear()
+        self._kapsi_layer_scale_ranges.clear()
         caps_urls = self.wfs_registry.get_endpoints("Kapsi")
         if not caps_urls:
             raise Exception("Kapsi GetCapabilities-osoite puuttuu.")
@@ -2953,16 +2956,47 @@ class VaylaWFSDownloader(object):
                     continue
                 layer_name = None
                 layer_title = None
+                min_scale = None
+                max_scale = None
                 for child in elem:
                     if child.tag.endswith("Name") and child.text and not layer_name:
                         layer_name = child.text.strip()
                     elif child.tag.endswith("Title") and child.text and not layer_title:
                         layer_title = child.text.strip()
+                    elif child.tag.endswith("MinScaleDenominator") and child.text:
+                        try:
+                            min_scale = float(child.text)
+                        except ValueError:
+                            self._warn(
+                                "[VAROITUS] Kapsi-tason minimimittakaava ei ole numero: {}".format(
+                                    child.text
+                                )
+                            )
+                    elif child.tag.endswith("MaxScaleDenominator") and child.text:
+                        try:
+                            max_scale = float(child.text)
+                        except ValueError:
+                            self._warn(
+                                "[VAROITUS] Kapsi-tason maksimimittakaava ei ole numero: {}".format(
+                                    child.text
+                                )
+                            )
 
                 if layer_name:
                     display_core = layer_title if layer_title else layer_name
                     display = "{} ({})".format(display_core, service_name)
                     layer_ref = "{}|{}".format(service_base, layer_name)
+                    if layer_ref in seen_layer_refs:
+                        if (
+                            layer_ref not in self._kapsi_layer_scale_ranges
+                            and (min_scale is not None or max_scale is not None)
+                        ):
+                            self._kapsi_layer_scale_ranges[layer_ref] = (
+                                min_scale,
+                                max_scale,
+                            )
+                        continue
+                    seen_layer_refs.add(layer_ref)
                     unique_display = display
                     counter = 2
                     while unique_display in self._kapsi_layer_mapping and self._kapsi_layer_mapping[unique_display] != layer_ref:
@@ -2970,6 +3004,8 @@ class VaylaWFSDownloader(object):
                         counter += 1
 
                     self._kapsi_layer_mapping[unique_display] = layer_ref
+                    if min_scale is not None or max_scale is not None:
+                        self._kapsi_layer_scale_ranges[layer_ref] = (min_scale, max_scale)
                     out.append(unique_display)
 
         if not out:
@@ -3066,10 +3102,66 @@ class VaylaWFSDownloader(object):
 
     @staticmethod
     def _kapsi_request_layer(service_base, selected_layer):
-        service_root = os.path.basename(
-            urllib.parse.urlsplit(service_base or "").path.rstrip("/")
+        return selected_layer
+
+    def _kapsi_target_gsd(self, layer_ref, selected_layer):
+        """Palauta valitun mittakaavatason WMS-mittakaavaan sopiva pikselikoko."""
+        if not re.search(r"_\d+(?:k|m)$", selected_layer or "", re.IGNORECASE):
+            return 20.0, False
+
+        scale_range = getattr(self, "_kapsi_layer_scale_ranges", {}).get(layer_ref)
+        if not scale_range:
+            return 20.0, False
+
+        min_scale, max_scale = scale_range
+        if min_scale is not None and max_scale is not None:
+            scale_denominator = math.sqrt(min_scale * max_scale)
+        elif max_scale is not None:
+            scale_denominator = max_scale * 0.75
+        else:
+            scale_denominator = min_scale * 1.25
+        # Kapsin MapServer käyttää oletuksena 72 DPI:tä mittakaavan laskentaan.
+        mapserver_pixel_size_m = 0.0254 / 72.0
+        return max(0.1, scale_denominator * mapserver_pixel_size_m), True
+
+    @staticmethod
+    def _kapsi_exact_tile_axis_bounds(axis_min, axis_max, tile_span, index, count):
+        """Pidä myös reunalaatta täysikokoisena, ettei WMS-taso katoa mittakaavarajalla."""
+        if count == 1:
+            center = (axis_min + axis_max) / 2.0
+            return center - (tile_span / 2.0), center + (tile_span / 2.0)
+        tile_min = min(axis_min + (index * tile_span), axis_max - tile_span)
+        return tile_min, tile_min + tile_span
+
+    def _kapsi_exact_grid_bounds(self, ext, tile_span, cols, rows):
+        x_min, _ = self._kapsi_exact_tile_axis_bounds(
+            ext.XMin, ext.XMax, tile_span, 0, cols
         )
-        return service_root or selected_layer
+        _, x_max = self._kapsi_exact_tile_axis_bounds(
+            ext.XMin, ext.XMax, tile_span, cols - 1, cols
+        )
+        y_min, _ = self._kapsi_exact_tile_axis_bounds(
+            ext.YMin, ext.YMax, tile_span, 0, rows
+        )
+        _, y_max = self._kapsi_exact_tile_axis_bounds(
+            ext.YMin, ext.YMax, tile_span, rows - 1, rows
+        )
+        return x_min, y_min, x_max, y_max
+
+    @staticmethod
+    def _kapsi_tile_batches(cols, rows, batch_size=25):
+        """Jaa laattaruutu peräkkäisiin eriin, joissa on enintään batch_size laattaa."""
+        if cols < 1 or rows < 1 or batch_size < 1:
+            return []
+        cols_per_batch = min(cols, batch_size)
+        rows_per_batch = max(1, batch_size // cols_per_batch)
+        batches = []
+        for row_start in range(0, rows, rows_per_batch):
+            row_end = min(rows, row_start + rows_per_batch)
+            for col_start in range(0, cols, cols_per_batch):
+                col_end = min(cols, col_start + cols_per_batch)
+                batches.append((row_start, row_end, col_start, col_end))
+        return batches
 
     def _download_kapsi_wms_jpeg(self, layer_id: str, boundary_fc: str, workspace: str):
         service_base = self.kapsi_wms_base
@@ -3079,10 +3171,7 @@ class VaylaWFSDownloader(object):
             service_base = parts[0].strip() or self.kapsi_wms_base
             service_layer = parts[1].strip() or layer_id
 
-        # Kapsin Capabilities-listan asteikkotasot (esim. taustakartta_800k)
-        # ovat mittakaavasidonnaisia. Niitä suoraan pyydettäessä MapServer voi
-        # palauttaa tyhjän kuvan. Pyydä palvelun ylätaso, joka valitsee oikean
-        # asteikkotason automaattisesti annetun BBOXin ja pikselikoon perusteella.
+        layer_ref = "{}|{}".format(service_base, service_layer)
         request_layer = self._kapsi_request_layer(service_base, service_layer)
 
         ext = self._boundary_extent_3067(boundary_fc)
@@ -3092,71 +3181,100 @@ class VaylaWFSDownloader(object):
         extent_w = ext.XMax - ext.XMin
         extent_h = ext.YMax - ext.YMin
         tile_px = 4096
-        target_gsd_by_layer = {
-            "taustakartta_4m": 4.0,
-            "taustakartta_5k": 1.5,
-            "taustakartta_8m": 8.0,
-            "taustakartta_40k": 12.0,
-            "taustakartta_80k": 24.0,
-            "maastokartta_50k": 15.0,
-            "maastokartta_100k": 30.0,
-            "maastokartta_250k": 75.0,
-            "maastokartta_500k": 150.0,
-            "yleiskartta_1000k": 280.0,
-            "yleiskartta_2000k": 560.0,
-            "yleiskartta_4500k": 1260.0,
-            "yleiskartta_8000k": 2240.0,
-        }
-        target_gsd = target_gsd_by_layer.get(service_layer.lower(), 20.0)
-        cols = max(1, int(math.ceil(extent_w / (tile_px * target_gsd))))
-        rows = max(1, int(math.ceil(extent_h / (tile_px * target_gsd))))
-        # Cap tiles to avoid excessive requests
-        if cols * rows > 25:
-            scale = math.sqrt(25.0 / (cols * rows))
-            cols = max(1, int(cols * scale))
-            rows = max(1, int(rows * scale))
+        target_gsd, exact_scale = self._kapsi_target_gsd(layer_ref, service_layer)
+        tile_span = tile_px * target_gsd
+        cols = max(1, int(math.ceil(extent_w / tile_span)))
+        rows = max(1, int(math.ceil(extent_h / tile_span)))
+        required_tiles = cols * rows
+        if required_tiles > 25:
+            if exact_scale:
+                self._msg(
+                    "[INFO] Kapsi-taso '{}' jaetaan {} laatan ruudukoksi useaan "
+                    "enintään 25 laatan latauserään.".format(
+                        service_layer, required_tiles
+                    )
+                )
+            else:
+                scale = math.sqrt(25.0 / (cols * rows))
+                cols = max(1, int(cols * scale))
+                rows = max(1, int(rows * scale))
 
         tile_w = extent_w / cols
         tile_h = extent_h / rows
+        output_ext = ext
+        if exact_scale:
+            output_bounds = self._kapsi_exact_grid_bounds(
+                ext, tile_span, cols, rows
+            )
+
+            class _OutputExt:
+                pass
+
+            output_ext = _OutputExt()
+            (
+                output_ext.XMin,
+                output_ext.YMin,
+                output_ext.XMax,
+                output_ext.YMax,
+            ) = output_bounds
 
         raster_dir = self._raster_folder(workspace)
         tile_paths = []
+        tile_batches = self._kapsi_tile_batches(cols, rows)
 
-        for row_i in range(rows):
-            for col_i in range(cols):
-                t_xmin = ext.XMin + col_i * tile_w
-                t_ymin = ext.YMin + row_i * tile_h
-                t_xmax = t_xmin + tile_w
-                t_ymax = t_ymin + tile_h
-                params = {
-                    "FORMAT": "image/jpeg",
-                    "VERSION": "1.1.1",
-                    "SERVICE": "WMS",
-                    "REQUEST": "GetMap",
-                    "LAYERS": request_layer,
-                    "STYLES": "",
-                    "SRS": "EPSG:3067",
-                    "WIDTH": str(tile_px),
-                    "HEIGHT": str(tile_px),
-                    "BBOX": "{},{},{},{}".format(t_xmin, t_ymin, t_xmax, t_ymax),
-                }
-                request_url = "{}?{}".format(service_base, urllib.parse.urlencode(params))
-                raw = self._download_kapsi_image_bytes(request_url)
+        for batch_index, (row_start, row_end, col_start, col_end) in enumerate(
+            tile_batches, 1
+        ):
+            if len(tile_batches) > 1:
+                batch_tiles = (row_end - row_start) * (col_end - col_start)
+                self._msg(
+                    "[INFO] Kapsi-latauserä {}/{} ({} laattaa).".format(
+                        batch_index, len(tile_batches), batch_tiles
+                    )
+                )
+            for row_i in range(row_start, row_end):
+                for col_i in range(col_start, col_end):
+                    if exact_scale:
+                        t_xmin, t_xmax = self._kapsi_exact_tile_axis_bounds(
+                            ext.XMin, ext.XMax, tile_span, col_i, cols
+                        )
+                        t_ymin, t_ymax = self._kapsi_exact_tile_axis_bounds(
+                            ext.YMin, ext.YMax, tile_span, row_i, rows
+                        )
+                    else:
+                        t_xmin = ext.XMin + col_i * tile_w
+                        t_ymin = ext.YMin + row_i * tile_h
+                        t_xmax = t_xmin + tile_w
+                        t_ymax = t_ymin + tile_h
+                    params = {
+                        "FORMAT": "image/jpeg",
+                        "VERSION": "1.1.1",
+                        "SERVICE": "WMS",
+                        "REQUEST": "GetMap",
+                        "LAYERS": request_layer,
+                        "STYLES": "",
+                        "SRS": "EPSG:3067",
+                        "WIDTH": str(tile_px),
+                        "HEIGHT": str(tile_px),
+                        "BBOX": "{},{},{},{}".format(t_xmin, t_ymin, t_xmax, t_ymax),
+                    }
+                    request_url = "{}?{}".format(service_base, urllib.parse.urlencode(params))
+                    raw = self._download_kapsi_image_bytes(request_url)
 
-                tile_name = self._validated_name(
-                    "Kapsi_{}_tile_{}_{}".format(service_layer, row_i, col_i), raster_dir
-                ) + ".jpg"
-                tile_path = os.path.join(raster_dir, tile_name)
-                with open(tile_path, "wb") as handle:
-                    handle.write(raw)
+                    tile_name = self._validated_name(
+                        "Kapsi_{}_tile_{}_{}".format(service_layer, row_i, col_i), raster_dir
+                    ) + ".jpg"
+                    tile_path = os.path.join(raster_dir, tile_name)
+                    with open(tile_path, "wb") as handle:
+                        handle.write(raw)
 
-                # Create a simple Extent-like object for the world file
-                class _TileExt:
-                    pass
-                te = _TileExt()
-                te.XMin, te.YMin, te.XMax, te.YMax = t_xmin, t_ymin, t_xmax, t_ymax
-                self._write_world_file(tile_path, te, tile_px, tile_px)
-                tile_paths.append(tile_path)
+                    # Create a simple Extent-like object for the world file
+                    class _TileExt:
+                        pass
+                    te = _TileExt()
+                    te.XMin, te.YMin, te.XMax, te.YMax = t_xmin, t_ymin, t_xmax, t_ymax
+                    self._write_world_file(tile_path, te, tile_px, tile_px)
+                    tile_paths.append(tile_path)
 
         if len(tile_paths) == 1:
             # Single tile – rename to final output name
@@ -3194,7 +3312,9 @@ class VaylaWFSDownloader(object):
                     mosaic_height = int(getattr(mosaic_desc, "height", tile_px * rows))
                 except Exception:
                     mosaic_width, mosaic_height = tile_px * cols, tile_px * rows
-                self._write_world_file(out_path, ext, mosaic_width, mosaic_height)
+                self._write_world_file(
+                    out_path, output_ext, mosaic_width, mosaic_height
+                )
                 # Clean up tiles
                 for tp in tile_paths:
                     for ext_s in [".jpg", ".jgw", ".prj"]:
@@ -3919,23 +4039,28 @@ class VaylaWFSDownloader(object):
             # Tyhjää tulosta ei saa lisätä oikeana GPString-valintana. Aiempi
             # placeholder päätyi muuten execute-vaiheessa ladattavaksi
             # tasoksi ja aiheutti turhan määritystä ei löytynyt -virheen.
-            parameters[2].filter.list = filtered_layers
             valid_layers = {self._norm(value) for value in filtered_layers}
-            stale_selection = (
-                not filtered_layers
-                or any(
-                    self._is_layer_placeholder(value)
-                    or self._norm(value) not in valid_layers
-                    for value in selected_before
-                )
-            )
-            if stale_selection and selected_before:
-                self._clear_multivalue_param(parameters[2])
-            elif selected_before:
-                # ArcGIS Pro voi tyhjentää GPString-monivalinnan, kun
-                # filter.list asetetaan uudelleen samassa validointikierroksessa.
-                # Palauta juuri valitut, edelleen kelvolliset arvot.
-                self._set_multivalue_param(parameters[2], selected_before)
+            valid_selection = [
+                value for value in selected_before
+                if not self._is_layer_placeholder(value)
+                and self._norm(value) in valid_layers
+            ]
+            try:
+                current_filter = list(parameters[2].filter.list or [])
+            except Exception:
+                current_filter = None
+            filter_changed = current_filter != filtered_layers
+            if filter_changed:
+                parameters[2].filter.list = filtered_layers
+
+            if selected_before:
+                if valid_selection:
+                    # ArcGIS Pro voi tyhjentää GPString-monivalinnan, kun sen
+                    # ValueList päivitetään. Palauta edelleen kelvolliset arvot.
+                    if filter_changed or valid_selection != selected_before:
+                        self._set_multivalue_param(parameters[2], valid_selection)
+                else:
+                    self._clear_multivalue_param(parameters[2])
 
             parameters[4].enabled = False
             parameters[5].enabled = False
@@ -4943,6 +5068,15 @@ class VaylaWFSDownloader(object):
                 "clip_s": 0.0,
             })
 
+        staged_source_counts = {}
+        for output in staged_outputs:
+            source_path = output.get("path")
+            if source_path:
+                source_key = os.path.normcase(os.path.abspath(str(source_path)))
+                staged_source_counts[source_key] = (
+                    staged_source_counts.get(source_key, 0) + 1
+                )
+
         to_add = []
         if staged_outputs:
             self._msg("[INFO] Kaikki käsittely on valmis. Kopioidaan tulokset kohteeseen vasta nyt...")
@@ -4990,7 +5124,10 @@ class VaylaWFSDownloader(object):
             output["final_path"] = final_path
             to_add.append(output)
             local_delete_start = time.perf_counter()
-            self._remove_local_output(output["path"])
+            source_key = os.path.normcase(os.path.abspath(str(output["path"])))
+            staged_source_counts[source_key] -= 1
+            if staged_source_counts[source_key] <= 0:
+                self._remove_local_output(output["path"])
             if output.get("metrics"):
                 output["metrics"].add(
                     "väliaineistojen poistaminen", time.perf_counter() - local_delete_start
