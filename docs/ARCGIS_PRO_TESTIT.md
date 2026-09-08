@@ -59,3 +59,32 @@ Yhdistetyn JSONin tai suoran feature class -kirjoituksen toteutusta ei pidä ott
    projisoidaan EPSG:3067:ään ennen paikallista Clip-vaihetta ja että lokiin
    tulee OGC-yhteenveto. API-avainta ei saa näkyä lokissa, URL:ssa tai
    virheilmoituksessa.
+
+## 7. MML-, Kapsi- ja Karttapaikka-valinnat
+
+1. Valitse **MML**, syötä API-avain ja valitse **Taustakartta** tai
+   **Maastokartta**. Lataa pieni alue ja varmista, että RGB-rasteri tallentuu
+   EPSG:3067-File Geodatabaseen.
+2. Valitse **Kapsi**, valitse listattu taso ja varmista, ettei valinta katoa
+   validointikierroksella. Lataa pieni alue ja tarkista kuvan sijainti kartalla.
+3. Valitse **Karttapaikka**, valitse ensin avoin INSPIRE-taso ja sitten
+   API-avaimella Maastotiedot-taso. Kummankaan valinta ei saa kadota heti.
+
+## 8. MML:n rinnakkaiset taustakarttatasot
+
+1. Avaa **Taustakartat (MML/Kapsi)**, valitse MML ja joko **Taustakartta** tai
+   **Maastokartta**.
+2. Varmista lokista järjestys: MML-tason lataus alkaa, ladatut tiilet `n/N`,
+   kaikkien tiilien lataus valmis, RGB-muunnos alkaa, RGB-mosaiikki valmis ja
+   rasteri tallennettu geodatabaseen.
+3. Tarkista väliaikaishakemistosta testiajon aikana, että jokaisella PNG8-tiilellä
+   on `.pgw` ja `.prj` ja että `MosaicToNewRaster` saa syötteenä vain RGB-TIFFit.
+   Mosaiikin asetusten pitää olla 8-bit unsigned, 3 kaistaa, `FIRST` ja
+   `REJECT`; `MATCH`-menetelmää ei saa käyttää.
+4. Varmista kartalta, että `MML WMS – Taustakartta` tai `MML WMS – Maastokartta`
+   on Taustakartta-ryhmässä näkyvänä ja paikallinen `MML RGB` -rasteri samassa
+   ryhmässä piilotettuna. Tarkista myös, ettei API-avain näy WMS-URL:ssa tai
+   lokissa.
+5. Estä WMS-yhteys testin ajaksi. Lokissa pitää näkyä live-WMS:n lisäyksen
+   epäonnistuminen ja paikallisen rasterin käyttöönotto varatasona; paikallisen
+   rasterin pitää olla näkyvä.

@@ -20,6 +20,31 @@ import ctypes
 from ctypes import wintypes
 
 
+# MML:n avoimen karttakuvan REST-tyylinen WMTS-osoite ja julkiset WMS-osoitteet
+# pidetään tarkoituksella erillään. WMTS-tiilipyynnöt tarvitsevat API-avaimen,
+# mutta Kapsin live-WMS ei saa koskaan periä sitä URL:iin tai otsakkeisiin.
+MML_WMTS_SERVICE_URL = (
+    "https://avoin-karttakuva.maanmittauslaitos.fi/avoin/wmts/1.0.0"
+)
+MML_WMTS_LAYER_IDS = {
+    "Taustakartta": "taustakartta",
+    "Maastokartta": "maastokartta",
+}
+MML_WMS_SERVICE_URLS = {
+    "taustakartta": "https://tiles.kartat.kapsi.fi/taustakartta?",
+    "maastokartta": "https://tiles.kartat.kapsi.fi/peruskartta?",
+}
+MML_WMTS_MATRIX_SET = "ETRS-TM35FIN"
+MML_WMTS_EPSG = 3067
+MML_WMTS_TILE_SIZE = 256
+MML_WMTS_ORIGIN_X = -548576.0
+MML_WMTS_ORIGIN_Y = 8388608.0
+MML_WMTS_MIN_LEVEL = 0
+MML_WMTS_MAX_LEVEL = 13
+MML_WMTS_DEFAULT_LEVEL = 9
+MML_WMTS_MAX_TILES = 256
+
+
 class PhaseMetrics(object):
     """Monotoniseen kelloon perustuva vaihekirjanpito.
 
@@ -117,7 +142,7 @@ class WFSSourceRegistry(object):
             },
             "MML": {
                 "type": "mml_raster",
-                "endpoints": ["https://avoin-paikkatieto.maanmittauslaitos.fi/geoserver/gwc/service/wmts?SERVICE=WMTS&REQUEST=GetCapabilities"],
+                "endpoints": ["https://avoin-karttakuva.maanmittauslaitos.fi/avoin/wmts/1.0.0/WMTSCapabilities.xml"],
                 "description": "MML taustakartat (rasteri)"
             },
             "Kapsi": {
@@ -456,6 +481,7 @@ class VaylaWFSDownloader(object):
         }
 
         self._all_wfs_layers_cache = {}
+        self._layer_mapping_cache = {}
         self._kunnat_cache = None
         self._layer_mapping = {}  # Yhdistää käyttöliittymänimen ja teknisen WFS-nimen
 
@@ -473,6 +499,7 @@ class VaylaWFSDownloader(object):
         # MML taustakartat (samassa UI:ssa)
         self._all_mml_layers_cache = {}
         self._mml_layer_mapping = {}
+        self._mml_layer_mapping_cache = {}
         self._runtime_mml_api_key = ""
         self._runtime_karttapaikka_api_key = ""
         self._credentials_cache = None
@@ -486,8 +513,12 @@ class VaylaWFSDownloader(object):
         self._runtime_project = None
         self._runtime_map = None
         self._runtime_map_loaded = False
-        self.mml_wmts_capabilities = "https://avoin-paikkatieto.maanmittauslaitos.fi/geoserver/gwc/service/wmts?SERVICE=WMTS&REQUEST=GetCapabilities"
-        self.mml_wms_base = "https://avoin-paikkatieto.maanmittauslaitos.fi/geoserver/wms"
+        # WMTS:n capabilities-osoite tarvitaan edelleen yleisen MML-lähteen
+        # tasolistaukseen, mutta taustakartan tiilet haetaan erillisestä
+        # REST-tyylisestä palvelujuuresta alla olevilla vakioilla.
+        self.mml_wmts_capabilities = MML_WMTS_SERVICE_URL + "/WMTSCapabilities.xml"
+        self.mml_wmts_base = MML_WMTS_SERVICE_URL
+        self.mml_wms_services = dict(MML_WMS_SERVICE_URLS)
         self.mml_karttakuva_wmts = "https://karttakuva.maanmittauslaitos.fi/maasto/wmts/1.0.0/WMTSCapabilities.xml"
         self._all_mml_karttakuva_layers_cache = {}
         self._mml_karttakuva_layer_mapping = {}
@@ -695,6 +726,138 @@ class VaylaWFSDownloader(object):
         except Exception as ex:
             return False, str(ex)
 
+    def _active_map_for_background(self):
+        if not self._runtime_map_loaded:
+            self._runtime_project = arcpy.mp.ArcGISProject("CURRENT")
+            self._runtime_map = self._runtime_project.activeMap
+            self._runtime_map_loaded = True
+        if not self._runtime_map:
+            raise Exception("Aktiivista karttaa ei löydy.")
+        return self._runtime_map
+
+    def _find_or_create_group_layer(self, active_map, group_name):
+        for layer in active_map.listLayers():
+            if getattr(layer, "isGroupLayer", False) and getattr(layer, "name", "") == group_name:
+                return layer
+        create_group = getattr(active_map, "createGroupLayer", None)
+        if callable(create_group):
+            return create_group(group_name)
+        # ArcGIS Prossa createGroupLayer on saatavilla, mutta pidetään
+        # testaus-/vanhan projektin varapolku ilman että karttataso katoaa.
+        return None
+
+    @staticmethod
+    def _as_layer_list(value):
+        if value is None:
+            return []
+        if isinstance(value, (list, tuple)):
+            return list(value)
+        return [value]
+
+    def _put_layer_in_group(self, active_map, group_layer, layer):
+        if group_layer is None:
+            return
+        add_to_group = getattr(active_map, "addLayerToGroup", None)
+        if callable(add_to_group):
+            add_to_group(group_layer, layer, "TOP")
+            return
+        group_add = getattr(group_layer, "addLayer", None)
+        if callable(group_add):
+            group_add(layer)
+            return
+            raise Exception("Taustakartta-ryhmään ei voitu lisätä tasoa.")
+
+    def _configure_group_layers(self, active_map, group_layer, layers, layer_name,
+                                visible=True):
+        layers = self._as_layer_list(layers)
+        if not layers:
+            raise Exception("ArcGIS Pro ei palauttanut lisättyä tasoa.")
+        for layer in layers:
+            self._put_layer_in_group(active_map, group_layer, layer)
+        top_layer = layers[0]
+        try:
+            top_layer.name = layer_name
+        except Exception:
+            pass
+        try:
+            top_layer.visible = bool(visible)
+        except Exception:
+            pass
+        return top_layer
+
+    def _add_path_to_group(self, active_map, group_layer, path, layer_name, visible=True,
+                           data_type=None):
+        if data_type:
+            added = active_map.addDataFromPath(path, data_type)
+        else:
+            added = active_map.addDataFromPath(path)
+        if not self._as_layer_list(added):
+            raise Exception("ArcGIS Pro ei palauttanut lisättyä tasoa polusta '{}'.".format(path))
+        # addDataFromPath voi palauttaa palvelutasolle useamman alitason.
+        # Kaikki palautetut tasot siirretään samaan ryhmään; päällimmäisenä
+        # näkyvä taso saa käyttäjälle selkeän nimen.
+        return self._configure_group_layers(
+            active_map, group_layer, added, layer_name, visible
+        )
+
+    def _add_mml_background_layers(self, local_raster_path, layer_id, display_name):
+        """Lisää RGB-varatason ja julkisen WMS:n Taustakartta-ryhmään."""
+        active_map = self._active_map_for_background()
+        group_layer = self._find_or_create_group_layer(active_map, "Taustakartta")
+        if group_layer is not None:
+            try:
+                group_layer.visible = True
+            except Exception:
+                pass
+        local_layer = None
+        try:
+            local_layer = self._add_path_to_group(
+                active_map,
+                group_layer,
+                local_raster_path,
+                "MML RGB – {}".format(display_name),
+                visible=False,
+            )
+        except Exception as ex:
+            self._warn("[VAROITUS] Paikallista MML RGB-rasteria ei lisätty kartalle: {}".format(ex))
+
+        service_url = self.mml_wms_services.get((layer_id or "").strip())
+        if not service_url:
+            if local_layer is not None:
+                local_layer.visible = True
+            raise Exception("MML WMS -palveluosoitetta ei ole tasolle '{}'.".format(layer_id))
+
+        self._msg("[INFO] live-WMS:n lisäys alkaa: {}".format(display_name))
+        try:
+            # Mahdolliset layoutit ja legendat käsitellään ennen tätä kohtaa.
+            # Tässä lisäosassa ei ole erillistä PAGX-tuontia, joten WMS lisätään
+            # vasta kun paikallinen RGB-rasteri on valmis ja ryhmä luotu.
+            layers = active_map.addDataFromPath(service_url, "WMS")
+            wms_layer = self._configure_group_layers(
+                active_map,
+                group_layer,
+                layers,
+                "MML WMS – {}".format(display_name),
+                visible=True,
+            )
+            if local_layer is not None:
+                local_layer.visible = False
+            self._msg("[INFO] live-WMS lisätty: {}".format(display_name))
+            return {"local": local_layer, "wms": wms_layer, "wms_added": True}
+        except Exception as ex:
+            if local_layer is not None:
+                try:
+                    local_layer.visible = True
+                except Exception:
+                    pass
+                self._warn(
+                    "[VAROITUS] live-WMS:n lisäys epäonnistui; paikallinen RGB-rasteri "
+                    "otettiin käyttöön varatasona: {}".format(ex)
+                )
+                self._msg("[INFO] Paikallinen rasteri otettu käyttöön varatasona.")
+                return {"local": local_layer, "wms": None, "wms_added": False}
+            raise
+
     def _parse_source_values(self, value_as_text):
         values = self._parse_multivalue(value_as_text)
         return values if values else ["Väylä"]
@@ -772,6 +935,21 @@ class VaylaWFSDownloader(object):
         except Exception:
             pass
         return cleared
+
+    @staticmethod
+    def _set_multivalue_param(param, values):
+        """Aseta moniarvovalinta takaisin ArcGIS-version tukemalla tavalla."""
+        clean_values = [str(value) for value in (values or []) if str(value or "").strip()]
+        try:
+            param.values = clean_values
+            return True
+        except Exception:
+            pass
+        try:
+            param.value = ";".join(clean_values) if clean_values else None
+            return True
+        except Exception:
+            return False
 
     def _format_layer_label(self, title, source_name):
         clean_title = re.sub(r"\s*\(\s*digiroad\s*\)", "", str(title or ""), flags=re.IGNORECASE)
@@ -2612,27 +2790,42 @@ class VaylaWFSDownloader(object):
         arcpy.management.Delete(lyr)
         return out_fc
 
-    def _fetch_mml_layer_list(self, api_key=""):
-        out = []
-        self._mml_layer_mapping.clear()
-        headers = {"User-Agent": "ArcGISPro-MMLBasemapTool/1.0"}
-        key = (api_key or "").strip()
-        # MML accepts api-key as query param; also send Basic auth as fallback
-        caps_url = self.mml_wmts_capabilities
-        if key:
-            sep = "&" if "?" in caps_url else "?"
-            caps_url = caps_url + sep + "api-key=" + urllib.parse.quote(key, safe="")
-            token = base64.b64encode(f"{key}:".encode("utf-8")).decode("ascii")
-            headers["Authorization"] = f"Basic {token}"
+    @staticmethod
+    def _direct_xml_text(parent, local_name):
+        for child in list(parent):
+            if child.tag.split("}")[-1] == local_name and child.text:
+                return child.text.strip()
+        return None
 
-        req = urllib.request.Request(caps_url, headers=headers)
+    @staticmethod
+    def _mml_auth_headers(api_key, user_agent="ArcGISPro-MMLBasemapTool/1.1"):
+        key = (api_key or "").strip()
+        headers = {"User-Agent": user_agent}
+        if key:
+            token = base64.b64encode("{}:".format(key).encode("utf-8")).decode("ascii")
+            headers["Authorization"] = "Basic {}".format(token)
+        return headers
+
+    def _fetch_mml_capabilities(self, api_key=""):
+        key = (api_key or "").strip()
+        if not key:
+            raise Exception("MML WMTS vaatii API-avaimen.")
+        req = urllib.request.Request(
+            self.mml_wmts_capabilities,
+            headers=self._mml_auth_headers(key),
+        )
         try:
             with urllib.request.urlopen(req, timeout=60) as response:
-                xml_bytes = response.read()
+                return response.read()
         except urllib.error.HTTPError as ex:
-            if ex.code == 401:
-                raise Exception("MML WMTS vaatii API-avaimen (401 Unauthorized).")
+            if ex.code in (401, 403):
+                raise Exception("MML WMTS hylkäsi API-avaimen (HTTP {}).".format(ex.code))
             raise
+
+    def _fetch_mml_layer_list(self, api_key=""):
+        out = []
+        mapping = {}
+        xml_bytes = self._fetch_mml_capabilities(api_key)
         root = ET.fromstring(xml_bytes)
         for elem in root.iter():
             if not elem.tag.endswith("Layer"):
@@ -2646,19 +2839,23 @@ class VaylaWFSDownloader(object):
                     title = child.text.strip()
             if layer_id:
                 display = title if title else layer_id
-                if display in self._mml_layer_mapping and self._mml_layer_mapping[display] != layer_id:
+                if display in mapping and mapping[display] != layer_id:
                     display = f"{display} ({layer_id})"
-                self._mml_layer_mapping[display] = layer_id
+                mapping[display] = layer_id
                 out.append(display)
         out_sorted = sorted(list(set(out)))
         if not out_sorted:
             raise Exception("Yhtään MML-karttatasoa ei löytynyt WMTS capabilities -vastauksesta.")
+        self._mml_layer_mapping = mapping
         return out_sorted
 
     def _get_mml_layers_cached(self, api_key=""):
-        cache_key = "auth:{}".format(self._norm(api_key)) if (api_key or "").strip() else "noauth"
+        cache_key = "auth:{}".format(self._secret_cache_key(api_key)) if (api_key or "").strip() else "noauth"
         if cache_key not in self._all_mml_layers_cache:
             self._all_mml_layers_cache[cache_key] = self._fetch_mml_layer_list(api_key=api_key)
+            self._mml_layer_mapping_cache[cache_key] = dict(self._mml_layer_mapping)
+        else:
+            self._mml_layer_mapping = dict(self._mml_layer_mapping_cache.get(cache_key, {}))
         return self._all_mml_layers_cache[cache_key]
 
     def _fetch_mml_karttakuva_layer_list(self, user="", password=""):
@@ -2809,13 +3006,14 @@ class VaylaWFSDownloader(object):
     def _get_basemap_mode_options(self, provider):
         if provider == "Kapsi":
             return ["Raster (JPEG WMS EPSG:3067)"]
-        return ["Live WMTS", "Raster (GeoTIFF EPSG:3067)"]
+        return ["Paikallinen RGB + live WMS"]
 
     def _write_world_file(self, raster_path, ext, width, height):
         root, extension = os.path.splitext(raster_path)
         world_extension_map = {
             ".jpg": ".jgw",
             ".jpeg": ".jgw",
+            ".png": ".pgw",
             ".tif": ".tfw"
         }
         world_path = root + world_extension_map.get(extension.lower(), ".wld")
@@ -3027,11 +3225,15 @@ class VaylaWFSDownloader(object):
 
     def _boundary_extent_3067(self, boundary_fc):
         desc = arcpy.Describe(boundary_fc)
-        sr = desc.spatialReference
-        if sr and sr.factoryCode == 3067:
-            return self._boundary_extent_from_features(boundary_fc)
+        sr = getattr(desc, "spatialReference", None)
+        if sr and int(getattr(sr, "factoryCode", 0) or 0) == MML_WMTS_EPSG:
+            # WMTS-ruudukon laskenta tehdään nimenomaan latausrajauksen
+            # Describe().extentistä, ei oletetusta projektinäkymästä.
+            return desc.extent
+        if not sr:
+            raise Exception("Latausrajauksen koordinaatistoa ei voitu tunnistaa.")
         tmp = os.path.join(self._scratch_gdb(), f"bnd_3067_{uuid.uuid4().hex[:8]}")
-        arcpy.management.Project(boundary_fc, tmp, arcpy.SpatialReference(3067))
+        arcpy.management.Project(boundary_fc, tmp, arcpy.SpatialReference(MML_WMTS_EPSG))
         ext = arcpy.Describe(tmp).extent
         self._safe_delete(tmp)
         return ext
@@ -3086,38 +3288,429 @@ class VaylaWFSDownloader(object):
         self._safe_delete(src_fc)
         return poly_fc
 
-    def _download_wms_geotiff(self, layer_id: str, boundary_fc: str, workspace: str, api_key: str):
-        ext = self._boundary_extent_3067(boundary_fc)
-        params = {
-            "SERVICE": "WMS",
-            "VERSION": "1.3.0",
-            "REQUEST": "GetMap",
-            "LAYERS": layer_id,
-            "STYLES": "",
-            "CRS": "EPSG:3067",
-            "BBOX": f"{ext.XMin},{ext.YMin},{ext.XMax},{ext.YMax}",
-            "WIDTH": "4096",
-            "HEIGHT": "4096",
-            "FORMAT": "image/geotiff",
-            "TRANSPARENT": "TRUE"
+    def _parse_mml_wmts_layer(self, xml_bytes, layer_id):
+        """Palauta EPSG:3067 WMTS-tason tyyli, formaatti ja matriisit."""
+        root = ET.fromstring(xml_bytes)
+        contents = next((elem for elem in root.iter() if elem.tag.split("}")[-1] == "Contents"), None)
+        if contents is None:
+            raise Exception("MML WMTS -vastauksesta puuttuu Contents.")
+
+        selected_layer = None
+        for elem in list(contents):
+            if elem.tag.split("}")[-1] != "Layer":
+                continue
+            if self._direct_xml_text(elem, "Identifier") == layer_id:
+                selected_layer = elem
+                break
+        if selected_layer is None:
+            raise Exception("MML WMTS -tasoa '{}' ei löytynyt.".format(layer_id))
+
+        formats = [
+            (child.text or "").strip()
+            for child in list(selected_layer)
+            if child.tag.split("}")[-1] == "Format" and child.text
+        ]
+        image_format = next((fmt for fmt in formats if fmt.lower() == "image/png"), None)
+        image_format = image_format or next((fmt for fmt in formats if fmt.lower() in ("image/jpeg", "image/jpg")), None)
+        if not image_format:
+            raise Exception("MML WMTS -tasolla ei ole tuettua PNG/JPEG-kuvaformaattia.")
+
+        style_id = "default"
+        styles = [child for child in list(selected_layer) if child.tag.split("}")[-1] == "Style"]
+        preferred_style = next(
+            (style for style in styles if str(style.attrib.get("isDefault", "")).lower() == "true"),
+            styles[0] if styles else None,
+        )
+        if preferred_style is not None:
+            style_id = self._direct_xml_text(preferred_style, "Identifier") or style_id
+
+        linked_sets = []
+        for child in list(selected_layer):
+            if child.tag.split("}")[-1] == "TileMatrixSetLink":
+                matrix_set_id = self._direct_xml_text(child, "TileMatrixSet")
+                if matrix_set_id:
+                    linked_sets.append(matrix_set_id)
+
+        matrix_sets = {}
+        for elem in list(contents):
+            if elem.tag.split("}")[-1] != "TileMatrixSet":
+                continue
+            matrix_set_id = self._direct_xml_text(elem, "Identifier")
+            if matrix_set_id:
+                matrix_sets[matrix_set_id] = elem
+
+        selected_set_id = None
+        selected_set = None
+        for matrix_set_id in linked_sets:
+            elem = matrix_sets.get(matrix_set_id)
+            if elem is None:
+                continue
+            crs = self._direct_xml_text(elem, "SupportedCRS") or ""
+            if "3067" in crs or "tm35" in matrix_set_id.lower():
+                selected_set_id, selected_set = matrix_set_id, elem
+                break
+        if selected_set is None:
+            raise Exception("MML WMTS -tasolta puuttuu EPSG:3067 TileMatrixSet.")
+
+        matrices = []
+        for elem in list(selected_set):
+            if elem.tag.split("}")[-1] != "TileMatrix":
+                continue
+            try:
+                matrix_id = self._direct_xml_text(elem, "Identifier")
+                scale = float(self._direct_xml_text(elem, "ScaleDenominator"))
+                origin_parts = re.split(r"[\s,]+", self._direct_xml_text(elem, "TopLeftCorner") or "")
+                origin_values = [float(value) for value in origin_parts if value]
+                if len(origin_values) != 2:
+                    continue
+                origin_x, origin_y = origin_values
+                # Osa palveluista noudattaa EPSG-akselijärjestystä (N,E),
+                # vaikka WMTS-laskenta tarvitsee arvot järjestyksessä (E,N).
+                if abs(origin_x) > 2000000 and abs(origin_y) < 2000000:
+                    origin_x, origin_y = origin_y, origin_x
+                matrices.append({
+                    "id": matrix_id,
+                    "resolution": scale * 0.00028,
+                    "origin_x": origin_x,
+                    "origin_y": origin_y,
+                    "tile_width": int(self._direct_xml_text(elem, "TileWidth")),
+                    "tile_height": int(self._direct_xml_text(elem, "TileHeight")),
+                    "matrix_width": int(self._direct_xml_text(elem, "MatrixWidth")),
+                    "matrix_height": int(self._direct_xml_text(elem, "MatrixHeight")),
+                })
+            except (TypeError, ValueError):
+                continue
+        if not matrices:
+            raise Exception("MML WMTS -palvelusta ei löytynyt käyttökelpoisia tiilimatriiseja.")
+        return {
+            "style": style_id,
+            "format": image_format,
+            "matrix_set": selected_set_id,
+            "matrices": matrices,
         }
-        request_url = f"{self.mml_wms_base}?{urllib.parse.urlencode(params)}"
-        token = base64.b64encode(f"{api_key}:".encode("utf-8")).decode("ascii")
+
+    @staticmethod
+    def _wmts_tile_range(matrix, ext):
+        span_x = matrix["tile_width"] * matrix["resolution"]
+        span_y = matrix["tile_height"] * matrix["resolution"]
+        epsilon_x = max(span_x * 1e-10, 1e-8)
+        epsilon_y = max(span_y * 1e-10, 1e-8)
+        col_min = int(math.floor((ext.XMin - matrix["origin_x"]) / span_x))
+        col_max = int(math.floor((ext.XMax - epsilon_x - matrix["origin_x"]) / span_x))
+        row_min = int(math.floor((matrix["origin_y"] - ext.YMax) / span_y))
+        row_max = int(math.floor((matrix["origin_y"] - ext.YMin - epsilon_y) / span_y))
+        col_min = max(0, col_min)
+        row_min = max(0, row_min)
+        col_max = min(matrix["matrix_width"] - 1, col_max)
+        row_max = min(matrix["matrix_height"] - 1, row_max)
+        if col_max < col_min or row_max < row_min:
+            return None
+        return col_min, col_max, row_min, row_max
+
+    def _choose_mml_wmts_matrix(self, matrices, ext, max_tiles=25):
+        candidates = []
+        for matrix in matrices:
+            tile_range = self._wmts_tile_range(matrix, ext)
+            if tile_range is None:
+                continue
+            col_min, col_max, row_min, row_max = tile_range
+            count = (col_max - col_min + 1) * (row_max - row_min + 1)
+            candidates.append((matrix["resolution"], count, matrix, tile_range))
+        if not candidates:
+            raise Exception("Valittu alue ei osu MML WMTS -palvelun tiiliruudukkoon.")
+        candidates.sort(key=lambda item: item[0])
+        for candidate in candidates:
+            if candidate[1] <= max_tiles:
+                return candidate[2], candidate[3]
+        # Karkeinkin taso on turvallisin vaihtoehto hyvin suurelle alueelle.
+        return candidates[-1][2], candidates[-1][3]
+
+    @staticmethod
+    def _mml_wmts_resolution(level):
+        level = int(level)
+        if level < MML_WMTS_MIN_LEVEL or level > MML_WMTS_MAX_LEVEL:
+            raise ValueError("MML WMTS -tason pitää olla välillä 0–13.")
+        return float(2 ** (MML_WMTS_MAX_LEVEL - level))
+
+    @staticmethod
+    def _mml_wmts_tile_range(ext, level):
+        """Laske MML:n kiinteän ETRS-TM35FIN-ruudukon kattavat tiilet."""
+        resolution = VaylaWFSDownloader._mml_wmts_resolution(level)
+        tile_span = MML_WMTS_TILE_SIZE * resolution
+        # Kun rajaus päättyy täsmälleen tiilen reunaan, viimeistä viereistä
+        # tiiltä ei tarvita. Pieni epsilon estää liukulukujen vuoksi syntyvän
+        # ylimääräisen rivi-/sarakepyynnön.
+        epsilon = max(resolution * 1e-10, 1e-8)
+        first_col = int(math.floor((ext.XMin - MML_WMTS_ORIGIN_X) / tile_span))
+        last_col = int(math.floor(
+            (ext.XMax - epsilon - MML_WMTS_ORIGIN_X) / tile_span
+        ))
+        first_row = int(math.floor((MML_WMTS_ORIGIN_Y - ext.YMax) / tile_span))
+        last_row = int(math.floor(
+            (MML_WMTS_ORIGIN_Y - ext.YMin - epsilon) / tile_span
+        ))
+        first_col = max(0, first_col)
+        first_row = max(0, first_row)
+        if last_col < first_col or last_row < first_row:
+            return None
+        return first_row, last_row, first_col, last_col
+
+    @classmethod
+    def _choose_mml_fixed_wmts_level(cls, ext):
+        """Valitse oletustaso 9, mutta harvenna tasoa yli 256 tiilen alueella."""
+        for level in range(MML_WMTS_DEFAULT_LEVEL, MML_WMTS_MIN_LEVEL - 1, -1):
+            tile_range = cls._mml_wmts_tile_range(ext, level)
+            if tile_range is None:
+                continue
+            first_row, last_row, first_col, last_col = tile_range
+            count = (last_row - first_row + 1) * (last_col - first_col + 1)
+            if count <= MML_WMTS_MAX_TILES:
+                return level, tile_range, count
+        raise Exception(
+            "MML WMTS -rajaukselle tarvittaisiin yli 256 tiiltä myös tasolla 0."
+        )
+
+    def _mml_wmts_tile_url(self, layer_id, level, row, column, api_key):
+        key = (api_key or "").strip()
+        if not key:
+            raise Exception("MML WMTS vaatii API-avaimen.")
+        service_url = self.mml_wmts_base.rstrip("/")
+        encoded_key = urllib.parse.quote(key, safe="")
+        return "{}/{}/default/{}/{}/{}/{}.png?api-key={}".format(
+            service_url,
+            layer_id,
+            MML_WMTS_MATRIX_SET,
+            int(level),
+            int(row),
+            int(column),
+            encoded_key,
+        )
+
+    def _download_mml_wmts_tile(self, request_url, api_key):
+        """Lataa yksi PNG8-tiili ja vaadi aidon PNG-tiedoston allekirjoitus."""
         req = urllib.request.Request(
             request_url,
-            headers={"Authorization": f"Basic {token}", "User-Agent": "ArcGISPro-MMLBasemapTool/1.0"}
+            headers=dict(self._mml_auth_headers(api_key), Accept="image/png"),
         )
-        with urllib.request.urlopen(req, timeout=180) as resp:
-            raw = resp.read()
-            ctype = (resp.headers.get("Content-Type", "") or "").lower()
-        if "xml" in ctype or "html" in ctype:
-            raise Exception("WMS palautti virhesisältöä XML/HTML-muodossa GeoTIFFin sijaan.")
+        try:
+            with urllib.request.urlopen(req, timeout=180) as response:
+                raw = response.read()
+        except urllib.error.HTTPError as ex:
+            if ex.code in (401, 403):
+                raise Exception(
+                    "MML WMTS hylkäsi API-avaimen tiiltä ladattaessa (HTTP {}).".format(
+                        ex.code
+                    )
+                )
+            raise
+        if not raw.startswith(b"\x89PNG\r\n\x1a\n"):
+            raise Exception("MML WMTS palautti kuvan sijaan muuta sisältöä kuin PNG:n.")
+        return raw
+
+    @staticmethod
+    def _path_exists(path):
+        try:
+            if arcpy.Exists(path):
+                return True
+        except Exception:
+            pass
+        return os.path.exists(path)
+
+    def _colormap_to_rgb(self, png_path, rgb_path):
+        """Muunna yksi PNG8-tiili RGB-TIFFiksi ennen mosaiikkia."""
+        converters = []
+        image_analysis = getattr(arcpy, "ia", None)
+        spatial_analysis = getattr(arcpy, "sa", None)
+        primary = getattr(image_analysis, "ColormapToRGB", None)
+        fallback = getattr(spatial_analysis, "ColormapToRGB", None)
+        if callable(primary):
+            converters.append(("arcpy.ia.ColormapToRGB", primary))
+        if callable(fallback) and fallback is not primary:
+            converters.append(("arcpy.sa.ColormapToRGB", fallback))
+        if not converters:
+            raise Exception(
+                "ArcGISin ColormapToRGB-toimintoa ei ole saatavilla (arcpy.ia/arcpy.sa)."
+            )
+
+        errors = []
+        for converter_name, converter in converters:
+            try:
+                try:
+                    result = converter(png_path, rgb_path)
+                except TypeError:
+                    # Spatial Analystin joissakin Pro-versioissa funktio
+                    # ottaa vain syöterasterin ja palauttaa Raster-olion.
+                    result = converter(png_path)
+                # Image Analystin ja Spatial Analystin versiot palauttavat eri
+                # tavoin Raster-olion tai kirjoittavat annetun polun suoraan.
+                if result is not None and not self._path_exists(rgb_path):
+                    save = getattr(result, "save", None)
+                    if callable(save):
+                        save(rgb_path)
+                if self._path_exists(rgb_path):
+                    return rgb_path
+                raise Exception("muunnos ei tuottanut RGB-TIFFiä")
+            except Exception as ex:
+                errors.append("{}: {}".format(converter_name, ex))
+                try:
+                    if self._path_exists(rgb_path):
+                        self._safe_delete(rgb_path)
+                except Exception:
+                    pass
+        raise Exception("PNG8-tiilen RGB-muunnos epäonnistui: {}".format("; ".join(errors)))
+
+    def _ensure_raster_file_gdb(self, workspace):
+        """Palauta File GDB rasteritulokselle, luo sellainen tarvittaessa."""
+        if not workspace:
+            try:
+                workspace = arcpy.mp.ArcGISProject("CURRENT").defaultGeodatabase
+            except Exception:
+                workspace = self._scratch_gdb()
+        workspace = os.path.abspath(str(workspace))
+        if workspace.lower().endswith(".gdb"):
+            if not self._path_exists(workspace):
+                raise Exception("Rasterin File Geodatabasea ei löydy: {}".format(workspace))
+            return workspace
+
+        if not os.path.isdir(workspace):
+            raise Exception("Rasterin tallennuskohde ei ole kansio tai File GDB: {}".format(workspace))
+        gdb_name = self._sanitize_table_name("Suomenvaylat_MML") + ".gdb"
+        gdb_path = os.path.join(workspace, gdb_name)
+        if not self._path_exists(gdb_path):
+            arcpy.management.CreateFileGDB(workspace, gdb_name)
+        return gdb_path
+
+    def _download_mml_wmts_geotiff(
+        self, layer_id: str, boundary_fc: str, workspace: str, api_key: str,
+        output_gdb: str = None,
+    ):
+        """Lataa MML:n PNG8-tiilet, muunna ne yksitellen RGB:ksi ja mosaiikoi.
+
+        ``output_gdb`` annetaan MML-taustakartalle, jolloin lopputulos syntyy
+        suoraan File Geodatabaseen. Yleisen MML-rasterilähteen vanha kutsu voi
+        edelleen käyttää väliaikaista kansiota ilman että karttatyönkulku
+        muuttuu.
+        """
+        key = (api_key or "").strip()
+        if not key:
+            raise Exception("MML WMTS vaatii API-avaimen.")
+        layer_id = (layer_id or "").strip()
+        if not layer_id:
+            raise Exception("MML WMTS -tason tunniste puuttuu.")
+
+        # Rajaus otetaan Describe().extentistä. Jos aineisto ei ole
+        # EPSG:3067:ssä, _boundary_extent_3067 projisoi sen ensin väliaikaisesti.
+        ext = self._boundary_extent_3067(boundary_fc)
+        level, tile_range, tile_count = self._choose_mml_fixed_wmts_level(ext)
+        first_row, last_row, first_col, last_col = tile_range
+        resolution = self._mml_wmts_resolution(level)
+        self._msg(
+            "[INFO] MML-tason lataus alkaa: {} (taso {}, {} tiiltä).".format(
+                layer_id, level, tile_count
+            )
+        )
+
         raster_dir = self._raster_folder(workspace)
-        out_name = self._validated_name(f"MML_{layer_id}_raster", raster_dir) + ".tif"
-        out_tif = os.path.join(raster_dir, out_name)
-        with open(out_tif, "wb") as f:
-            f.write(raw)
-        return out_tif
+        if not os.path.isdir(raster_dir):
+            os.makedirs(raster_dir, exist_ok=True)
+        temporary_dir = tempfile.mkdtemp(prefix="mml_wmts_tiles_", dir=raster_dir)
+        png_paths = []
+        rgb_paths = []
+        tile_span = MML_WMTS_TILE_SIZE * resolution
+
+        try:
+            downloaded = 0
+            for row in range(first_row, last_row + 1):
+                for column in range(first_col, last_col + 1):
+                    request_url = self._mml_wmts_tile_url(
+                        layer_id, level, row, column, key
+                    )
+                    raw = self._download_mml_wmts_tile(request_url, key)
+                    tile_stem = self._sanitize_table_name(
+                        "MML_{}_L{}_R{}_C{}".format(layer_id, level, row, column)
+                    )
+                    png_path = os.path.join(temporary_dir, tile_stem + ".png")
+                    with open(png_path, "wb") as handle:
+                        handle.write(raw)
+
+                    class _TileExtent:
+                        pass
+
+                    tile_ext = _TileExtent()
+                    tile_ext.XMin = MML_WMTS_ORIGIN_X + column * tile_span
+                    tile_ext.XMax = tile_ext.XMin + tile_span
+                    tile_ext.YMax = MML_WMTS_ORIGIN_Y - row * tile_span
+                    tile_ext.YMin = tile_ext.YMax - tile_span
+                    self._write_world_file(
+                        png_path, tile_ext, MML_WMTS_TILE_SIZE, MML_WMTS_TILE_SIZE
+                    )
+                    png_paths.append((png_path, tile_ext))
+                    downloaded += 1
+                    self._msg(
+                        "[EDISTYMINEN] Ladatut tiilet {}/{}".format(
+                            downloaded, tile_count
+                        )
+                    )
+
+            self._msg(
+                "[INFO] Kaikkien tiilien lataus valmis: {}/{}".format(
+                    downloaded, tile_count
+                )
+            )
+            self._msg("[INFO] RGB-muunnos alkaa: {} PNG8-tiiltä.".format(len(png_paths)))
+            for png_path, tile_ext in png_paths:
+                rgb_path = os.path.splitext(png_path)[0] + "_RGB.tif"
+                self._colormap_to_rgb(png_path, rgb_path)
+                # Varmista world/prj myös ColormapToRGB:n versiosta riippumatta.
+                self._write_world_file(
+                    rgb_path, tile_ext, MML_WMTS_TILE_SIZE, MML_WMTS_TILE_SIZE
+                )
+                rgb_paths.append(rgb_path)
+
+            if not rgb_paths:
+                raise Exception("MML WMTS ei palauttanut yhtään tiiltä.")
+
+            output_workspace = output_gdb or raster_dir
+            is_gdb = str(output_workspace).lower().endswith(".gdb")
+            output_stem = "MML_{}_RGB".format(layer_id)
+            if is_gdb:
+                output_base = self._unique_output_name(output_stem, output_workspace)
+            else:
+                output_base = self._validated_name(output_stem, output_workspace)
+                suffix = 1
+                while os.path.exists(os.path.join(output_workspace, output_base + ".tif")):
+                    output_base = "{}_{}".format(
+                        self._validated_name(output_stem, output_workspace), suffix
+                    )
+                    suffix += 1
+            output_name = output_base if is_gdb else output_base + ".tif"
+            final_path = os.path.join(output_workspace, output_name)
+            self._msg("[INFO] RGB-mosaiikki alkaa: {} RGB-TIFFiä.".format(len(rgb_paths)))
+
+            # Tärkeää: MosaicToNewRaster saa vain RGB-TIFFit. PNG8-kuvia ei
+            # koskaan yhdistetä suoraan, koska niiden väripaletit voivat erota.
+            arcpy.management.MosaicToNewRaster(
+                rgb_paths,
+                output_workspace,
+                output_name,
+                coordinate_system_for_the_raster=arcpy.SpatialReference(MML_WMTS_EPSG),
+                pixel_type="8_BIT_UNSIGNED",
+                number_of_bands=3,
+                cellsize=resolution,
+                mosaic_method="FIRST",
+                mosaic_colormap_mode="REJECT",
+            )
+            self._msg("[INFO] RGB-mosaiikki valmis: {}".format(final_path))
+            if is_gdb:
+                self._msg("[INFO] Rasteri tallennettu geodatabaseen: {}".format(final_path))
+            return final_path
+        finally:
+            # PNG:t, world/prj-tiedostot ja väliaikaiset RGB-TIFFit ovat vain
+            # ajon välivaiheita; lopullinen rasteri jää output_workspaceen.
+            try:
+                shutil.rmtree(temporary_dir, ignore_errors=True)
+            except Exception:
+                pass
 
     # ---------------------------
     # UI / PARAMETERS
@@ -3258,6 +3851,8 @@ class VaylaWFSDownloader(object):
 
     def updateParameters(self, parameters):
         try:
+            if not isinstance(getattr(self, "_layer_mapping_cache", None), dict):
+                self._layer_mapping_cache = {}
             selected_before = self._parse_multivalue_param(parameters[2])
             source_values = self._source_values_from_param(parameters[0])
             layer_search = parameters[1].valueAsText or ""
@@ -3300,7 +3895,6 @@ class VaylaWFSDownloader(object):
                 self._secret_cache_key(karttakuva_user),
                 self._secret_cache_key(karttakuva_pass)
             )
-            source_key_changed = source_key != getattr(self, "_last_layer_source_key", None)
             self._last_layer_source_key = source_key
             if source_key not in self._all_wfs_layers_cache:
                 fetch_error = None
@@ -3310,8 +3904,12 @@ class VaylaWFSDownloader(object):
                     fetch_error = fe
                     self._all_wfs_layers_cache[source_key] = []
                 if fetch_error:
+                    self._layer_mapping = {}
                     self._warn("[VAROITUS] Tasojen haku epäonnistui ({}): {}".format(
                         ", ".join(source_values), fetch_error))
+                self._layer_mapping_cache[source_key] = dict(self._layer_mapping)
+            else:
+                self._layer_mapping = dict(self._layer_mapping_cache.get(source_key, {}))
 
             filtered_layers = self._all_wfs_layers_cache.get(source_key, [])
             if layer_search.strip():
@@ -3325,7 +3923,6 @@ class VaylaWFSDownloader(object):
             valid_layers = {self._norm(value) for value in filtered_layers}
             stale_selection = (
                 not filtered_layers
-                or source_key_changed
                 or any(
                     self._is_layer_placeholder(value)
                     or self._norm(value) not in valid_layers
@@ -3334,6 +3931,11 @@ class VaylaWFSDownloader(object):
             )
             if stale_selection and selected_before:
                 self._clear_multivalue_param(parameters[2])
+            elif selected_before:
+                # ArcGIS Pro voi tyhjentää GPString-monivalinnan, kun
+                # filter.list asetetaan uudelleen samassa validointikierroksessa.
+                # Palauta juuri valitut, edelleen kelvolliset arvot.
+                self._set_multivalue_param(parameters[2], selected_before)
 
             parameters[4].enabled = False
             parameters[5].enabled = False
@@ -3781,6 +4383,10 @@ class VaylaWFSDownloader(object):
                 "tulosnimen validointi", time.perf_counter() - output_name_start
             )
             proposed_output_path = self._dataset_output_path(workspace, proposed_output_name)
+            # Kaikki ominaisuudet, jotka päätyvät yhteiseen staged_outputs-
+            # yhteenvetoon, tarvitsevat hakutavan. OSM ei kulje WFS/OGC-haaran
+            # kautta, joten alusta arvo ennen lähdekohtaista käsittelyä.
+            requested_mode = "paikallinen aineistohaku"
             if layer_kind == "wfs":
                 if is_heavy:
                     requested_mode = "kuntakohtainen BBOX + paikallinen Clip"
@@ -3816,6 +4422,8 @@ class VaylaWFSDownloader(object):
                     self._msg("  [TASO] Lopputulos: {}".format(proposed_output_path))
 
             if layer_kind == "osm":
+                requested_mode = "OpenStreetMap Overpass API + paikallinen Clip"
+                self._msg("  [TASO] Hakutapa: {}".format(requested_mode))
                 self._msg("  [INFO] Haetaan OpenStreetMap-aineistoa: {}".format(layer_ui_name))
                 try:
                     chunks, total_found, used_grid = self._fetch_osm_feature_chunks(layer_clean, boundary_fc)
@@ -3829,7 +4437,7 @@ class VaylaWFSDownloader(object):
                     continue
                 download_start = time.perf_counter()
                 try:
-                    out_tif = self._download_wms_geotiff(
+                    out_tif = self._download_mml_wmts_geotiff(
                         layer_clean, boundary_fc, self._scratch_folder(), mml_api_key.strip()
                     )
                 except Exception as ex:
@@ -4579,10 +5187,24 @@ class MMLBasemapDownloader(VaylaWFSDownloader):
     def __init__(self):
         super().__init__()
         self.label = "Taustakartat (MML/Kapsi)"
-        self.description = "Tuo MML- tai Kapsi-taustakarttoja live- tai rasterimuodossa."
+        self.description = "Tuo MML:n RGB-vararasterin ja julkisen live-WMS-taustakartan."
         self.canRunInBackground = False
         # Kaikki MML-/WMS-attribuutit ja apumetodit peritään emoluokasta
         # (VaylaWFSDownloader); vain UI ja execute eroavat.
+
+    def _get_basemap_layers_cached(self, provider):
+        if provider == "MML":
+            # Taustakarttatyökalun julkinen WMS-pari ja paikallisen WMTS:n
+            # REST-tason tunnisteet ovat vakioituja. Yleinen WFS-työkalu voi
+            # edelleen käyttää capabilities-pohjaista MML-listaa erikseen.
+            self._mml_layer_mapping = dict(MML_WMTS_LAYER_IDS)
+            return list(MML_WMTS_LAYER_IDS.keys())
+        return super()._get_basemap_layers_cached(provider)
+
+    def _get_basemap_mode_options(self, provider):
+        if provider == "MML":
+            return ["Paikallinen RGB + live WMS"]
+        return super()._get_basemap_mode_options(provider)
 
     def getParameterInfo(self):
         p_provider = arcpy.Parameter(
@@ -4624,8 +5246,8 @@ class MMLBasemapDownloader(VaylaWFSDownloader):
             parameterType="Required",
             direction="Input"
         )
-        p_mode.filter.list = ["Live WMTS", "Raster (GeoTIFF EPSG:3067)"]
-        p_mode.value = "Live WMTS"
+        p_mode.filter.list = ["Paikallinen RGB + live WMS"]
+        p_mode.value = "Paikallinen RGB + live WMS"
 
         p_extent_type = arcpy.Parameter(
             displayName="Aluerajauksen taso",
@@ -4667,7 +5289,7 @@ class MMLBasemapDownloader(VaylaWFSDownloader):
         p_custom_layer.enabled = False
 
         p_workspace = arcpy.Parameter(
-            displayName="Tallennuskohde (GDB tai kansio)",
+            displayName="Tallennuskohde (File GDB tai kansio)",
             name="workspace",
             datatype="DEWorkspace",
             parameterType="Optional",
@@ -4680,9 +5302,9 @@ class MMLBasemapDownloader(VaylaWFSDownloader):
             pass
 
         p_api_key = arcpy.Parameter(
-            displayName="MML API-avain (pakollinen vain MML rasterille)",
+            displayName="MML API-avain",
             name="api_key",
-            datatype="GPString",
+            datatype="GPStringHidden",
             parameterType="Optional",
             direction="Input"
         )
@@ -4694,6 +5316,7 @@ class MMLBasemapDownloader(VaylaWFSDownloader):
         try:
             provider = parameters[0].valueAsText or "MML"
             map_search = parameters[1].valueAsText or ""
+            selected_map = parameters[2].valueAsText
             extent_type = parameters[4].valueAsText
             api_key = (parameters[8].valueAsText or "").strip()
             self._runtime_mml_api_key = api_key
@@ -4706,6 +5329,11 @@ class MMLBasemapDownloader(VaylaWFSDownloader):
                 q = self._norm(map_search)
                 filtered = [x for x in all_maps if q in self._norm(x)]
             parameters[2].filter.list = filtered if filtered else ["(ei osumia – tyhjennä haku)"]
+            if selected_map and selected_map in filtered:
+                # filter.list-päivitys voi muuten nollata valinnan ArcGIS Prossa.
+                parameters[2].value = selected_map
+            elif selected_map and selected_map not in filtered:
+                parameters[2].value = None
             parameters[3].filter.list = mode_options
             if mode not in mode_options:
                 parameters[3].value = mode_options[0]
@@ -4720,7 +5348,7 @@ class MMLBasemapDownloader(VaylaWFSDownloader):
                 parameters[6].enabled = True
                 parameters[5].value = None
 
-            parameters[8].enabled = (provider == "MML" and (parameters[3].valueAsText or mode_options[0]) == "Raster (GeoTIFF EPSG:3067)")
+            parameters[8].enabled = (provider == "MML")
         except Exception as e:
             self._warn(f"updateParameters epäonnistui: {e}")
 
@@ -4729,7 +5357,7 @@ class MMLBasemapDownloader(VaylaWFSDownloader):
         extent_type = parameters[4].valueAsText
         extent_value_text = parameters[5].valueAsText
         custom_layer = parameters[6].valueAsText
-        mode = parameters[3].valueAsText or "Live WMTS"
+        mode = parameters[3].valueAsText or "Paikallinen RGB + live WMS"
         api_key = parameters[8].valueAsText or ""
 
         vals = self._parse_multivalue(extent_value_text)
@@ -4743,8 +5371,8 @@ class MMLBasemapDownloader(VaylaWFSDownloader):
         else:
             parameters[6].clearMessage()
 
-        if provider == "MML" and mode == "Raster (GeoTIFF EPSG:3067)" and not api_key.strip():
-            parameters[8].setErrorMessage("Rasterilataus vaatii MML API-avaimen.")
+        if provider == "MML" and not api_key.strip():
+            parameters[8].setErrorMessage("MML-karttatasojen listaus ja lataus vaativat API-avaimen.")
         else:
             parameters[8].clearMessage()
 
@@ -4754,7 +5382,7 @@ class MMLBasemapDownloader(VaylaWFSDownloader):
 
         provider = parameters[0].valueAsText or "MML"
         map_display = parameters[2].valueAsText
-        mode = parameters[3].valueAsText or "Live WMTS"
+        mode = parameters[3].valueAsText or "Paikallinen RGB + live WMS"
         extent_type = parameters[4].valueAsText
         extent_vals = self._parse_multivalue(parameters[5].valueAsText)
         custom_layer = parameters[6].valueAsText
@@ -4769,11 +5397,11 @@ class MMLBasemapDownloader(VaylaWFSDownloader):
             except Exception:
                 workspace = self._scratch_gdb()
 
-        if not map_display:
+        if not map_display or self._is_layer_placeholder(map_display):
             raise Exception("Valitse taustakartta.")
         layer_id = self._get_basemap_layer_id(provider, map_display)
         boundary_fc = None
-        if mode != "Live WMTS":
+        if provider in ("MML", "Kapsi"):
             if extent_type == "Oma aineisto (Polygon/Polyline)":
                 boundary_fc = self._prepare_custom_boundary(custom_layer)
             else:
@@ -4782,33 +5410,18 @@ class MMLBasemapDownloader(VaylaWFSDownloader):
                 )
 
         try:
-            if provider == "MML" and mode == "Live WMTS":
-                wmts_creds = self._find_wmts_credentials_file()
-                secured = None
-                try:
-                    if wmts_creds:
-                        secured = arcpy.ImportCredentials([wmts_creds])
-                    out_layer = f"wmts_{uuid.uuid4().hex[:8]}"
-                    arcpy.management.MakeWMTSLayer(self.mml_wmts_capabilities, layer_id, out_layer)
-                    tmp_lyrx = os.path.join(self._scratch_folder(), f"{out_layer}.lyrx")
-                    arcpy.management.SaveToLayerFile(out_layer, tmp_lyrx, "ABSOLUTE")
-                    self._add_to_map(tmp_lyrx)
-                    self._safe_delete(out_layer)
-                finally:
-                    if secured:
-                        try:
-                            arcpy.ClearCredentials(secured)
-                        except Exception:
-                            pass
-            elif provider == "MML":
+            if provider == "MML":
                 if not api_key.strip():
                     raise Exception("Rasterilataus vaatii MML API-avaimen.")
-                out_tif = self._download_wms_geotiff(
-                    layer_id, boundary_fc, self._scratch_folder(), api_key.strip()
+                raster_gdb = self._ensure_raster_file_gdb(workspace)
+                final_tif = self._download_mml_wmts_geotiff(
+                    layer_id,
+                    boundary_fc,
+                    self._scratch_folder(),
+                    api_key.strip(),
+                    output_gdb=raster_gdb,
                 )
-                final_tif = self._copy_raster_to_workspace(out_tif, workspace)
-                self._add_to_map(final_tif)
-                self._remove_local_output(out_tif)
+                self._add_mml_background_layers(final_tif, layer_id, map_display)
             else:
                 out_jpg = self._download_kapsi_wms_jpeg(
                     layer_id, boundary_fc, self._scratch_folder()

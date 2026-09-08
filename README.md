@@ -5,7 +5,9 @@ ArcGIS Pro -laajennus Suomenväylät-aineistojen lataamiseen WFS-rajapinnoista.
 ## Vaatimukset
 
 
-`Config.daml` ja C#-lähdekoodi käyttävät täysin kvalifioituja tyyppejä `suomenvaylat.Module1` ja `suomenvaylat.OpenSuomenvaylatToolButton`.
+`Config.daml` käyttää oletusnimitilaa `suomenvaylat` ja luokkien lyhyitä nimiä
+`Module1` ja `OpenSuomenvaylatToolButton`. ArcGIS Pro ratkaisee ne tällöin
+tyypeiksi `suomenvaylat.Module1` ja `suomenvaylat.OpenSuomenvaylatToolButton`.
 
 Jos ArcGIS Pro näyttää edelleen `TypeNotFound`-virheen, aja ensin paketin diagnostiikka:
 
@@ -17,13 +19,18 @@ Skriptin tuloksesta olennaiset rivit ovat `Assembly identity`, `Referenced ArcGI
 
 ## Manuaalinen paketointi ilman MSBuildia
 
-Kun C#-osa on jo käännetty esimerkiksi ArcGIS Pron AssemblyCacheen, paketoi nykyiset lähdetiedostot yhdellä PowerShell-komennolla:
+Kun C#-osa on jo käännetty build-kansioon, paketoi nykyiset lähdetiedostot yhdellä PowerShell-komennolla:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\package-addin.ps1
 ```
 
-Skripti etsii ensin `suomenvaylat.dll`-tiedoston bin-kansiosta ja sen jälkeen ArcGIS Pron AssemblyCachesta. Se rakentaa uuden `bin\Debug\net8.0-windows\suomenvaylat.esriAddInX`-paketin tyhjästä, sisältää Python-työkalun ja resurssit sekä validoi paketin sisällön. Paketti käyttää versiota `1.0.4`, jotta ArcGIS Pro tunnistaa sen päivitykseksi.
+Skripti käyttää vain käännöksen build-kansiossa olevaa DLL:ää eikä koskaan valitse
+automaattisesti ArcGIS Pron AssemblyCache-kopiota. Se rakentaa uuden
+`bin\Debug\net8.0-windows\suomenvaylat.esriAddInX`-paketin tyhjästä, sijoittaa
+DLL:n ja työkalut viralliseen `Install\`-hakemistoon, tarkistaa CLR-tyypit ja
+validoi paketin sisällön. Paketti käyttää versiota `1.0.6`, jotta ArcGIS Pro
+tunnistaa sen päivitykseksi.
 
 Jos DLL on muualla, anna sen polku:
 
@@ -31,11 +38,35 @@ Jos DLL on muualla, anna sen polku:
 powershell -ExecutionPolicy Bypass -File .\package-addin.ps1 -AssemblyPath "C:\polku\suomenvaylat.dll"
 ```
 
-Skripti ei käännä C#-lähdekoodia. Se on tarkoitettu erityisesti Python-työkalun ja sen resurssien päivittämiseen ilman MSBuildia. C#-lähdekoodin muutokset vaativat erillisen .NET/ArcGIS Pro SDK -käännöksen.
+Jos uutta käännöstä ei voida tehdä, olemassa olevaa AssemblyCache-DLL:ää voi
+käyttää vain, jos se sisältää nykyiset tyypit. Paketoitava tiedosto voidaan
+antaa suoraan näin:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\package-addin-fixed.ps1 `
+  -AssemblyPath "$env:LOCALAPPDATA\ESRI\ArcGISPro\AssemblyCache\{2aea3c93-c012-4ed4-b416-6b3a844e0204}\suomenvaylat.dll"
+```
+
+Skripti tarkistaa assemblyn nimen ja odotetut tyypit ennen paketointia.
+
+Skripti ei käännä C#-lähdekoodia. Tee ArcGIS Pro SDK -koneella puhdas
+uudelleenkäännös Visual Studion täydellä MSBuildilla ja paketoi heti perään:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\build-addin.ps1 -Configuration Debug
+```
+
+C#-lähdekoodin muutoksia ei saa paketoida vanhan DLL:n kanssa. Jos käännös on
+eri kansiossa, anna juuri uudelleen käännetyn DLL:n polku `-AssemblyPath`-parametrilla.
+
+`dotnet build` ei sovellu tämän ArcGIS Pro SDK -projektin kääntämiseen, koska
+Esrin nykyinen `Esri.ProApp.SDK.Desktop.targets` käyttää täyden MSBuildin
+`CodeTaskFactory`-tehtävää. Jos MSBuild löytyy epätyypillisestä paikasta, anna
+polku parametrilla `-MSBuildPath`.
 
 ### TypeNotFound / command unavailable
 
-Jos ArcGIS Pro näyttää virheen `TypeNotFound` tai ilmoittaa komennon olevan unavailable, paketin DLL on yleensä vanha, väärä tai se ei sisällä nykyistä painiketyyppiä. `package-addin.ps1` tarkistaa nyt assemblyn nimen ja yrittää lukea siitä tyypit `suomenvaylat.Module1` sekä `suomenvaylat.OpenSuomenvaylatToolButton`. Lisäksi Add-in-versiona on `1.0.4`, jotta ArcGIS Pro tunnistaa päivityksen.
+Jos ArcGIS Pro näyttää virheen `TypeNotFound` tai ilmoittaa komennon olevan unavailable, paketissa on ollut vanha/väärä DLL tai väärä AddInX-rakenne. `package-addin.ps1` tarkistaa nyt assemblyn nimen, varmistaa että DLL sisältää tyypit `suomenvaylat.Module1` ja `suomenvaylat.OpenSuomenvaylatToolButton`, sekä pakottaa runtime-tiedostot `Install\`-hakemistoon. Add-in-versiona on `1.0.6`, jotta ArcGIS Pro tunnistaa tämän päivitykseksi.
 
 Jos tarkistus ilmoittaa väärästä DLL:stä, käännä C#-projekti ArcGIS Pro SDK:n kanssa ja anna tulos suoraan:
 
@@ -60,6 +91,23 @@ WFS- ja rasterikäsittely tehdään ajokohtaisessa paikallisessa scratch-geodata
 `JSONToFeatures`-toteutusta ei ole vaihdettu ilman ArcGIS Prossa tehtävää saman aineiston vertailutestiä. Uusi loki antaa tarvittavat vertailuluvut nykyiselle sivukohtaiselle toteutukselle ennen mahdollista yhdistetyn JSONin tai suoran feature class -kirjoituksen kokeilua.
 
 ## Karttapaikka / Maanmittauslaitos
+
+MML-taustakartat käyttävät Maanmittauslaitoksen nykyistä avointa
+Karttakuvapalvelua osoitteessa `avoin-karttakuva.maanmittauslaitos.fi`.
+Taustakarttatyökalun MML-valinnat ovat **Taustakartta** ja **Maastokartta**.
+WMTS-tiilet haetaan API-avaimella sekä URL-parametrilla että HTTP Basic
+otsakkeella. Jokainen PNG8-tiili muunnetaan ensin omaksi RGB-TIFFikseen
+`ColormapToRGB`-toiminnolla; vasta sen jälkeen RGB-TIFFit mosaiikoidaan
+EPSG:3067-File Geodatabase -rasteriksi. PNG8-tiiliä ei mosaiikoida suoraan.
+
+Kartalle lisätään paikallinen RGB-rasteri ja julkinen Kapsin live-WMS samaan
+`Taustakartta`-ryhmään. Live-WMS on oletuksena näkyvissä ja paikallinen rasteri
+piilotettuna. Jos WMS:n lisääminen epäonnistuu, paikallinen rasteri otetaan
+automaattisesti käyttöön varatasona. API-avainta ei kirjoiteta WMS-osoitteeseen.
+
+ArcGIS Pron tasovalinta säilytetään suodatinlistan päivityksen yli, jos valittu
+taso kuuluu edelleen valittuihin lähteisiin. Tämä koskee muun muassa Kapsi- ja
+Karttapaikka-tasoja.
 
 Karttapaikka-lähde käyttää nykyisiä Maanmittauslaitoksen INSPIRE WFS -palveluja. Vanhat
 `avoin-karttakuva.maanmittauslaitos.fi/inspire/wfs`- ja

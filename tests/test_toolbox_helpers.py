@@ -101,6 +101,18 @@ class ToolboxHelperTests(unittest.TestCase):
             registry.get_ogc_endpoint("Karttapaikka"),
         )
 
+    def test_mml_uses_current_open_wmts_endpoint(self):
+        registry = MODULE.WFSSourceRegistry()
+        self.assertEqual(
+            ["https://avoin-karttakuva.maanmittauslaitos.fi/avoin/wmts/1.0.0/WMTSCapabilities.xml"],
+            registry.get_endpoints("MML"),
+        )
+
+    def test_mml_auth_uses_basic_header_without_putting_key_in_url(self):
+        headers = self.tool._mml_auth_headers("CaseSensitive-Key")
+        self.assertIn("Authorization", headers)
+        self.assertNotIn("CaseSensitive-Key", headers["Authorization"])
+
     def test_karttapaikka_auth_is_only_sent_to_ogc_api(self):
         self.tool._runtime_karttapaikka_api_key = "test-key"
         self.assertEqual(
@@ -230,6 +242,167 @@ class ToolboxHelperTests(unittest.TestCase):
         )
         self.assertEqual(["", "new-key"], calls)
 
+    def test_valid_layer_selection_survives_first_source_key_update(self):
+        class Filter:
+            def __init__(self):
+                self.list = []
+
+        class Param:
+            def __init__(self, value=None, values=None):
+                self.value = value
+                self.values = values
+                self.filter = Filter()
+                self.enabled = True
+
+            @property
+            def valueAsText(self):
+                if self.values:
+                    return ";".join(str(item[0] if isinstance(item, (list, tuple)) else item)
+                                    for item in self.values)
+                return self.value
+
+        layer = "Peruskartta (peruskartta) - Kapsi"
+        self.tool._all_wfs_layers_cache = {}
+        self.tool._layer_mapping = {}
+        self.tool._runtime_mml_api_key = ""
+        self.tool._runtime_karttapaikka_api_key = ""
+        self.tool._runtime_karttakuva_user = ""
+        self.tool._runtime_karttakuva_pass = ""
+        self.tool._fetch_layer_list = lambda sources: [layer]
+        self.tool._get_extent_choices = lambda extent_type: []
+        self.tool._warn = lambda message: None
+        parameters = [
+            Param(values=[["Kapsi"]]), Param(""), Param(value=layer, values=[layer]),
+            Param(None), Param(None), Param(None), Param(None),
+            Param(""), Param(""), Param(""), Param(""),
+        ]
+
+        self.tool.updateParameters(parameters)
+
+        self.assertEqual([layer], parameters[2].values)
+        self.assertEqual([layer], parameters[2].filter.list)
+
+    def test_wmts_matrix_parser_and_selection_use_epsg3067(self):
+        xml = b'''<?xml version="1.0"?>
+        <Capabilities xmlns="http://www.opengis.net/wmts/1.0"
+                      xmlns:ows="http://www.opengis.net/ows/1.1">
+          <Contents>
+            <Layer>
+              <ows:Identifier>taustakartta</ows:Identifier>
+              <Style isDefault="true"><ows:Identifier>default</ows:Identifier></Style>
+              <Format>image/png</Format>
+              <TileMatrixSetLink><TileMatrixSet>ETRS-TM35FIN</TileMatrixSet></TileMatrixSetLink>
+            </Layer>
+            <TileMatrixSet>
+              <ows:Identifier>ETRS-TM35FIN</ows:Identifier>
+              <ows:SupportedCRS>urn:ogc:def:crs:EPSG::3067</ows:SupportedCRS>
+              <TileMatrix>
+                <ows:Identifier>0</ows:Identifier>
+                <ScaleDenominator>3571428.5714285714</ScaleDenominator>
+                <TopLeftCorner>-548576 8388608</TopLeftCorner>
+                <TileWidth>256</TileWidth><TileHeight>256</TileHeight>
+                <MatrixWidth>8</MatrixWidth><MatrixHeight>8</MatrixHeight>
+              </TileMatrix>
+            </TileMatrixSet>
+          </Contents>
+        </Capabilities>'''
+        spec = self.tool._parse_mml_wmts_layer(xml, "taustakartta")
+        ext = types.SimpleNamespace(XMin=-500000, YMin=8100000, XMax=-300000, YMax=8300000)
+        matrix, tile_range = self.tool._choose_mml_wmts_matrix(spec["matrices"], ext)
+
+        self.assertEqual("ETRS-TM35FIN", spec["matrix_set"])
+        self.assertEqual("image/png", spec["format"])
+        self.assertEqual("0", matrix["id"])
+        self.assertIsNotNone(tile_range)
+
+    def test_mml_basemap_uses_fixed_wmts_and_public_wms_pairs(self):
+        self.assertEqual(
+            "https://avoin-karttakuva.maanmittauslaitos.fi/avoin/wmts/1.0.0",
+            MODULE.MML_WMTS_SERVICE_URL,
+        )
+        self.assertEqual("taustakartta", MODULE.MML_WMTS_LAYER_IDS["Taustakartta"])
+        self.assertEqual("maastokartta", MODULE.MML_WMTS_LAYER_IDS["Maastokartta"])
+        self.assertEqual(
+            "https://tiles.kartat.kapsi.fi/taustakartta?",
+            MODULE.MML_WMS_SERVICE_URLS["taustakartta"],
+        )
+        self.assertEqual(
+            "https://tiles.kartat.kapsi.fi/peruskartta?",
+            MODULE.MML_WMS_SERVICE_URLS["maastokartta"],
+        )
+
+        basemap = MODULE.MMLBasemapDownloader.__new__(MODULE.MMLBasemapDownloader)
+        basemap._mml_layer_mapping = {}
+        self.assertEqual(
+            ["Taustakartta", "Maastokartta"],
+            basemap._get_basemap_layers_cached("MML"),
+        )
+
+    def test_fixed_mml_wmts_range_and_tile_url(self):
+        span = MODULE.MML_WMTS_TILE_SIZE * (2 ** (13 - 9))
+        ext = types.SimpleNamespace(
+            XMin=MODULE.MML_WMTS_ORIGIN_X + (2 * span) + 1,
+            XMax=MODULE.MML_WMTS_ORIGIN_X + (2 * span) + 100,
+            YMin=MODULE.MML_WMTS_ORIGIN_Y - (4 * span) + 100,
+            YMax=MODULE.MML_WMTS_ORIGIN_Y - (3 * span) - 100,
+        )
+        self.assertEqual(
+            (3, 3, 2, 2),
+            self.tool._mml_wmts_tile_range(ext, 9),
+        )
+        self.assertEqual(16.0, self.tool._mml_wmts_resolution(9))
+
+        self.tool.mml_wmts_base = MODULE.MML_WMTS_SERVICE_URL
+        url = self.tool._mml_wmts_tile_url("taustakartta", 9, 3, 2, "A/B")
+        self.assertEqual(
+            "https://avoin-karttakuva.maanmittauslaitos.fi/avoin/wmts/1.0.0/"
+            "taustakartta/default/ETRS-TM35FIN/9/3/2.png?api-key=A%2FB",
+            url,
+        )
+        auth = self.tool._mml_auth_headers("A/B")["Authorization"]
+        self.assertEqual("Basic " + MODULE.base64.b64encode(b"A/B:").decode("ascii"), auth)
+
+    def test_mml_background_adds_wms_top_and_hides_local_raster(self):
+        class Layer:
+            def __init__(self, name, group=False):
+                self.name = name
+                self.isGroupLayer = group
+                self.visible = True
+
+        class Map:
+            def __init__(self):
+                self.group = Layer("Taustakartta", group=True)
+                self.local = Layer("local")
+                self.wms = Layer("wms")
+                self.calls = []
+
+            def listLayers(self):
+                return [self.group]
+
+            def addDataFromPath(self, path, data_type=None):
+                self.calls.append((path, data_type))
+                return [self.wms if data_type == "WMS" else self.local]
+
+            def addLayerToGroup(self, group, layer, position):
+                self.calls.append(("group", layer, position))
+
+        self.tool._runtime_map_loaded = True
+        self.tool._runtime_map = Map()
+        self.tool.mml_wms_services = dict(MODULE.MML_WMS_SERVICE_URLS)
+        self.tool._msg = lambda message: None
+        self.tool._warn = lambda message: None
+        result = self.tool._add_mml_background_layers(
+            "C:/tmp/MML_RGB", "taustakartta", "Taustakartta"
+        )
+        self.assertTrue(result["wms_added"])
+        self.assertFalse(result["local"].visible)
+        self.assertTrue(result["wms"].visible)
+        self.assertEqual("MML WMS – Taustakartta", result["wms"].name)
+        self.assertIn(
+            (MODULE.MML_WMS_SERVICE_URLS["taustakartta"], "WMS"),
+            self.tool._runtime_map.calls,
+        )
+
     def test_kapsi_uses_service_root_for_scale_dependent_layer(self):
         self.assertEqual(
             "taustakartta",
@@ -287,6 +460,15 @@ class ToolboxHelperTests(unittest.TestCase):
             "keep_scratch_on_error", "clip_cql_results", "benchmark_copy"
         ):
             self.assertNotIn(parameter_name, source)
+
+    def test_osm_branch_defines_mode_for_common_staging_summary(self):
+        source = TOOLBOX.read_text(encoding="utf-8")
+        osm_branch = source.index('if layer_kind == "osm":')
+        osm_branch_end = source.index('elif layer_kind == "mml_raster":', osm_branch)
+        self.assertIn(
+            'requested_mode = "OpenStreetMap Overpass API + paikallinen Clip"',
+            source[osm_branch:osm_branch_end],
+        )
 
     def test_fetch_json_records_network_read_and_parse_separately(self):
         class Response:

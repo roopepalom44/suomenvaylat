@@ -32,22 +32,13 @@ function Resolve-AssemblyPath {
         (Join-Path $root "bin\$Configuration\suomenvaylat.dll")
     )
 
-    $assemblyCacheRoot = Join-Path $env:LOCALAPPDATA 'ESRI\ArcGISPro\AssemblyCache\{2aea3c93-c012-4ed4-b416-6b3a844e0204}'
-    if (Test-Path -LiteralPath $assemblyCacheRoot) {
-        $candidates += @(
-            Get-ChildItem -LiteralPath $assemblyCacheRoot -Filter 'suomenvaylat.dll' -File -Recurse -ErrorAction SilentlyContinue |
-                Sort-Object LastWriteTime -Descending |
-                ForEach-Object { $_.FullName }
-        )
-    }
-
     foreach ($candidate in $candidates) {
         if (Test-Path -LiteralPath $candidate -PathType Leaf) {
             return (Resolve-Path -LiteralPath $candidate).Path
         }
     }
 
-    throw "Compiled suomenvaylat.dll was not found. This script does not run MSBuild. Build the C# add-in once, or pass -AssemblyPath to an existing suomenvaylat.dll."
+    throw "Compiled suomenvaylat.dll was not found in the build output. Rebuild the C# add-in with the ArcGIS Pro SDK, or pass the resulting DLL explicitly with -AssemblyPath. An AssemblyCache DLL is never selected automatically because it may be stale."
 }
 
 $assemblySource = Resolve-AssemblyPath -ExplicitPath $AssemblyPath
@@ -63,6 +54,23 @@ if ($assemblyName.Name -ne 'suomenvaylat') {
     throw "Assembly name '$($assemblyName.Name)' does not match Config.daml defaultAssembly 'suomenvaylat.dll'."
 }
 Write-Output "Assembly identity: $($assemblyName.FullName)"
+$assemblyDirectory = Split-Path -Parent $assemblySource
+
+if ([string]::IsNullOrWhiteSpace($AssemblyPath)) {
+    $assemblyItem = Get-Item -LiteralPath $assemblySource
+    $latestCSharpSource = @(
+        (Join-Path $root 'Module1.cs'),
+        (Join-Path $root 'OpenSuomenvaylatToolButton.cs'),
+        (Join-Path $root 'suomenvaylat.csproj')
+    ) |
+        Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } |
+        Get-Item |
+        Sort-Object LastWriteTimeUtc -Descending |
+        Select-Object -First 1
+    if ($latestCSharpSource -and $assemblyItem.LastWriteTimeUtc -lt $latestCSharpSource.LastWriteTimeUtc) {
+        throw "The build output DLL is older than the C# source ($($latestCSharpSource.Name)). Rebuild the add-in before packaging so ArcGIS Pro cannot receive an old button type."
+    }
+}
 
 $configPath = Join-Path $root 'Config.daml'
 [xml]$config = Get-Content -LiteralPath $configPath -Raw
@@ -130,18 +138,24 @@ $temporaryDirectory = Join-Path $env:TEMP ('suomenvaylat-addin-' + [guid]::NewGu
 $temporaryPackagePath = Join-Path $env:TEMP ('suomenvaylat-' + [guid]::NewGuid().ToString('N') + '.esriAddInX')
 
 $packageFiles = @(
-    @{ Relative = 'Config.daml'; Source = (Join-Path $root 'Config.daml') },
-    @{ Relative = 'suomenvaylat.dll'; Source = $assemblySource },
-    @{ Relative = 'Images\AddInDesktop16.png'; Source = (Join-Path $root 'Images\AddInDesktop16.png') },
-    @{ Relative = 'Images\AddInDesktop32.png'; Source = (Join-Path $root 'Images\AddInDesktop32.png') },
-    @{ Relative = 'Images\Suomenvaylat16.png'; Source = (Join-Path $root 'Images\Suomenvaylat16.png') },
-    @{ Relative = 'Images\Suomenvaylat32.png'; Source = (Join-Path $root 'Images\Suomenvaylat32.png') },
-    @{ Relative = 'DarkImages\AddInDesktop16.png'; Source = (Join-Path $root 'DarkImages\AddInDesktop16.png') },
-    @{ Relative = 'DarkImages\AddInDesktop32.png'; Source = (Join-Path $root 'DarkImages\AddInDesktop32.png') },
-    @{ Relative = 'Toolboxes\VaylaWFSDownloader.pyt'; Source = (Join-Path $root 'Toolboxes\VaylaWFSDownloader.pyt') },
-    @{ Relative = 'Toolboxes\Resources\credentials.wmts'; Source = (Join-Path $root 'Toolboxes\Resources\credentials.wmts') },
-    @{ Relative = 'Toolboxes\Resources\hallinnolliset_aluejaot.gpkg'; Source = (Join-Path $root 'Toolboxes\Resources\hallinnolliset_aluejaot.gpkg') }
+    @{ Relative = 'Config.daml'; Source = (Join-Path $root 'Config.daml'); Required = $true },
+    @{ Relative = 'Images\AddInDesktop16.png'; Source = (Join-Path $root 'Images\AddInDesktop16.png'); Required = $true },
+    @{ Relative = 'Images\AddInDesktop32.png'; Source = (Join-Path $root 'Images\AddInDesktop32.png'); Required = $true },
+    @{ Relative = 'Images\Suomenvaylat16.png'; Source = (Join-Path $root 'Images\Suomenvaylat16.png'); Required = $true },
+    @{ Relative = 'Images\Suomenvaylat32.png'; Source = (Join-Path $root 'Images\Suomenvaylat32.png'); Required = $true },
+    @{ Relative = 'DarkImages\AddInDesktop16.png'; Source = (Join-Path $root 'DarkImages\AddInDesktop16.png'); Required = $true },
+    @{ Relative = 'DarkImages\AddInDesktop32.png'; Source = (Join-Path $root 'DarkImages\AddInDesktop32.png'); Required = $true },
+    @{ Relative = 'Install\suomenvaylat.dll'; Source = $assemblySource; Required = $true },
+    @{ Relative = 'Install\suomenvaylat.pdb'; Source = (Join-Path $assemblyDirectory 'suomenvaylat.pdb'); Required = $false },
+    @{ Relative = 'Install\suomenvaylat.deps.json'; Source = (Join-Path $assemblyDirectory 'suomenvaylat.deps.json'); Required = $false },
+    @{ Relative = 'Install\suomenvaylat.runtimeconfig.json'; Source = (Join-Path $assemblyDirectory 'suomenvaylat.runtimeconfig.json'); Required = $false },
+    @{ Relative = 'Install\Toolboxes\VaylaWFSDownloader.pyt'; Source = (Join-Path $root 'Toolboxes\VaylaWFSDownloader.pyt'); Required = $true },
+    @{ Relative = 'Install\Toolboxes\Resources\credentials.wmts'; Source = (Join-Path $root 'Toolboxes\Resources\credentials.wmts'); Required = $true },
+    @{ Relative = 'Install\Toolboxes\Resources\hallinnolliset_aluejaot.gpkg'; Source = (Join-Path $root 'Toolboxes\Resources\hallinnolliset_aluejaot.gpkg'); Required = $true }
 )
+$packageFiles = @($packageFiles | Where-Object {
+    $_.Required -or (Test-Path -LiteralPath $_.Source -PathType Leaf)
+})
 
 try {
     foreach ($item in $packageFiles) {
@@ -180,6 +194,12 @@ try {
         if ($entryNames -notcontains $item.Relative) {
             throw "Package validation failed: $($item.Relative) is missing."
         }
+    }
+
+    if ($entryNames -contains 'suomenvaylat.dll' -or
+        $entryNames -contains 'Toolboxes\VaylaWFSDownloader.pyt' -or
+        $entryNames -contains 'OpenSuomenvaylatToolButton.cs') {
+        throw 'Package validation failed: runtime files must be under Install\.'
     }
 
     if (Test-Path -LiteralPath $packagePath) {
