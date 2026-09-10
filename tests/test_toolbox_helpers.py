@@ -101,11 +101,19 @@ class ToolboxHelperTests(unittest.TestCase):
             registry.get_ogc_endpoint("Karttapaikka"),
         )
 
-    def test_mml_uses_current_open_wmts_endpoint(self):
+    def test_mml_uses_current_property_ogc_endpoint(self):
         registry = MODULE.WFSSourceRegistry()
         self.assertEqual(
-            ["https://avoin-karttakuva.maanmittauslaitos.fi/avoin/wmts/1.0.0/WMTSCapabilities.xml"],
+            [MODULE.MML_PROPERTY_OGC_API_ENDPOINT],
             registry.get_endpoints("MML"),
+        )
+        self.assertEqual(
+            MODULE.MML_PROPERTY_OGC_API_ENDPOINT,
+            registry.get_ogc_endpoint("MML"),
+        )
+        self.assertEqual(
+            MODULE.MML_PROPERTY_VECTOR_TILE_TILEJSON,
+            registry.get_source("MML")["vector_tile_endpoint"],
         )
 
     def test_mml_auth_uses_basic_header_without_putting_key_in_url(self):
@@ -126,6 +134,61 @@ class ToolboxHelperTests(unittest.TestCase):
         )
         self.assertIn("Authorization", headers)
         self.assertNotIn("test-key", headers["Authorization"])
+
+    def test_mml_property_auth_is_only_sent_to_ogc_api(self):
+        self.tool._runtime_mml_api_key = "property-key"
+        self.assertEqual(
+            {},
+            self.tool._build_source_auth_headers("MML", layer_kind="wfs"),
+        )
+        headers = self.tool._build_source_auth_headers(
+            "MML",
+            endpoint=MODULE.MML_PROPERTY_OGC_API_ENDPOINT,
+            layer_kind="mml_property_ogcapi",
+        )
+        self.assertIn("Authorization", headers)
+        self.assertNotIn("property-key", headers["Authorization"])
+
+    def test_mml_property_collections_are_discovered_dynamically(self):
+        self.tool.wfs_registry = MODULE.WFSSourceRegistry()
+        self.tool._runtime_mml_api_key = "property-key"
+        captured = {}
+
+        def fake_fetch(url, timeout=60, quiet=False, extra_headers=None, timings=None):
+            captured["url"] = url
+            captured["headers"] = extra_headers
+            return (
+                {
+                    "collections": [
+                        {
+                            "id": "KiinteistorajanSijaintitiedot",
+                            "title": "Kiinteistörajan sijaintitiedot",
+                        },
+                        {
+                            "id": "PalstanSijaintitiedot",
+                            "title": "Palstan sijaintitiedot",
+                        },
+                    ]
+                },
+                "{}",
+                200,
+                "application/json",
+            )
+
+        self.tool._fetch_json = fake_fetch
+        layers = self.tool._get_mml_ogc_layers()
+
+        self.assertEqual(
+            MODULE.MML_PROPERTY_OGC_API_ENDPOINT + "collections",
+            captured["url"],
+        )
+        self.assertIn("Authorization", captured["headers"])
+        self.assertEqual(
+            ["KiinteistorajanSijaintitiedot", "PalstanSijaintitiedot"],
+            [layer["id"] for layer in layers],
+        )
+        self.assertEqual("Kiinteistojaotus", layers[0]["title"])
+        self.assertEqual("mml_property_ogcapi", layers[0]["kind"])
 
     def test_secret_cache_key_preserves_api_key_case_without_exposing_it(self):
         lower = self.tool._secret_cache_key("AbC-123")
@@ -383,27 +446,66 @@ class ToolboxHelperTests(unittest.TestCase):
         self.assertEqual("0", matrix["id"])
         self.assertIsNotNone(tile_range)
 
-    def test_mml_basemap_uses_fixed_wmts_and_public_wms_pairs(self):
+    def test_mml_basemap_uses_current_vector_tile_services(self):
         self.assertEqual(
-            "https://avoin-karttakuva.maanmittauslaitos.fi/avoin/wmts/1.0.0",
-            MODULE.MML_WMTS_SERVICE_URL,
-        )
-        self.assertEqual("taustakartta", MODULE.MML_WMTS_LAYER_IDS["Taustakartta"])
-        self.assertEqual("maastokartta", MODULE.MML_WMTS_LAYER_IDS["Maastokartta"])
-        self.assertEqual(
-            "https://tiles.kartat.kapsi.fi/taustakartta?",
-            MODULE.MML_WMS_SERVICE_URLS["taustakartta"],
+            "https://avoin-karttakuva.maanmittauslaitos.fi/"
+            "vectortiles/tilejson/taustakartta/1.0.0/taustakartta/default/"
+            "v21/ETRS-TM35FIN/tilejson.json",
+            MODULE.MML_TOPO_VECTOR_TILE_TILEJSON,
         )
         self.assertEqual(
-            "https://tiles.kartat.kapsi.fi/peruskartta?",
-            MODULE.MML_WMS_SERVICE_URLS["maastokartta"],
+            MODULE.MML_PROPERTY_VECTOR_TILE_TILEJSON,
+            MODULE.MML_VECTOR_TILE_LAYER_IDS["Kiinteistojaotus"],
         )
 
         basemap = MODULE.MMLBasemapDownloader.__new__(MODULE.MMLBasemapDownloader)
         basemap._mml_layer_mapping = {}
         self.assertEqual(
-            ["Taustakartta", "Maastokartta"],
+            ["Taustakartta", "Maastokartta", "Kiinteistojaotus"],
             basemap._get_basemap_layers_cached("MML"),
+        )
+
+    def test_mml_vector_tile_is_added_with_custom_api_key(self):
+        class Layer:
+            def __init__(self, name, group=False):
+                self.name = name
+                self.isGroupLayer = group
+                self.visible = False
+
+        class Map:
+            def __init__(self):
+                self.group = Layer("Taustakartta", group=True)
+                self.vector = Layer("vector")
+                self.calls = []
+
+            def listLayers(self):
+                return [self.group]
+
+            def addDataFromPath(self, path, data_type=None, custom_parameters=None):
+                self.calls.append((path, data_type, custom_parameters))
+                return self.vector
+
+            def addLayerToGroup(self, group, layer, position):
+                self.calls.append(("group", layer, position))
+
+        self.tool._runtime_map_loaded = True
+        self.tool._runtime_map = Map()
+        self.tool._msg = lambda message: None
+        result = self.tool._add_mml_vector_tile_layer(
+            MODULE.MML_PROPERTY_VECTOR_TILE_TILEJSON,
+            "Kiinteistojaotus",
+            "Secret-Key",
+        )
+
+        self.assertEqual("MML vector tile – Kiinteistojaotus", result["vector_tile"].name)
+        self.assertTrue(result["vector_tile"].visible)
+        self.assertIn(
+            (
+                MODULE.MML_PROPERTY_VECTOR_TILE_TILEJSON,
+                "VECTOR_TILE",
+                {"api-key": "Secret-Key"},
+            ),
+            self.tool._runtime_map.calls,
         )
 
     def test_fixed_mml_wmts_range_and_tile_url(self):

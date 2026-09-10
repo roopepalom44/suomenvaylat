@@ -62,9 +62,10 @@ Yhdistetyn JSONin tai suoran feature class -kirjoituksen toteutusta ei pidä ott
 
 ## 7. MML-, Kapsi- ja Karttapaikka-valinnat
 
-1. Valitse **MML**, syötä API-avain ja valitse **Taustakartta** tai
-   **Maastokartta**. Lataa pieni alue ja varmista, että RGB-rasteri tallentuu
-   EPSG:3067-File Geodatabaseen.
+1. Valitse **MML**, syötä API-avain ja varmista, että kiinteistöjen OGC API
+   -kokoelmat tulevat dynaamisesti valikkoon. Valitse esimerkiksi
+   **Kiinteistojaotus** ja lataa pieni alue. Varmista lokista OGC API Features
+   -haku, EPSG:3067-projisointi ja paikallinen Clip.
 2. Valitse **Kapsi**, valitse listattu taso ja varmista, ettei valinta katoa
    validointikierroksella. Lataa pieni alue ja tarkista kuvan sijainti kartalla.
 3. Valitse **Karttapaikka**, valitse ensin avoin INSPIRE-taso ja sitten
@@ -72,19 +73,13 @@ Yhdistetyn JSONin tai suoran feature class -kirjoituksen toteutusta ei pidä ott
 
 ## 8. MML:n rinnakkaiset taustakarttatasot
 
-1. Avaa **Taustakartat (MML/Kapsi)**, valitse MML ja joko **Taustakartta** tai
-   **Maastokartta**.
-2. Varmista lokista järjestys: MML-tason lataus alkaa, ladatut tiilet `n/N`,
-   kaikkien tiilien lataus valmis, RGB-muunnos alkaa, RGB-mosaiikki valmis ja
-   rasteri tallennettu geodatabaseen.
-3. Tarkista väliaikaishakemistosta testiajon aikana, että jokaisella PNG8-tiilellä
-   on `.pgw` ja `.prj` ja että `MosaicToNewRaster` saa syötteenä vain RGB-TIFFit.
-   Mosaiikin asetusten pitää olla 8-bit unsigned, 3 kaistaa, `FIRST` ja
-   `REJECT`; `MATCH`-menetelmää ei saa käyttää.
-4. Varmista kartalta, että `MML WMS – Taustakartta` tai `MML WMS – Maastokartta`
-   on Taustakartta-ryhmässä näkyvänä ja paikallinen `MML RGB` -rasteri samassa
-   ryhmässä piilotettuna. Tarkista myös, ettei API-avain näy WMS-URL:ssa tai
-   lokissa.
-5. Estä WMS-yhteys testin ajaksi. Lokissa pitää näkyä live-WMS:n lisäyksen
-   epäonnistuminen ja paikallisen rasterin käyttöönotto varatasona; paikallisen
-   rasterin pitää olla näkyvä.
+1. Avaa **Taustakartat (MML/Kapsi)**, syötä MML API-avain ja valitse
+   **Taustakartta**, **Maastokartta** tai **Kiinteistojaotus**.
+2. Varmista lokista, että MML TileJSON lisätään `VECTOR_TILE`-tyyppinä
+   `Taustakartta`-ryhmään ja että API-avain välitetään custom request
+   parameterina. Avainta ei saa näkyä URL:ssa tai lokissa.
+3. Tarkista kartalta, että valittu MML vector tile -taso on näkyvä. MML-polussa
+   ei pidä syntyä paikallista RGB-rasteria eikä WMTS-tiilien lataus-/mosaiikki-
+   vaiheita.
+4. Valitse **Kapsi** ja varmista erikseen, että rajaus, rasterilataus ja
+   tallennus File GDB:hen toimivat edelleen.

@@ -20,9 +20,40 @@ import ctypes
 from ctypes import wintypes
 
 
-# MML:n avoimen karttakuvan REST-tyylinen WMTS-osoite ja julkiset WMS-osoitteet
-# pidetään tarkoituksella erillään. WMTS-tiilipyynnöt tarvitsevat API-avaimen,
-# mutta Kapsin live-WMS ei saa koskaan periä sitä URL:iin tai otsakkeisiin.
+# MML:n nykyiset avoimet rajapinnat. Kiinteistöaineistot haetaan OGC API
+# Features -palvelusta ja karttatasot lisätään ArcGIS Prohon TileJSON-vektori-
+# tiilinä. Vanha WMTS-polku on säilytetty alempana vain yhteensopivuus-/
+# varareittejä varten; sitä ei käytetä MML:n normaalissa tasolistauksessa.
+MML_PROPERTY_OGC_API_ENDPOINT = (
+    "https://avoin-paikkatieto.maanmittauslaitos.fi/"
+    "kiinteisto-avoin/simple-features/v3/"
+)
+MML_PROPERTY_VECTOR_TILE_TILEJSON = (
+    "https://avoin-karttakuva.maanmittauslaitos.fi/"
+    "kiinteisto-avoin/v3/kiinteistojaotus/ETRS-TM35FIN/tilejson.json"
+)
+MML_TOPO_VECTOR_TILE_TILEJSON = (
+    "https://avoin-karttakuva.maanmittauslaitos.fi/"
+    "vectortiles/tilejson/taustakartta/1.0.0/taustakartta/default/"
+    "v21/ETRS-TM35FIN/tilejson.json"
+)
+MML_PROPERTY_COLLECTION_LABELS = {
+    # Säilytä vanhan työkalun tuttu nimi, vaikka palvelun virallinen kokoelma
+    # on nimetty KiinteistorajanSijaintitiedot.
+    "KiinteistorajanSijaintitiedot": "Kiinteistojaotus",
+}
+MML_VECTOR_TILE_LAYER_IDS = {
+    "Taustakartta": MML_TOPO_VECTOR_TILE_TILEJSON,
+    # MML julkaisee taustakartan ja maastokartan nykyisessä avoimessa
+    # vektoritiilipalvelussa saman TileJSON-lähteen kautta. Eri karttatyylit
+    # voidaan vaihtaa ArcGIS Pron vektoritiilikerroksen tyylieditorilla.
+    "Maastokartta": MML_TOPO_VECTOR_TILE_TILEJSON,
+    "Kiinteistojaotus": MML_PROPERTY_VECTOR_TILE_TILEJSON,
+}
+
+# Vanha WMTS-osoite ja julkiset WMS-osoitteet pidetään erillään. Näitä
+# käytetään vain vanhoissa/varareiteissä, ei nykyisessä MML-vector tile -
+# toteutuksessa. Kapsin live-WMS ei saa koskaan periä MML:n API-avainta.
 MML_WMTS_SERVICE_URL = (
     "https://avoin-karttakuva.maanmittauslaitos.fi/avoin/wmts/1.0.0"
 )
@@ -141,9 +172,11 @@ class WFSSourceRegistry(object):
                 "description": "MML INSPIRE WFS + Maastotiedot OGC API Features"
             },
             "MML": {
-                "type": "mml_raster",
-                "endpoints": ["https://avoin-karttakuva.maanmittauslaitos.fi/avoin/wmts/1.0.0/WMTSCapabilities.xml"],
-                "description": "MML taustakartat (rasteri)"
+                "type": "mml_ogcapi",
+                "endpoints": [MML_PROPERTY_OGC_API_ENDPOINT],
+                "ogc_api_endpoint": MML_PROPERTY_OGC_API_ENDPOINT,
+                "vector_tile_endpoint": MML_PROPERTY_VECTOR_TILE_TILEJSON,
+                "description": "MML kiinteistöaineistot (OGC API Features + vector tiles)"
             },
             "Kapsi": {
                 "type": "kapsi_wms",
@@ -460,7 +493,7 @@ class Toolbox(object):
 class VaylaWFSDownloader(object):
     def __init__(self):
         self.label = "Suomenväylät.fi"
-        self.description = "Lataa WFS-aineistot osissa, hakee aluerajaukset paikallisesta geopackagesta ja leikkaa aineistot."
+        self.description = "Lataa WFS- ja OGC API Features -aineistot osissa, hakee aluerajaukset paikallisesta geopackagesta ja leikkaa aineistot."
         self.canRunInBackground = False
 
         self.wfs_registry = WFSSourceRegistry()
@@ -496,7 +529,7 @@ class VaylaWFSDownloader(object):
         # Lähteet joiden raskaat tasot pilkotaan kunnittain
         self.heavy_chunk_sources = ["Väylä", "DigiRoad"]
 
-        # MML taustakartat (samassa UI:ssa)
+        # MML:n OGC API Features- ja vector tile -palvelut
         self._all_mml_layers_cache = {}
         self._mml_layer_mapping = {}
         self._mml_layer_mapping_cache = {}
@@ -513,9 +546,9 @@ class VaylaWFSDownloader(object):
         self._runtime_project = None
         self._runtime_map = None
         self._runtime_map_loaded = False
-        # WMTS:n capabilities-osoite tarvitaan edelleen yleisen MML-lähteen
-        # tasolistaukseen, mutta taustakartan tiilet haetaan erillisestä
-        # REST-tyylisestä palvelujuuresta alla olevilla vakioilla.
+        # Vanha WMTS-polku jätetään luokkaan yhteensopivuutta varten. MML:n
+        # normaali tasolistaus käyttää nykyistä kiinteistöjen OGC API Features
+        # -palvelua ja taustakarttatyökalu käyttää TileJSON-vektoritiiliä.
         self.mml_wmts_capabilities = MML_WMTS_SERVICE_URL + "/WMTSCapabilities.xml"
         self.mml_wmts_base = MML_WMTS_SERVICE_URL
         self.mml_wms_services = dict(MML_WMS_SERVICE_URLS)
@@ -859,6 +892,49 @@ class VaylaWFSDownloader(object):
                 return {"local": local_layer, "wms": None, "wms_added": False}
             raise
 
+    def _add_mml_vector_tile_layer(self, tilejson_url, display_name, api_key):
+        """Lisää MML:n nykyisen TileJSON-vektoritiilipalvelun kartalle.
+
+        API-avain annetaan ArcGIS Pron custom request parameter -sanakirjassa,
+        joten se ei päädy palveluosoitteeseen tai tavalliseen lokitulosteeseen.
+        """
+        key = (api_key or "").strip()
+        if not key:
+            raise Exception("MML:n vector tile -palvelu vaatii API-avaimen.")
+        tilejson_url = str(tilejson_url or "").strip()
+        if not tilejson_url:
+            raise Exception("MML:n vector tile -palveluosoite puuttuu.")
+
+        active_map = self._active_map_for_background()
+        group_layer = self._find_or_create_group_layer(active_map, "Taustakartta")
+        if group_layer is not None:
+            try:
+                group_layer.visible = True
+            except Exception:
+                pass
+
+        self._msg(
+            "[INFO] MML vector tile -tason lisäys alkaa: {} ({})".format(
+                display_name, self._sanitize_url(tilejson_url)
+            )
+        )
+        # ArcGIS Pro tukee TileJSON-osoitetta VECTOR_TILE-tyyppinä ja välittää
+        # custom_parameters-sanakirjan tiilipyyntöihin.
+        layers = active_map.addDataFromPath(
+            tilejson_url,
+            "VECTOR_TILE",
+            {"api-key": key},
+        )
+        vector_layer = self._configure_group_layers(
+            active_map,
+            group_layer,
+            layers,
+            "MML vector tile – {}".format(display_name),
+            visible=True,
+        )
+        self._msg("[INFO] MML vector tile -taso lisätty: {}".format(display_name))
+        return {"vector_tile": vector_layer}
+
     def _parse_source_values(self, value_as_text):
         values = self._parse_multivalue(value_as_text)
         return values if values else ["Väylä"]
@@ -1112,11 +1188,19 @@ class VaylaWFSDownloader(object):
 
         Karttapaikan vanha WFS-osoite hyväksyi joissakin versioissa Basic-
         tunnistautumista, mutta nykyiset INSPIRE WFS -osoitteet ovat avoimia.
-        Basic-headerin lähettäminen niihin aiheuttaa 401-vastauksen. Uusi
-        Maastotiedot OGC API Features -rajapinta käyttää samaa API-avainta,
-        mutta sen Basic-header kuuluu vain OGC-pyyntöihin.
+        Basic-headerin lähettäminen niihin aiheuttaa 401-vastauksen. Nykyiset
+        MML:n OGC API Features -rajapinnat käyttävät API-avainta Basic-
+        tunnistautumisessa, mutta header kuuluu vain OGC-pyyntöihin.
         """
         headers = {}
+        if source_name == "MML":
+            key = (getattr(self, "_runtime_mml_api_key", "") or "").strip()
+            if key and layer_kind == "mml_property_ogcapi":
+                return self._mml_auth_headers(
+                    key, user_agent="ArcGISPro-MMLPropertyOGC/1.0"
+                )
+            return headers
+
         if source_name != "Karttapaikka":
             return headers
 
@@ -1265,6 +1349,59 @@ class VaylaWFSDownloader(object):
             })
         return layers
 
+    def _get_mml_ogc_layers(self):
+        """Hae MML:n kiinteistöaineistojen nykyiset OGC API -kokoelmat.
+
+        Kokoelmalista luetaan palvelusta joka kerta, kun MML:n API-avain
+        vaihtuu. Näin uudet kiinteistöaineistot tulevat ArcGIS Pron valikkoon
+        ilman että niitä tarvitsee lisätä tähän toolboxiin käsin.
+        """
+        endpoint = self.wfs_registry.get_ogc_endpoint("MML")
+        if not endpoint:
+            return []
+        key = (getattr(self, "_runtime_mml_api_key", "") or "").strip()
+        if not key:
+            return []
+
+        base = endpoint.rstrip("/") + "/"
+        request_url = base + "collections"
+        headers = self._build_source_auth_headers(
+            "MML", endpoint=endpoint, layer_kind="mml_property_ogcapi"
+        )
+        data, raw_text, status, content_type = self._fetch_json(
+            request_url,
+            timeout=60,
+            quiet=True,
+            extra_headers=headers,
+        )
+        if not isinstance(data, dict):
+            reason = self._wfs_error_snippet(raw_text, 300) or content_type or "ei vastaussisältöä"
+            if status == 401 or status == 403:
+                reason = "API-avain hylättiin (HTTP {})".format(status)
+            raise Exception(
+                "MML:n kiinteistöjen OGC API -kokoelmia ei voitu hakea "
+                "(HTTP {}): {}".format(status, reason)
+            )
+
+        layers = []
+        for collection in data.get("collections", []) or []:
+            if not isinstance(collection, dict):
+                continue
+            collection_id = str(collection.get("id") or "").strip()
+            if not collection_id:
+                continue
+            title = str(collection.get("title") or collection_id).strip()
+            title = MML_PROPERTY_COLLECTION_LABELS.get(collection_id, title)
+            layers.append({
+                "id": collection_id,
+                "title": title,
+                "source": "MML",
+                "kind": "mml_property_ogcapi",
+                "endpoint": endpoint,
+                "geometry_field": "geometry",
+            })
+        return layers
+
     def _get_layer_entries_for_sources(self, source_names):
         entries = []
         mapping = {}
@@ -1283,6 +1420,17 @@ class VaylaWFSDownloader(object):
                         })
                 except Exception as ex:
                     self._warn("[VAROITUS] MML karttatasojen listaus epäonnistui: {}".format(ex))
+            elif source_type == "mml_ogcapi":
+                source_entries = []
+                try:
+                    source_entries = self._get_mml_ogc_layers()
+                except Exception as ex:
+                    self._warn(
+                        "[VAROITUS] MML:n kiinteistöjen OGC API -tasojen "
+                        "listaus epäonnistui: {}".format(
+                            self._redact_secrets(ex)
+                        )
+                    )
             elif source_type == "mml_karttakuva":
                 source_entries = []
                 try:
@@ -2381,7 +2529,8 @@ class VaylaWFSDownloader(object):
 
     def _fetch_ogcapi_feature_chunks(self, endpoint, collection_id,
                                      bbox_wgs84, max_features,
-                                     extra_headers=None, max_requests=250):
+                                     extra_headers=None, max_requests=250,
+                                     service_label="OGC API Features"):
         """Hae OGC API Features -kokoelma sivuina paikalliseen scratch-GDB:hen.
 
         OGC API:n oletus-GeoJSON on CRS84. Se muunnetaan heti JSONToFeaturesin
@@ -2431,8 +2580,8 @@ class VaylaWFSDownloader(object):
             if json_data is None:
                 reason = self._wfs_error_snippet(raw_text, 350) or content_type or "ei vastaussisältöä"
                 raise Exception(
-                    "Maastotiedot OGC API -pyyntö epäonnistui (HTTP {}): {}".format(
-                        status, reason
+                    "{}-pyyntö epäonnistui (HTTP {}): {}".format(
+                        service_label, status, reason
                     )
                 )
 
@@ -2511,7 +2660,7 @@ class VaylaWFSDownloader(object):
 
         if len(visited) >= max_requests:
             self._warn(
-                "[VAROITUS] Maksimipyyntömäärä saavutettu Maastotiedot-kokoelmassa "
+                "[VAROITUS] Maksimipyyntömäärä saavutettu OGC API -kokoelmassa "
                 "'{}' (max_requests={}).".format(collection_id, max_requests)
             )
         stats["fetch_total_s"] = time.perf_counter() - fetch_start
@@ -3042,7 +3191,7 @@ class VaylaWFSDownloader(object):
     def _get_basemap_mode_options(self, provider):
         if provider == "Kapsi":
             return ["Raster (JPEG WMS EPSG:3067)"]
-        return ["Paikallinen RGB + live WMS"]
+        return ["Live vector tile"]
 
     def _write_world_file(self, raster_path, ext, width, height):
         root, extension = os.path.splitext(raster_path)
@@ -3922,7 +4071,7 @@ class VaylaWFSDownloader(object):
             pass
 
         p_mml_api_key = arcpy.Parameter(
-            displayName="MML API-avain (vain MML rasteritasoille)",
+            displayName="MML API-avain (OGC API/vector tile -tasoille)",
             name="mml_api_key",
             datatype="GPStringHidden",
             parameterType="Optional",
@@ -4118,15 +4267,17 @@ class VaylaWFSDownloader(object):
         else:
             parameters[2].clearMessage()
 
-        needs_mml_key = False
+        needs_mml_key = "MML" in source_values
         if selected_layers:
             for lbl in selected_layers:
                 info = self._layer_mapping.get(lbl)
-                if info and info.get("kind") == "mml_raster":
+                if info and info.get("kind") in ("mml_raster", "mml_property_ogcapi"):
                     needs_mml_key = True
                     break
         if needs_mml_key and not mml_api_key.strip():
-            parameters[7].setErrorMessage("MML rasteritasot vaativat API-avaimen.")
+            parameters[7].setErrorMessage(
+                "MML:n OGC API/vector tile -tasot vaativat API-avaimen."
+            )
         else:
             parameters[7].clearMessage()
 
@@ -4453,6 +4604,14 @@ class VaylaWFSDownloader(object):
 
         if any(
             (self._lookup_layer_info(lbl.strip().strip("'").strip('"')) or {}).get("kind")
+            == "mml_property_ogcapi"
+            for lbl in layers
+        ) and not mml_api_key.strip():
+            self._error("[VIRHE] MML:n kiinteistöjen OGC API -tasot vaativat API-avaimen.")
+            raise arcpy.ExecuteError
+
+        if any(
+            (self._lookup_layer_info(lbl.strip().strip("'").strip('"')) or {}).get("kind")
             == "mml_ogcapi"
             for lbl in layers
         ) and not karttapaikka_api_key.strip():
@@ -4531,8 +4690,11 @@ class VaylaWFSDownloader(object):
                     ))
                     self._msg("  [TASO] Paikallinen välitulos: {}".format(staged_fc))
                     self._msg("  [TASO] Lopputulos: {}".format(proposed_output_path))
-            elif layer_kind == "mml_ogcapi":
-                requested_mode = "Maastotiedot OGC API Features + paikallinen Clip"
+            elif layer_kind in ("mml_ogcapi", "mml_property_ogcapi"):
+                if layer_kind == "mml_property_ogcapi":
+                    requested_mode = "MML:n kiinteistötietojen OGC API Features + paikallinen Clip"
+                else:
+                    requested_mode = "Maastotiedot OGC API Features + paikallinen Clip"
                 self._msg("  [TASO] Näyttönimi: {}".format(layer_ui_name))
                 self._msg("  [TASO] Lähde: {}".format(source_name or "(tuntematon)"))
                 self._msg("  [TASO] OGC API -palvelu: {}".format(
@@ -4609,15 +4771,24 @@ class VaylaWFSDownloader(object):
                     continue
                 self._msg("  [INFO] Taso valmis.")
                 continue
-            elif layer_kind == "mml_ogcapi":
+            elif layer_kind in ("mml_ogcapi", "mml_property_ogcapi"):
+                is_property_ogc = layer_kind == "mml_property_ogcapi"
+                api_key = mml_api_key.strip() if is_property_ogc else karttapaikka_api_key.strip()
+                if is_property_ogc:
+                    service_label = "MML:n kiinteistötiedot"
+                    missing_key_message = "MML:n kiinteistötaso vaatii API-avaimen"
+                else:
+                    service_label = "Karttapaikan Maastotiedot"
+                    missing_key_message = "Karttapaikan Maastotiedot-taso vaatii API-avaimen"
                 self._msg(
-                    "  [INFO] Haetaan Karttapaikan Maastotiedot-aineistoa "
-                    "(OGC API Features)..."
+                    "  [INFO] Haetaan {} -aineistoa (OGC API Features)...".format(
+                        service_label
+                    )
                 )
-                if not karttapaikka_api_key.strip():
+                if not api_key:
                     _record_layer_failure(
                         layer_ui_name,
-                        "Karttapaikan Maastotiedot-taso vaatii API-avaimen",
+                        missing_key_message,
                     )
                     continue
                 try:
@@ -4636,6 +4807,7 @@ class VaylaWFSDownloader(object):
                         bbox_wgs84=ogc_bbox_wgs84,
                         max_features=max_features,
                         extra_headers=auth_headers,
+                        service_label=service_label,
                     )
                     temp_feature_classes.extend(chunks)
                     layer_http_s += ogc_stats.get("network_s", 0.0)
@@ -5324,23 +5496,22 @@ class MMLBasemapDownloader(VaylaWFSDownloader):
     def __init__(self):
         super().__init__()
         self.label = "Taustakartat (MML/Kapsi)"
-        self.description = "Tuo MML:n RGB-vararasterin ja julkisen live-WMS-taustakartan."
+        self.description = "Lisää MML:n nykyiset vector tile -taustakartat tai lataa Kapsin rasteritaustan."
         self.canRunInBackground = False
         # Kaikki MML-/WMS-attribuutit ja apumetodit peritään emoluokasta
         # (VaylaWFSDownloader); vain UI ja execute eroavat.
 
     def _get_basemap_layers_cached(self, provider):
         if provider == "MML":
-            # Taustakarttatyökalun julkinen WMS-pari ja paikallisen WMTS:n
-            # REST-tason tunnisteet ovat vakioituja. Yleinen WFS-työkalu voi
-            # edelleen käyttää capabilities-pohjaista MML-listaa erikseen.
-            self._mml_layer_mapping = dict(MML_WMTS_LAYER_IDS)
-            return list(MML_WMTS_LAYER_IDS.keys())
+            # Nykyinen MML:n avoin karttakuvapalvelu julkaisee TileJSONin
+            # kautta sekä maastotiedot että kiinteistöjaotuksen.
+            self._mml_layer_mapping = dict(MML_VECTOR_TILE_LAYER_IDS)
+            return list(MML_VECTOR_TILE_LAYER_IDS.keys())
         return super()._get_basemap_layers_cached(provider)
 
     def _get_basemap_mode_options(self, provider):
         if provider == "MML":
-            return ["Paikallinen RGB + live WMS"]
+            return ["Live vector tile"]
         return super()._get_basemap_mode_options(provider)
 
     def getParameterInfo(self):
@@ -5383,8 +5554,8 @@ class MMLBasemapDownloader(VaylaWFSDownloader):
             parameterType="Required",
             direction="Input"
         )
-        p_mode.filter.list = ["Paikallinen RGB + live WMS"]
-        p_mode.value = "Paikallinen RGB + live WMS"
+        p_mode.filter.list = ["Live vector tile"]
+        p_mode.value = "Live vector tile"
 
         p_extent_type = arcpy.Parameter(
             displayName="Aluerajauksen taso",
@@ -5478,10 +5649,18 @@ class MMLBasemapDownloader(VaylaWFSDownloader):
             parameters[5].enabled = False
             parameters[6].enabled = False
             parameters[5].filter.list = []
-            if extent_type in ["Kunta/Kaupunki", "Maakunta", "Elinvoimakeskus", "Hyvinvointialue"]:
+            parameters[7].enabled = (provider == "Kapsi")
+            # MML:n vector tile -palvelu on live-palvelu: se piirtää kartan
+            # kulloisenkin karttanäkymän mukaan eikä tee rajauskohtaisesti
+            # tiedostoon tallennettavaa rasteria. Rajausparametrit koskevat
+            # siksi vain Kapsin rasterilatausta.
+            parameters[4].enabled = (provider == "Kapsi")
+            if provider == "Kapsi" and extent_type in [
+                "Kunta/Kaupunki", "Maakunta", "Elinvoimakeskus", "Hyvinvointialue"
+            ]:
                 parameters[5].enabled = True
                 parameters[5].filter.list = self._get_extent_choices(extent_type)
-            elif extent_type == "Oma aineisto (Polygon/Polyline)":
+            elif provider == "Kapsi" and extent_type == "Oma aineisto (Polygon/Polyline)":
                 parameters[6].enabled = True
                 parameters[5].value = None
 
@@ -5494,22 +5673,26 @@ class MMLBasemapDownloader(VaylaWFSDownloader):
         extent_type = parameters[4].valueAsText
         extent_value_text = parameters[5].valueAsText
         custom_layer = parameters[6].valueAsText
-        mode = parameters[3].valueAsText or "Paikallinen RGB + live WMS"
+        mode = parameters[3].valueAsText or "Live vector tile"
         api_key = parameters[8].valueAsText or ""
 
         vals = self._parse_multivalue(extent_value_text)
-        if extent_type in ["Kunta/Kaupunki", "Maakunta", "Elinvoimakeskus", "Hyvinvointialue"] and not vals:
+        if provider == "Kapsi" and extent_type in [
+            "Kunta/Kaupunki", "Maakunta", "Elinvoimakeskus", "Hyvinvointialue"
+        ] and not vals:
             parameters[5].setErrorMessage("Valitse alue on pakollinen tälle aluerajauksen tasolle.")
         else:
             parameters[5].clearMessage()
 
-        if extent_type == "Oma aineisto (Polygon/Polyline)" and (not custom_layer or str(custom_layer).strip() == ""):
+        if provider == "Kapsi" and extent_type == "Oma aineisto (Polygon/Polyline)" and (not custom_layer or str(custom_layer).strip() == ""):
             parameters[6].setErrorMessage("Valitse oma rajausaineisto.")
         else:
             parameters[6].clearMessage()
 
         if provider == "MML" and not api_key.strip():
-            parameters[8].setErrorMessage("MML-karttatasojen listaus ja lataus vaativat API-avaimen.")
+            parameters[8].setErrorMessage(
+                "MML:n OGC API/vector tile -tasojen listaus ja lisäys vaativat API-avaimen."
+            )
         else:
             parameters[8].clearMessage()
 
@@ -5519,7 +5702,7 @@ class MMLBasemapDownloader(VaylaWFSDownloader):
 
         provider = parameters[0].valueAsText or "MML"
         map_display = parameters[2].valueAsText
-        mode = parameters[3].valueAsText or "Paikallinen RGB + live WMS"
+        mode = parameters[3].valueAsText or "Live vector tile"
         extent_type = parameters[4].valueAsText
         extent_vals = self._parse_multivalue(parameters[5].valueAsText)
         custom_layer = parameters[6].valueAsText
@@ -5538,7 +5721,7 @@ class MMLBasemapDownloader(VaylaWFSDownloader):
             raise Exception("Valitse taustakartta.")
         layer_id = self._get_basemap_layer_id(provider, map_display)
         boundary_fc = None
-        if provider in ("MML", "Kapsi"):
+        if provider == "Kapsi":
             if extent_type == "Oma aineisto (Polygon/Polyline)":
                 boundary_fc = self._prepare_custom_boundary(custom_layer)
             else:
@@ -5549,16 +5732,10 @@ class MMLBasemapDownloader(VaylaWFSDownloader):
         try:
             if provider == "MML":
                 if not api_key.strip():
-                    raise Exception("Rasterilataus vaatii MML API-avaimen.")
-                raster_gdb = self._ensure_raster_file_gdb(workspace)
-                final_tif = self._download_mml_wmts_geotiff(
-                    layer_id,
-                    boundary_fc,
-                    self._scratch_folder(),
-                    api_key.strip(),
-                    output_gdb=raster_gdb,
+                    raise Exception("MML:n vector tile -palvelu vaatii API-avaimen.")
+                self._add_mml_vector_tile_layer(
+                    layer_id, map_display, api_key.strip()
                 )
-                self._add_mml_background_layers(final_tif, layer_id, map_display)
             else:
                 out_jpg = self._download_kapsi_wms_jpeg(
                     layer_id, boundary_fc, self._scratch_folder()

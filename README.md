@@ -94,18 +94,30 @@ WFS- ja rasterikäsittely tehdään ajokohtaisessa paikallisessa scratch-geodata
 
 ## Karttapaikka / Maanmittauslaitos
 
-MML-taustakartat käyttävät Maanmittauslaitoksen nykyistä avointa
-Karttakuvapalvelua osoitteessa `avoin-karttakuva.maanmittauslaitos.fi`.
-Taustakarttatyökalun MML-valinnat ovat **Taustakartta** ja **Maastokartta**.
-WMTS-tiilet haetaan API-avaimella sekä URL-parametrilla että HTTP Basic
-otsakkeella. Jokainen PNG8-tiili muunnetaan ensin omaksi RGB-TIFFikseen
-`ColormapToRGB`-toiminnolla; vasta sen jälkeen RGB-TIFFit mosaiikoidaan
-EPSG:3067-File Geodatabase -rasteriksi. PNG8-tiiliä ei mosaiikoida suoraan.
+Yleisen **Suomenväylät.fi**-työkalun **MML**-lähde käyttää Maanmittauslaitoksen
+nykyistä kiinteistöaineistojen OGC API Features -palvelua:
+`https://avoin-paikkatieto.maanmittauslaitos.fi/kiinteisto-avoin/simple-features/v3/`.
+Kokoelmat haetaan dynaamisesti palvelun `collections`-resurssista, joten myös
+uudet MML-kiinteistötasot tulevat valikkoon ilman koodimuutosta. Jokainen valittu
+kokoelma haetaan GeoJSON-sivuina, projisoidaan EPSG:3067:ään ja leikataan
+paikallisesti rajaukseen.
 
-Kartalle lisätään paikallinen RGB-rasteri ja julkinen Kapsin live-WMS samaan
-`Taustakartta`-ryhmään. Live-WMS on oletuksena näkyvissä ja paikallinen rasteri
-piilotettuna. Jos WMS:n lisääminen epäonnistuu, paikallinen rasteri otetaan
-automaattisesti käyttöön varatasona. API-avainta ei kirjoiteta WMS-osoitteeseen.
+MML:n OGC API Features- ja vector tile -pyynnöt käyttävät samaa MML API-avainta
+HTTP Basic -tunnistautumisessa. Avainta ei lisätä OGC API -osoitteeseen eikä
+lokiviesteihin.
+
+**Taustakartat (MML/Kapsi)** -työkalun MML-valinnat **Taustakartta**,
+**Maastokartta** ja **Kiinteistojaotus** lisätään nykyisistä MML TileJSON-
+vektoritiilipalveluista suoraan aktiiviseen karttaan. MML:n vector tile -tasot
+ovat live-palveluja, joten ne noudattavat karttanäkymää eivätkä tuota paikallista
+rasterikopiota; alue- ja tallennuskohdeparametrit koskevat tässä työkalussa vain
+Kapsin rasterilatausta. MML:n kiinteistöjaotuksen TileJSON on:
+`https://avoin-karttakuva.maanmittauslaitos.fi/kiinteisto-avoin/v3/kiinteistojaotus/ETRS-TM35FIN/tilejson.json`.
+
+Kapsi säilyy rajauskohtaisena JPEG-rasterilatauksena. MML:n vanhat WMTS-rasterin
+muunnosrutiinit ovat edelleen lähdekoodissa yhteensopivuus-/varareitteinä,
+mutta niitä ei käytetä MML:n nykyisessä tasolistauksessa tai taustakarttatyökalun
+MML-polussa.
 
 ArcGIS Pron tasovalinta säilytetään suodatinlistan päivityksen yli, jos valittu
 taso kuuluu edelleen valittuihin lähteisiin. Tämä koskee muun muassa Kapsi- ja
