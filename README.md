@@ -29,7 +29,7 @@ Skripti käyttää vain käännöksen build-kansiossa olevaa DLL:ää eikä kosk
 automaattisesti ArcGIS Pron AssemblyCache-kopiota. Se rakentaa uuden
 `bin\Debug\net8.0-windows\suomenvaylat.esriAddInX`-paketin tyhjästä, sijoittaa
 DLL:n ja työkalut viralliseen `Install\`-hakemistoon, tarkistaa CLR-tyypit ja
-validoi paketin sisällön. Paketti käyttää versiota `1.0.10`, jotta ArcGIS Pro
+validoi paketin sisällön. Paketti käyttää versiota `1.0.11`, jotta ArcGIS Pro
 tunnistaa sen päivitykseksi.
 
 Kapsin tarkat mittakaavatasot jaetaan tarvittaessa useaan enintään 25 laatan latauserään ja yhdistetään lopuksi yhdeksi rasteriksi.
@@ -68,7 +68,7 @@ polku parametrilla `-MSBuildPath`.
 
 ### TypeNotFound / command unavailable
 
-Jos ArcGIS Pro näyttää virheen `TypeNotFound` tai ilmoittaa komennon olevan unavailable, paketissa on ollut vanha/väärä DLL tai väärä AddInX-rakenne. `package-addin.ps1` tarkistaa nyt assemblyn nimen, varmistaa että DLL sisältää tyypit `suomenvaylat.Module1` ja `suomenvaylat.OpenSuomenvaylatToolButton`, sekä pakottaa runtime-tiedostot `Install\`-hakemistoon. Add-in-versiona on `1.0.10`, jotta ArcGIS Pro tunnistaa tämän päivitykseksi.
+Jos ArcGIS Pro näyttää virheen `TypeNotFound` tai ilmoittaa komennon olevan unavailable, paketissa on ollut vanha/väärä DLL tai väärä AddInX-rakenne. `package-addin.ps1` tarkistaa nyt assemblyn nimen, varmistaa että DLL sisältää tyypit `suomenvaylat.Module1` ja `suomenvaylat.OpenSuomenvaylatToolButton`, sekä pakottaa runtime-tiedostot `Install\`-hakemistoon. Add-in-versiona on `1.0.11`, jotta ArcGIS Pro tunnistaa tämän päivitykseksi.
 
 Jos tarkistus ilmoittaa väärästä DLL:stä, käännä C#-projekti ArcGIS Pro SDK:n kanssa ja anna tulos suoraan:
 
@@ -122,6 +122,25 @@ MML-polussa.
 ArcGIS Pron tasovalinta säilytetään suodatinlistan päivityksen yli, jos valittu
 taso kuuluu edelleen valittuihin lähteisiin. Tämä koskee muun muassa Kapsi- ja
 Karttapaikka-tasoja.
+
+## OpenStreetMap POI-pisteet
+
+**OpenStreetMap**-lähteen **POI-pisteet**-taso hakee rajauksen POI-kohteet
+Overpass APIsta ja kokoaa ne yhdeksi pistetasoksi. Luokitus vastaa Geofabrikin
+`gis_osm_pois_free`-rakennetta: tuloksessa ovat `osm_id`, `code`, `fclass` ja
+`name`. Lisäksi `osm_type` kertoo, oliko alkuperäinen OSM-kohde `node`, `way` vai
+`relation`.
+
+Haku kattaa sekä OSM:ssä valmiiksi pisteinä kuvatut POI:t että alueina kuvatut
+kohteet. `way`- ja `relation`-kohteista muodostetaan Overpassin laskema
+keskipiste, joten esimerkiksi rakennuksen alueena piirretty hotelli tai ravintola
+päätyy samaan pistetasoon. Moniluokkainen OSM-kohde tuottaa yhden rivin jokaista
+osuvaa Geofabrik-`fclass`-luokkaa kohti. Julkisen Overpass-palvelun häiriössä
+työkalu kokeilee automaattisesti toista palvelinosoitetta ja tiheässä haussa
+pienempiä ruutuja.
+
+Rajapinnan, vertailuaineiston ja luokkaryhmien tarkempi kartoitus on tiedostossa
+[`docs/OSM_POI.md`](docs/OSM_POI.md).
 
 Karttapaikka-lähde käyttää nykyisiä Maanmittauslaitoksen INSPIRE WFS -palveluja. Vanhat
 `avoin-karttakuva.maanmittauslaitos.fi/inspire/wfs`- ja

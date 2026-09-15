@@ -754,6 +754,147 @@ class ToolboxHelperTests(unittest.TestCase):
             source[osm_branch:osm_branch_end],
         )
 
+    def test_osm_catalog_contains_geofabrik_poi_points_layer(self):
+        registry = MODULE.WFSSourceRegistry()
+        endpoints = registry.get_endpoints("OpenStreetMap")
+        self.assertGreaterEqual(len(endpoints), 2)
+        self.assertTrue(all(url.startswith("https://") for url in endpoints))
+
+        layers = MODULE.OverpassAdapter.get_layers()
+        poi = next(
+            layer for layer in layers
+            if layer["id"] == MODULE.GeofabrikPOIAdapter.LAYER_ID
+        )
+        self.assertEqual("POI-pisteet", poi["title"])
+        self.assertEqual("OpenStreetMap", poi["source"])
+        self.assertEqual("osm", poi["kind"])
+
+    def test_overpass_connection_falls_back_to_second_endpoint(self):
+        class Registry:
+            @staticmethod
+            def get_endpoints(source_name):
+                assert source_name == "OpenStreetMap"
+                return ["https://first.example/api", "https://second.example/api"]
+
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            @staticmethod
+            def read():
+                return b'{"elements": [{"type": "node", "id": 1}]}'
+
+        calls = []
+
+        def fake_open(request, timeout=0):
+            calls.append((request.full_url, timeout))
+            if len(calls) == 1:
+                raise MODULE.urllib.error.URLError("primary unavailable")
+            return Response()
+
+        self.tool.wfs_registry = Registry()
+        original_open = MODULE.urllib.request.urlopen
+        MODULE.urllib.request.urlopen = fake_open
+        try:
+            result = self.tool._fetch_overpass_json("[out:json];node(1);out;")
+        finally:
+            MODULE.urllib.request.urlopen = original_open
+
+        self.assertEqual({"elements": [{"type": "node", "id": 1}]}, result)
+        self.assertEqual(
+            [
+                ("https://first.example/api", 150),
+                ("https://second.example/api", 150),
+            ],
+            calls,
+        )
+
+    def test_geofabrik_poi_query_combines_point_and_area_osm_objects(self):
+        query = MODULE.GeofabrikPOIAdapter.build_query("60,24,61,25")
+        self.assertIn('[out:json][timeout:120]', query)
+        self.assertIn('nwr["amenity"]', query)
+        self.assertIn('nwr["shop"]', query)
+        self.assertIn('nwr["tourism"]', query)
+        self.assertIn('(60,24,61,25)', query)
+        self.assertTrue(query.endswith("out center;"))
+
+    def test_geofabrik_poi_classification_keeps_multiple_classes(self):
+        classes = MODULE.GeofabrikPOIAdapter.classify({
+            "amenity": "restaurant",
+            "tourism": "hotel",
+            "name": "Testikohde",
+        })
+        self.assertEqual(
+            [(2301, "restaurant"), (2401, "hotel")],
+            classes,
+        )
+        self.assertEqual(
+            [(2031, "recycling_glass")],
+            MODULE.GeofabrikPOIAdapter.classify({
+                "amenity": "recycling", "recycling:glass": "yes"
+            }),
+        )
+
+    def test_geofabrik_poi_catalog_has_all_mapped_feature_classes(self):
+        classes = {
+            (code, fclass)
+            for _, _, code, fclass in MODULE.GeofabrikPOIAdapter.TAG_CLASSES
+        }
+        classes.update({
+            (2017, "consulate"),
+            (2030, "recycling"),
+            (2031, "recycling_glass"),
+            (2032, "recycling_paper"),
+            (2033, "recycling_clothes"),
+            (2034, "recycling_metal"),
+            (2590, "vending_machine"),
+            (2592, "vending_parking"),
+            (2950, "tower"),
+            (2951, "comms_tower"),
+            (2953, "observation_tower"),
+        })
+        # Liitteen 141 luokkaa sekä kaksi määrittelyn mukaista luokkaa,
+        # joilla ei ollut Suomen otoksessa yhtään pistettä.
+        self.assertEqual(143, len(classes))
+        self.assertEqual(
+            [(2953, "observation_tower")],
+            MODULE.GeofabrikPOIAdapter.classify({
+                "man_made": "tower", "tower:type": "observation"
+            }),
+        )
+
+    def test_geofabrik_poi_geojson_outputs_nodes_and_area_centres_as_points(self):
+        result = MODULE.GeofabrikPOIAdapter.to_geojson({
+            "elements": [
+                {
+                    "type": "node", "id": 10, "lat": 60.1, "lon": 24.1,
+                    "tags": {"amenity": "cafe", "name": "Kahvila"},
+                },
+                {
+                    "type": "way", "id": 20,
+                    "center": {"lat": 60.2, "lon": 24.2},
+                    "tags": {"amenity": "restaurant", "tourism": "attraction"},
+                },
+            ]
+        })
+        self.assertEqual(3, len(result["features"]))
+        self.assertTrue(all(
+            feature["geometry"]["type"] == "Point"
+            for feature in result["features"]
+        ))
+        way_features = [
+            feature for feature in result["features"]
+            if feature["properties"]["osm_type"] == "way"
+        ]
+        self.assertEqual(
+            {"restaurant", "attraction"},
+            {feature["properties"]["fclass"] for feature in way_features},
+        )
+        self.assertEqual([24.2, 60.2], way_features[0]["geometry"]["coordinates"])
+
     def test_fetch_json_records_network_read_and_parse_separately(self):
         class Response:
             status = 200

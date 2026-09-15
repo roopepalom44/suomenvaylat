@@ -189,7 +189,13 @@ class WFSSourceRegistry(object):
             },
             "OpenStreetMap": {
                 "type": "overpass",
-                "endpoints": ["https://overpass-api.de/api/interpreter"],
+                # Julkiset Overpass-palvelut voivat olla hetkellisesti
+                # ruuhkautuneita. Kutsu yrittää osoitteita järjestyksessä
+                # ja vaihtaa automaattisesti varapalveluun.
+                "endpoints": [
+                    "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+                    "https://overpass-api.de/api/interpreter"
+                ],
                 "description": "OpenStreetMap Overpass API"
             },
             "MML Karttakuva": {
@@ -308,6 +314,7 @@ class OverpassAdapter(object):
         {"id": "osm_nature", "title": "Luonnonsuojelu", "query": '(relation["boundary"="protected_area"]({bbox});way["boundary"="protected_area"]({bbox}););out geom;'},
         {"id": "osm_parking", "title": "Pysakointi", "query": '(way["amenity"="parking"]({bbox});node["amenity"="parking"]({bbox}););out geom;'},
         {"id": "osm_parks", "title": "Puistot", "query": '(way["leisure"="park"]({bbox});relation["leisure"="park"]({bbox}););out geom;'},
+        {"id": "osm_poi_points", "title": "POI-pisteet", "query": None},
         {"id": "osm_poi", "title": "Palvelupisteet", "query": '(node["amenity"]({bbox});way["amenity"]({bbox}););out geom;'},
         {"id": "osm_power", "title": "Sahkoverkko", "query": '(way["power"]({bbox});node["power"]({bbox}););out geom;'},
         {"id": "osm_schools", "title": "Koulut", "query": '(node["amenity"="school"]({bbox});way["amenity"="school"]({bbox}););out geom;'},
@@ -331,6 +338,8 @@ class OverpassAdapter(object):
 
     @classmethod
     def build_query(cls, layer_id, bbox_4326):
+        if layer_id == GeofabrikPOIAdapter.LAYER_ID:
+            return GeofabrikPOIAdapter.build_query(bbox_4326)
         for item in cls.LAYERS:
             if item["id"] == layer_id:
                 return "[out:json][timeout:120];{}".format(item["query"].format(bbox=bbox_4326))
@@ -374,6 +383,298 @@ class OverpassAdapter(object):
         if is_closed and len(coords) >= 4:
             return {"type": "Polygon", "coordinates": [coords]}
         return {"type": "LineString", "coordinates": coords}
+
+
+class GeofabrikPOIAdapter(object):
+    """Geofabrikin POI-luokitusta vastaava yhdistetty OSM-pistetaso.
+
+    Geofabrikin ``pois`` sisältää OSM:ssä pisteinä/viivoina kuvatut
+    kohteet ja ``pois_a`` vastaavat alueet. Overpassin ``out center`` muuttaa
+    way/relation-kohteet pisteiksi, joten yksi POI-pistetaso voi sisältää
+    molemmat esitystavat.
+    """
+
+    LAYER_ID = "osm_poi_points"
+
+    # (OSM-avain, OSM-arvo, Geofabrik code, fclass). Sama kohde voi osua
+    # useaan luokkaan; silloin siitä tehdään yksi feature kutakin luokkaa
+    # kohti, kuten Geofabrikin tutkitussa aineistossa.
+    TAG_CLASSES = [
+        # public / education / health
+        ("amenity", "police", 2001, "police"),
+        ("amenity", "fire_station", 2002, "fire_station"),
+        ("amenity", "post_box", 2004, "post_box"),
+        ("amenity", "post_office", 2005, "post_office"),
+        ("amenity", "telephone", 2006, "telephone"),
+        ("amenity", "library", 2007, "library"),
+        ("amenity", "townhall", 2008, "town_hall"),
+        ("amenity", "courthouse", 2009, "courthouse"),
+        ("amenity", "prison", 2010, "prison"),
+        ("amenity", "embassy", 2011, "embassy"),
+        ("amenity", "community_centre", 2012, "community_centre"),
+        ("amenity", "nursing_home", 2013, "nursing_home"),
+        ("amenity", "arts_centre", 2014, "arts_centre"),
+        ("amenity", "grave_yard", 2015, "graveyard"),
+        ("amenity", "marketplace", 2016, "marketplace"),
+        ("amenity", "university", 2081, "university"),
+        ("amenity", "school", 2082, "school"),
+        ("amenity", "kindergarten", 2083, "kindergarten"),
+        ("amenity", "college", 2084, "college"),
+        ("amenity", "public_building", 2099, "public_building"),
+        ("amenity", "pharmacy", 2101, "pharmacy"),
+        ("amenity", "hospital", 2110, "hospital"),
+        ("amenity", "clinic", 2111, "clinic"),
+        ("amenity", "doctors", 2120, "doctors"),
+        ("amenity", "dentist", 2121, "dentist"),
+        ("amenity", "veterinary", 2129, "veterinary"),
+
+        # leisure / sports
+        ("amenity", "theatre", 2201, "theatre"),
+        ("amenity", "nightclub", 2202, "nightclub"),
+        ("amenity", "cinema", 2203, "cinema"),
+        ("leisure", "park", 2204, "park"),
+        ("leisure", "playground", 2205, "playground"),
+        ("leisure", "dog_park", 2206, "dog_park"),
+        ("leisure", "sports_centre", 2251, "sports_centre"),
+        ("leisure", "pitch", 2252, "pitch"),
+        ("amenity", "swimming_pool", 2253, "swimming_pool"),
+        ("leisure", "swimming_pool", 2253, "swimming_pool"),
+        ("leisure", "water_park", 2253, "swimming_pool"),
+        ("sport", "swimming", 2253, "swimming_pool"),
+        ("leisure", "golf_course", 2255, "golf_course"),
+        ("leisure", "stadium", 2256, "stadium"),
+        ("leisure", "ice_rink", 2257, "ice_rink"),
+        ("leisure", "track", 2258, "track"),
+        ("leisure", "fitness_centre", 2259, "fitness_centre"),
+        ("leisure", "sports_hall", 2261, "sports_hall"),
+
+        # catering / accommodation
+        ("amenity", "restaurant", 2301, "restaurant"),
+        ("amenity", "fast_food", 2302, "fast_food"),
+        ("amenity", "cafe", 2303, "cafe"),
+        ("amenity", "pub", 2304, "pub"),
+        ("amenity", "bar", 2305, "bar"),
+        ("amenity", "food_court", 2306, "food_court"),
+        ("amenity", "biergarten", 2307, "biergarten"),
+        ("tourism", "hotel", 2401, "hotel"),
+        ("tourism", "motel", 2402, "motel"),
+        ("tourism", "bed_and_breakfast", 2403, "bed_and_breakfast"),
+        ("tourism", "guest_house", 2404, "guesthouse"),
+        ("tourism", "hostel", 2405, "hostel"),
+        ("tourism", "chalet", 2406, "chalet"),
+        ("amenity", "shelter", 2421, "shelter"),
+        ("tourism", "camp_site", 2422, "camp_site"),
+        ("tourism", "alpine_hut", 2423, "alpine_hut"),
+        ("tourism", "caravan_site", 2424, "caravan_site"),
+        ("tourism", "wilderness_hut", 2425, "wilderness_hut"),
+
+        # shopping and services
+        ("shop", "supermarket", 2501, "supermarket"),
+        ("shop", "bakery", 2502, "bakery"),
+        ("shop", "kiosk", 2503, "kiosk"),
+        ("shop", "mall", 2504, "mall"),
+        ("shop", "department_store", 2505, "department_store"),
+        ("shop", "general", 2510, "general"),
+        ("shop", "convenience", 2511, "convenience"),
+        ("shop", "clothes", 2512, "clothes"),
+        ("shop", "florist", 2513, "florist"),
+        ("shop", "chemist", 2514, "chemist"),
+        ("shop", "books", 2515, "bookshop"),
+        ("shop", "butcher", 2516, "butcher"),
+        ("shop", "shoes", 2517, "shoe_shop"),
+        ("shop", "alcohol", 2518, "beverages"),
+        ("shop", "beverages", 2518, "beverages"),
+        ("shop", "optician", 2519, "optician"),
+        ("shop", "jewelry", 2520, "jeweller"),
+        ("shop", "gift", 2521, "gift_shop"),
+        ("shop", "sports", 2522, "sports_shop"),
+        ("shop", "stationery", 2523, "stationery"),
+        ("shop", "outdoor", 2524, "outdoor_shop"),
+        ("shop", "mobile_phone", 2525, "mobile_phone_shop"),
+        ("shop", "toys", 2526, "toy_shop"),
+        ("shop", "newsagent", 2527, "newsagent"),
+        ("shop", "greengrocer", 2528, "greengrocer"),
+        ("shop", "beauty", 2529, "beauty_shop"),
+        ("shop", "video", 2530, "video_shop"),
+        ("shop", "car", 2541, "car_dealership"),
+        ("shop", "bicycle", 2542, "bicycle_shop"),
+        ("shop", "doityourself", 2543, "doityourself"),
+        ("shop", "hardware", 2543, "doityourself"),
+        ("shop", "furniture", 2544, "furniture_shop"),
+        ("shop", "computer", 2546, "computer_shop"),
+        ("shop", "garden_centre", 2547, "garden_centre"),
+        ("shop", "hairdresser", 2561, "hairdresser"),
+        ("shop", "car_repair", 2562, "car_repair"),
+        ("amenity", "car_rental", 2563, "car_rental"),
+        ("amenity", "car_wash", 2564, "car_wash"),
+        ("amenity", "car_sharing", 2565, "car_sharing"),
+        ("amenity", "bicycle_rental", 2566, "bicycle_rental"),
+        ("shop", "travel_agency", 2567, "travel_agent"),
+        ("shop", "laundry", 2568, "laundry"),
+        ("shop", "dry_cleaning", 2568, "laundry"),
+        ("amenity", "bank", 2601, "bank"),
+        ("amenity", "atm", 2602, "atm"),
+
+        # tourism / historic
+        ("tourism", "information", 2701, "tourist_info"),
+        ("tourism", "attraction", 2721, "attraction"),
+        ("tourism", "museum", 2722, "museum"),
+        ("historic", "monument", 2723, "monument"),
+        ("historic", "memorial", 2724, "memorial"),
+        ("tourism", "artwork", 2725, "artwork"),
+        ("historic", "castle", 2731, "castle"),
+        ("historic", "ruins", 2732, "ruins"),
+        ("historic", "archaeological_site", 2733, "archaeological"),
+        ("historic", "wayside_cross", 2734, "wayside_cross"),
+        ("historic", "wayside_shrine", 2735, "wayside_shrine"),
+        ("historic", "battlefield", 2736, "battlefield"),
+        ("historic", "fort", 2737, "fort"),
+        ("tourism", "picnic_site", 2741, "picnic_site"),
+        ("tourism", "viewpoint", 2742, "viewpoint"),
+        ("tourism", "zoo", 2743, "zoo"),
+        ("tourism", "theme_park", 2744, "theme_park"),
+
+        # miscellaneous POIs
+        ("amenity", "toilets", 2901, "toilet"),
+        ("amenity", "bench", 2902, "bench"),
+        ("amenity", "drinking_water", 2903, "drinking_water"),
+        ("amenity", "fountain", 2904, "fountain"),
+        ("amenity", "hunting_stand", 2905, "hunting_stand"),
+        ("amenity", "waste_basket", 2906, "waste_basket"),
+        ("man_made", "surveillance", 2907, "camera_surveillance"),
+        ("man_made", "water_tower", 2952, "water_tower"),
+        ("man_made", "windmill", 2954, "windmill"),
+        ("man_made", "lighthouse", 2955, "lighthouse"),
+        ("man_made", "wastewater_plant", 2961, "wastewater_plant"),
+        ("man_made", "water_well", 2962, "water_well"),
+        ("man_made", "watermill", 2963, "water_mill"),
+        ("man_made", "water_works", 2964, "water_works"),
+    ]
+
+    @classmethod
+    def _query_values_by_key(cls):
+        values = {}
+        for key, value, _, _ in cls.TAG_CLASSES:
+            values.setdefault(key, set()).add(value)
+        extras = {
+            "amenity": {"recycling", "vending_machine"},
+            "office": {"diplomatic"},
+            "landuse": {"cemetery"},
+            "man_made": {"tower"},
+        }
+        for key, extra_values in extras.items():
+            values.setdefault(key, set()).update(extra_values)
+        return values
+
+    @classmethod
+    def build_query(cls, bbox_4326):
+        selectors = []
+        # Näiden yleisten avainten olemassaolohaku on Overpassissa selvästi
+        # nopeampi kuin kymmenien vaihtoehtojen arvo-regex. Tuntemattomat
+        # arvot suodatetaan pois classify-vaiheessa.
+        broad_keys = {"amenity", "historic", "leisure", "shop", "tourism"}
+        for key, values in sorted(cls._query_values_by_key().items()):
+            if key in broad_keys:
+                selectors.append('nwr["{}"]({});'.format(key, bbox_4326))
+                continue
+            if len(values) == 1:
+                selectors.append('nwr["{}"="{}"]({});'.format(
+                    key, next(iter(values)), bbox_4326
+                ))
+                continue
+            # Overpass käyttää POSIX-regexiä, jossa Pythonin
+            # non-capturing-ryhmä ``(?:...)`` ei ole sallittu.
+            pattern = "^({})$".format("|".join(sorted(re.escape(v) for v in values)))
+            selectors.append(
+                'nwr["{}"~"{}"]({});'.format(key, pattern, bbox_4326)
+            )
+        return "[out:json][timeout:120];({});out center;".format("".join(selectors))
+
+    @classmethod
+    def classify(cls, tags):
+        """Palauta kaikki Geofabrik-luokat ilman saman luokan duplikaatteja."""
+        tags = tags or {}
+        classes = []
+
+        def add(value):
+            if value and value not in classes:
+                classes.append(value)
+
+        for key, value, code, fclass in cls.TAG_CLASSES:
+            if str(tags.get(key, "")) == value:
+                add((code, fclass))
+
+        if tags.get("office") == "diplomatic":
+            if tags.get("diplomatic") == "consulate":
+                add((2017, "consulate"))
+            elif tags.get("diplomatic") == "embassy":
+                add((2011, "embassy"))
+        if tags.get("landuse") == "cemetery":
+            add((2015, "graveyard"))
+
+        if tags.get("amenity") == "recycling":
+            recycling_classes = (
+                ("recycling:glass", 2031, "recycling_glass"),
+                ("recycling:glass_bottles", 2031, "recycling_glass"),
+                ("recycling:paper", 2032, "recycling_paper"),
+                ("recycling:clothes", 2033, "recycling_clothes"),
+                ("recycling:scrap_metal", 2034, "recycling_metal"),
+            )
+            specific = None
+            for tag_name, code, fclass in recycling_classes:
+                if tags.get(tag_name) == "yes":
+                    specific = (code, fclass)
+                    break
+            add(specific or (2030, "recycling"))
+
+        if tags.get("amenity") == "vending_machine":
+            if tags.get("vending") == "parking_tickets":
+                add((2592, "vending_parking"))
+            else:
+                add((2590, "vending_machine"))
+
+        if tags.get("man_made") == "tower":
+            tower_type = tags.get("tower:type")
+            if tower_type == "communication":
+                add((2951, "comms_tower"))
+            elif tower_type == "observation":
+                add((2953, "observation_tower"))
+            else:
+                add((2950, "tower"))
+        return classes
+
+    @staticmethod
+    def _point_geometry(element):
+        if element.get("type") == "node":
+            lon, lat = element.get("lon"), element.get("lat")
+        else:
+            center = element.get("center") or {}
+            lon, lat = center.get("lon"), center.get("lat")
+        if lon is None or lat is None:
+            return None
+        return {"type": "Point", "coordinates": [lon, lat]}
+
+    @classmethod
+    def to_geojson(cls, overpass_json):
+        features = []
+        for element in overpass_json.get("elements", []) or []:
+            geometry = cls._point_geometry(element)
+            if geometry is None:
+                continue
+            tags = element.get("tags") or {}
+            for code, fclass in cls.classify(tags):
+                features.append({
+                    "type": "Feature",
+                    "geometry": geometry,
+                    "properties": {
+                        "osm_id": str(element.get("id") or ""),
+                        "osm_type": str(element.get("type") or ""),
+                        "code": code,
+                        "fclass": fclass,
+                        "name": str(tags.get("name") or ""),
+                    },
+                })
+        return {"type": "FeatureCollection", "features": features}
 
 
 class ShapefileFieldConverter(object):
@@ -1509,23 +1810,47 @@ class VaylaWFSDownloader(object):
             return True
         return False
 
+    def _fetch_overpass_json(self, query):
+        """Lähetä Overpass-kysely ja vaihda tarvittaessa varapalveluun."""
+        overpass_urls = self.wfs_registry.get_endpoints("OpenStreetMap")
+        if not overpass_urls:
+            raise Exception("OpenStreetMap Overpass -palveluosoite puuttuu.")
+        post_body = urllib.parse.urlencode({"data": query}).encode("utf-8")
+        endpoint_errors = []
+        for overpass_url in overpass_urls:
+            try:
+                req = urllib.request.Request(
+                    overpass_url, data=post_body,
+                    headers={
+                        "Content-Type": "application/x-www-form-urlencoded",
+                        "User-Agent": "ArcGISPro-Suomenvaylat-OSM/1.1",
+                    }
+                )
+                with urllib.request.urlopen(req, timeout=150) as response:
+                    raw = response.read().decode("utf-8", errors="replace")
+                return json.loads(raw)
+            except Exception as ex:
+                endpoint_errors.append("{}: {}".format(
+                    self._sanitize_url(overpass_url), ex
+                ))
+        raise Exception(
+            "Kaikki OpenStreetMap Overpass -yhteydet epäonnistuivat: {}".format(
+                " | ".join(endpoint_errors)
+            )
+        )
+
     def _fetch_osm_feature_chunks(self, layer_id, boundary_fc, max_grid=4):
         bbox_wgs84 = self._extent_bbox_4326(boundary_fc)
-        overpass_url = self.wfs_registry.get_endpoint("OpenStreetMap")
         boundary_sr = arcpy.Describe(boundary_fc).spatialReference
-        temp_feature_classes = []
 
         def _fetch_one(osm_bbox, batch_size):
             query = OverpassAdapter.build_query(layer_id, osm_bbox)
-            # Overpass API requires form-encoded POST: data=<urlencoded_query>
-            post_body = urllib.parse.urlencode({"data": query}).encode("utf-8")
-            req = urllib.request.Request(
-                overpass_url, data=post_body,
-                headers={"Content-Type": "application/x-www-form-urlencoded", "User-Agent": "ArcGISPro-OSMDownloader/1.0"}
-            )
-            with urllib.request.urlopen(req, timeout=180) as response:
-                raw = response.read().decode("utf-8", errors="replace")
-            geojson = OverpassAdapter.to_geojson(json.loads(raw))
+            response_data = self._fetch_overpass_json(query)
+
+            if layer_id == GeofabrikPOIAdapter.LAYER_ID:
+                geojson = GeofabrikPOIAdapter.to_geojson(response_data)
+            else:
+                geojson = OverpassAdapter.to_geojson(response_data)
             if not geojson.get("features"):
                 return [], 0
             temp_json_path = os.path.join(self._scratch_folder(), "osm_{}.geojson".format(uuid.uuid4().hex))
@@ -1547,7 +1872,13 @@ class VaylaWFSDownloader(object):
             self._safe_delete(temp_fc)
             return [projected_fc], len(geojson.get("features", []))
 
-        grid_levels = [1, 2, max_grid]
+        # POI-haku voi olla tavallista OSM-tasoa tiheämpi, joten sille on
+        # yksi lisääntynyt ruudutustaso ennen lopullista virhettä.
+        if layer_id == GeofabrikPOIAdapter.LAYER_ID:
+            max_grid = max(8, max_grid)
+            grid_levels = [1, 2, 4, max_grid]
+        else:
+            grid_levels = [1, 2, max_grid]
         resilience = ResilienceStrategy(max_batch_size=1, grid_levels=grid_levels)
         return resilience.execute_with_fallback(_fetch_one, bbox_wgs84)
 
@@ -4647,6 +4978,7 @@ class VaylaWFSDownloader(object):
             is_heavy = (layer_kind == "wfs" and source_name in self.heavy_chunk_sources and self._is_heavy_layer(layer_clean))
             temp_feature_classes = []
             used_kunta_chunks = False
+            used_overpass_grid = 1
             layer_start = time.perf_counter()
             layer_metrics = PhaseMetrics()
             layer_http_s = 0.0
@@ -4709,11 +5041,18 @@ class VaylaWFSDownloader(object):
                     self._msg("  [TASO] Lopputulos: {}".format(proposed_output_path))
 
             if layer_kind == "osm":
-                requested_mode = "OpenStreetMap Overpass API + paikallinen Clip"
+                if layer_clean == GeofabrikPOIAdapter.LAYER_ID:
+                    requested_mode = (
+                        "OpenStreetMap Overpass API + Geofabrik POI-luokitus + "
+                        "aluekohteiden keskipisteet + paikallinen Clip"
+                    )
+                else:
+                    requested_mode = "OpenStreetMap Overpass API + paikallinen Clip"
                 self._msg("  [TASO] Hakutapa: {}".format(requested_mode))
                 self._msg("  [INFO] Haetaan OpenStreetMap-aineistoa: {}".format(layer_ui_name))
                 try:
                     chunks, total_found, used_grid = self._fetch_osm_feature_chunks(layer_clean, boundary_fc)
+                    used_overpass_grid = used_grid
                     temp_feature_classes.extend(chunks)
                 except Exception as ex:
                     _record_layer_failure(layer_ui_name, ex)
@@ -5120,10 +5459,13 @@ class VaylaWFSDownloader(object):
                 layer_metrics.add("Merge", time.perf_counter() - merge_start)
                 created_merged = True
 
-            # Kuntakohtaisessa haussa vierekkäisten kuntien extent-bboxit menevät
-            # päällekkäin, jolloin sama kohde voi tulla mukaan useasta ruudusta.
+            # Kuntakohtaisessa ja Overpass-ruutuhaussa sama kohde voi tulla
+            # mukaan useasta bboxista. Kaikki attribuutit kuuluvat vertailuun,
+            # joten saman geometrian eri POI-fclass-rivit säilyvät.
             # Poistetaan geometrialtaan identtiset duplikaatit ennen leikkausta.
-            if (used_kunta_chunks or cql_split_effective) and created_merged:
+            if (
+                used_kunta_chunks or cql_split_effective or used_overpass_grid > 1
+            ) and created_merged:
                 try:
                     duplicate_start = time.perf_counter()
                     self._delete_identical_downloads(merged_fc)

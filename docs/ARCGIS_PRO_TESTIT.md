@@ -83,3 +83,19 @@ Yhdistetyn JSONin tai suoran feature class -kirjoituksen toteutusta ei pidä ott
    vaiheita.
 4. Valitse **Kapsi** ja varmista erikseen, että rajaus, rasterilataus ja
    tallennus File GDB:hen toimivat edelleen.
+
+## 9. OpenStreetMap / POI-pisteet
+
+1. Valitse lähteeksi **OpenStreetMap** ja tasoksi **POI-pisteet**. Tee ensin
+   pieni kuntarajaus, esimerkiksi Helsingin keskusta omalla polygonilla.
+2. Varmista lokista hakutapa `Geofabrik POI-luokitus`, Overpass-yhteys ja
+   paikallinen Clip. API-avainta ei tarvita.
+3. Tarkista, että lopputulos on pistetaso ja sisältää kentät `osm_id`,
+   `osm_type`, `code`, `fclass` ja `name`.
+4. Tarkista ainakin `node`- ja `way`-arvoja `osm_type`-kentästä. `way`- ja
+   `relation`-kohteiden geometrian pitää olla alueen keskipiste, ei polygoni.
+5. Etsi moniluokkainen kohde ja varmista, että sama `osm_id` voi esiintyä
+   usealla rivillä eri `code`/`fclass`-arvoilla.
+6. Testaa yhteyskatkon varautuminen estämällä ensisijainen Overpass-osoite
+   testiympäristössä. Haun pitää jatkua toisesta osoitteesta. Laajassa ja
+   tiheässä rajauksessa lokiin pitää tulla ruudutuksen eteneminen.
