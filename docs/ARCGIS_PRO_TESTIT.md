@@ -99,3 +99,7 @@ Yhdistetyn JSONin tai suoran feature class -kirjoituksen toteutusta ei pidä ott
 6. Testaa yhteyskatkon varautuminen estämällä ensisijainen Overpass-osoite
    testiympäristössä. Haun pitää jatkua toisesta osoitteesta. Laajassa ja
    tiheässä rajauksessa lokiin pitää tulla ruudutuksen eteneminen.
+7. Tee regressiotesti valinnalla **Kunta/Kaupunki → Oulu**. Tuloksen pitää olla
+   selvästi epätyhjä pistetaso. Jos Overpass palauttaa kohteita mutta ArcGISin
+   GeoJSON-muunnos tuottaa nolla kohdetta, ajon pitää päättyä näkyvään
+   virheeseen eikä onnistuneeksi merkittyyn tyhjään tasoon.

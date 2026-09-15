@@ -60,6 +60,13 @@ julkista instanssia. Jos rajaus on yhdelle pyynnölle liian tiheä, se yritetä�
 uudelleen 2×2-, 4×4- ja 8×8-ruudukkoina. Ruutujen identtiset rivit poistetaan
 ennen tarkkaa paikallista Clip-rajausta.
 
+ArcGIS-muunnokselle annetaan GeoJSONin geometriatyypiksi nimenomaisesti
+`POINT`. Muunnoksen kohdemäärä tarkistetaan ennen projektointia ja Clip-vaihetta,
+jotta kelvollinen Overpass-vastaus ei voi muuttua huomaamatta tyhjäksi tasoksi.
+Overpassin `remark`-kentässä palauttamat aikakatkaisut ja resurssivirheet
+käsitellään virheinä, jolloin työkalu kokeilee varapalvelua tai pienempää
+hakuruudukkoa.
+
 ## Yhteys- ja vertailutesti 15.9.2026
 
 Kampin testiruudun Overpass POST -pyyntö onnistui HTTP 200 -vastauksella.

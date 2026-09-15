@@ -1828,7 +1828,21 @@ class VaylaWFSDownloader(object):
                 )
                 with urllib.request.urlopen(req, timeout=150) as response:
                     raw = response.read().decode("utf-8", errors="replace")
-                return json.loads(raw)
+                payload = json.loads(raw)
+                if not isinstance(payload, dict):
+                    raise Exception("Overpass palautti odottamattoman JSON-rakenteen.")
+
+                # Overpass voi vastata HTTP 200:lla, vaikka kysely olisi
+                # aikakatkaistu tai resurssiraja olisi ylittynyt. Tällöin
+                # virhe on payloadin remark-kentässä ja elements voi olla
+                # tyhjä. Älä hyväksy sitä oikeaksi nollatulokseksi, vaan
+                # kokeile seuraavaa palvelinta ja lopulta pienempää ruudukkoa.
+                remark = str(payload.get("remark") or "").strip()
+                if remark:
+                    raise Exception("Overpass palautti virheen: {}".format(remark[:500]))
+                if not isinstance(payload.get("elements"), list):
+                    raise Exception("Overpass-vastauksesta puuttuu elements-taulukko.")
+                return payload
             except Exception as ex:
                 endpoint_errors.append("{}: {}".format(
                     self._sanitize_url(overpass_url), ex
@@ -1857,11 +1871,28 @@ class VaylaWFSDownloader(object):
             with open(temp_json_path, "w", encoding="utf-8") as handle:
                 json.dump(geojson, handle, ensure_ascii=False)
             temp_fc = os.path.join(self._scratch_gdb(), "osm_fc_{}".format(uuid.uuid4().hex[:10]))
-            arcpy.conversion.JSONToFeatures(temp_json_path, temp_fc)
             try:
-                os.remove(temp_json_path)
-            except Exception:
-                pass
+                # Esrin JSON To Features vaatii GeoJSONille geometriatyypin.
+                # POI-adapteri tuottaa aina pisteitä; ilman POINT-parametria
+                # ArcGIS voi luoda tyhjän feature classin täysin kelvollisesta
+                # GeoJSONista (havaittu Oulun kuntahaussa).
+                if layer_id == GeofabrikPOIAdapter.LAYER_ID:
+                    arcpy.conversion.JSONToFeatures(temp_json_path, temp_fc, "POINT")
+                else:
+                    arcpy.conversion.JSONToFeatures(temp_json_path, temp_fc)
+            finally:
+                try:
+                    os.remove(temp_json_path)
+                except Exception:
+                    pass
+
+            converted_count = int(arcpy.management.GetCount(temp_fc)[0])
+            if converted_count == 0:
+                self._safe_delete(temp_fc)
+                raise Exception(
+                    "ArcGIS ei muuntanut Overpass-vastauksen {} kohdetta paikkatietokohteiksi."
+                    .format(len(geojson.get("features", [])))
+                )
             # Overpass palauttaa koordinaatit aina WGS84-longitude/latitude-
             # muodossa, mutta GeoJSON-väliaineistoon ei välttämättä tallennu
             # CRS-metadataa. Määritä lähde-CRS ennen Projectia, muuten ArcGIS

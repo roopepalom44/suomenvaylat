@@ -812,6 +812,53 @@ class ToolboxHelperTests(unittest.TestCase):
             calls,
         )
 
+    def test_overpass_remark_is_an_error_and_uses_fallback_endpoint(self):
+        class Registry:
+            @staticmethod
+            def get_endpoints(source_name):
+                assert source_name == "OpenStreetMap"
+                return ["https://first.example/api", "https://second.example/api"]
+
+        class Response:
+            def __init__(self, body):
+                self.body = body
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return self.body
+
+        responses = [
+            b'{"remark": "runtime error: Query timed out", "elements": []}',
+            b'{"elements": [{"type": "node", "id": 2}]}',
+        ]
+
+        def fake_open(request, timeout=0):
+            return Response(responses.pop(0))
+
+        self.tool.wfs_registry = Registry()
+        original_open = MODULE.urllib.request.urlopen
+        MODULE.urllib.request.urlopen = fake_open
+        try:
+            result = self.tool._fetch_overpass_json("[out:json];node(1);out;")
+        finally:
+            MODULE.urllib.request.urlopen = original_open
+
+        self.assertEqual([{"type": "node", "id": 2}], result["elements"])
+        self.assertEqual([], responses)
+
+    def test_poi_geojson_conversion_explicitly_uses_point_geometry(self):
+        source = TOOLBOX.read_text(encoding="utf-8")
+        self.assertIn(
+            'arcpy.conversion.JSONToFeatures(temp_json_path, temp_fc, "POINT")',
+            source,
+        )
+        self.assertIn("if converted_count == 0:", source)
+
     def test_geofabrik_poi_query_combines_point_and_area_osm_objects(self):
         query = MODULE.GeofabrikPOIAdapter.build_query("60,24,61,25")
         self.assertIn('[out:json][timeout:120]', query)
