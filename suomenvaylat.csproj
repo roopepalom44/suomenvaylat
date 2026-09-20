@@ -13,7 +13,6 @@
     <None Remove="Config.daml" />
     <None Remove="Images\Suomenvaylat16.png" />
     <None Remove="Images\Suomenvaylat32.png" />
-    <None Remove="Toolboxes\Resources\credentials.wmts" />
     <None Remove="Toolboxes\Resources\hallinnolliset_aluejaot.gpkg" />
     <None Remove="Toolboxes\VaylaWFSDownloader.pyt" />
   </ItemGroup>
@@ -30,9 +29,6 @@
     <Content Include="DarkImages\AddInDesktop32.png" />
     <Content Include="Images\Suomenvaylat16.png">
       <CopyToOutputDirectory>Never</CopyToOutputDirectory>
-    </Content>
-    <Content Include="Toolboxes\Resources\credentials.wmts">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>
     <Content Include="Toolboxes\VaylaWFSDownloader.pyt">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>

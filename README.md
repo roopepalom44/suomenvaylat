@@ -2,6 +2,21 @@
 
 ArcGIS Pro -laajennus Suomenväylät-aineistojen lataamiseen WFS-rajapinnoista.
 
+## Lataus ja asennus
+
+1. Lataa uusin [Suomenvaylat.esriAddInX](https://github.com/roopepalom44/suomenvaylat/releases/latest/download/Suomenvaylat.esriAddInX) ([kaikki julkaisut](https://github.com/roopepalom44/suomenvaylat/releases)).
+2. Sulje ArcGIS Pro ja asenna tiedosto kaksoisklikkaamalla sitä.
+
+### Julkaisun tekeminen (kehittäjille)
+
+Nosta versio `Config.daml`-tiedostossa, commitoi ja pushaa, ja aja sitten:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\release.ps1
+```
+
+Skripti rakentaa Release-version, paketoi sen ja luo GitHub-releasen `v<versio>` (vaatii ArcGIS Pron ja `gh auth login`).
+
 ## Vaatimukset
 
 
@@ -77,6 +92,49 @@ powershell -ExecutionPolicy Bypass -File .\package-addin.ps1 -AssemblyPath "C:\p
 ```
 
 WFS- ja rasterikäsittely tehdään ajokohtaisessa paikallisessa scratch-geodatabasessa. Verkkotyötilaan kopioidaan vasta valmis taso tai rasteri, joten verkkoaseman hitaus ei hidasta jokaista välivaihetta.
+
+## Suorituskyky ja virheensieto
+
+- **Pysyvät HTTP-yhteydet.** Sivupyynnöt käyttävät samaa TCP/TLS-yhteyttä hostia
+  kohti sen sijaan, että jokainen sivu avaisi uuden. Vanhentunut keep-alive-
+  yhteys uusitaan automaattisesti kerran ennen virheen nostamista.
+- **Rinnakkainen sivujen esihaku.** Ensimmäinen sivu haetaan aina sarjallisesti,
+  jotta outputFormat-, geometriakenttä- ja sortBy-päättely sekä CQL:n varareitit
+  toimivat ennallaan. Vasta kun sivutus on todistetusti käynnissä, seuraavat
+  sivut haetaan rinnakkain (`_page_workers`, oletus 4). Jos palvelu kertoo
+  `numberMatched`- tai `totalFeatures`-arvon, esihaun aalto rajataan siihen,
+  jottei hännästä pyydetä tyhjiä sivuja.
+- **JSONToFeatures ajetaan erissä.** Sivut kootaan yhdeksi FeatureCollectioniksi
+  (`_json_batch_pages`, oletus 8) ennen muunnosta. Tämä vähentää sekä
+  GP-kutsujen määrää että myöhemmän Mergen syötteitä. Ensimmäisen sivun
+  ylätason jäsenet (esim. `crs` ja `geometry_name`) säilyvät ennallaan.
+- **Uudelleenyritys ohimenevissä virheissä.** Aikakatkaisut, katkenneet
+  yhteydet sekä 408/425/429/500/502/503/504 yritetään uudelleen
+  eksponentiaalisella viiveellä (oletus 3 yritystä); palvelimen `Retry-After`
+  voittaa oman viiveen. 4xx-virheitä **ei** yritetä uudelleen, koska esimerkiksi
+  400 ja 414 ovat CQL:n varareiteille merkitseviä signaaleja. Jokainen
+  uudelleenyritys lokitetaan sanitisoidulla palveluosoitteella.
+- **Vaillinaista aineistoa ei enää tallenneta hiljaisesti.** Jos sivutuksen
+  `max_requests` täyttyy, taso kaatuu ja näkyy ajon yhteenvedon
+  epäonnistuneissa tasoissa. Aiemmin vajaa aineisto tallennettiin ja lisättiin
+  kartalle kuin se olisi täysi.
+- **Rasterilaatat ladataan rinnakkain.** Kapsin JPEG-laatat ja MML:n WMTS-tiilet
+  haetaan säikeissä (`_tile_workers`, oletus 5); tiedostojen kirjoitus ja
+  nimien varaus tehdään pääsäikeessä, joten nimet eivät voi törmätä.
+- **Tasolistauksen levyvälimuisti.** GetCapabilities-haut talletetaan
+  `%LOCALAPPDATA%\Suomenvaylat\layer_catalog_cache.json`-tiedostoon 24 tunniksi,
+  joten työkalun avaus ei enää odota verkkoa joka kerta. Välimuistiavain on
+  SHA-256-tiiviste lähteistä ja tunnisteista — tunnisteita itseään ei kirjoiteta
+  levylle. Valinta **Päivitä tasolistaus palvelusta** ohittaa välimuistin
+  kertaluonteisesti.
+- **Keskeneräiset väliaineistot siivotaan.** Kun ruudukkotaso epäonnistuu ja
+  siirrytään hienompaan ruudukkoon, jo luodut scratch-feature classit
+  poistetaan sen sijaan että ne jäisivät paisuttamaan scratch-GDB:tä.
+- `ExportFeatures` korvaa deprecated `FeatureClassToFeatureClass`-työkalun;
+  vanha jää varareitiksi vanhemmille ArcGIS Pro -versioille.
+
+Kaikki rinnakkaisuus koskee vain verkkopyyntöjä. Geoprosessointi ja arcpy-kutsut
+tehdään edelleen yksinomaan pääsäikeessä.
 
 ## WFS-haun rajaus ja suorituskykyloki
 
@@ -156,6 +214,15 @@ INSPIRE WFS -palvelut ovat avoimia ilman API-avainta. Maastotiedot OGC API Featu
 palveluosoite, jotta rakennusten piste- ja polygoniversiot eivät sekoitu.
 
 ## Tunnisteiden käsittely
+
+> **Huom.** Aiemmissa versioissa repositoriossa oli tiedosto
+> `Toolboxes/Resources/credentials.wmts`, joka sisälsi WMTS-palvelun
+> käyttäjätunnuksen ja sisäisen verkkopolun. Tiedostoa ei koskaan käytetty
+> koodista, ja se on nyt poistettu paketista, projektitiedostosta ja
+> paketointiskriptistä. `*.wmts`-tiedostot on lisätty `.gitignore`en.
+> **Tiedostossa ollut tunnus on vaihdettava palveluntarjoajan hallinnassa** —
+> tiedoston poisto ei peruuta jo paljastunutta tunnusta.
+
 
 API-avaimet ja salasanat ovat käyttöliittymässä piilotettuja kenttiä. Tallennetut tunnisteet suojataan Windowsin käyttäjäkohtaisella DPAPI-salauksella. Aiemman version selväkieliset arvot migroidaan salattuun muotoon niitä luettaessa. Lokissa WFS-palvelusta näytetään vain sanitisoitu perusosoite ilman query-parametreja, käyttäjätunnusta tai salasanaa.
 

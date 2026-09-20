@@ -3,8 +3,15 @@ import importlib.util
 import os
 import pathlib
 import sys
+import shutil
+import tempfile
+import time
 import types
 import unittest
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+
+import fake_http
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -275,7 +282,7 @@ class ToolboxHelperTests(unittest.TestCase):
         self.tool._runtime_karttakuva_pass = ""
         calls = []
 
-        def fake_fetch_layer_list(sources):
+        def fake_fetch_layer_list(sources, cache_key=None, allow_disk_cache=True):
             calls.append(self.tool._runtime_karttapaikka_api_key)
             return (
                 ["tieviiva (Maastotiedot) - Karttapaikka"]
@@ -355,7 +362,9 @@ class ToolboxHelperTests(unittest.TestCase):
         self.tool._runtime_karttapaikka_api_key = ""
         self.tool._runtime_karttakuva_user = ""
         self.tool._runtime_karttakuva_pass = ""
-        self.tool._fetch_layer_list = lambda sources: [layer_name]
+        self.tool._fetch_layer_list = (
+            lambda sources, cache_key=None, allow_disk_cache=True: [layer_name]
+        )
         self.tool._get_extent_choices = lambda extent_type: []
         self.tool._warn = lambda message: None
         self.tool.updateParameters(parameters)
@@ -399,7 +408,9 @@ class ToolboxHelperTests(unittest.TestCase):
         self.tool._runtime_karttapaikka_api_key = ""
         self.tool._runtime_karttakuva_user = ""
         self.tool._runtime_karttakuva_pass = ""
-        self.tool._fetch_layer_list = lambda sources: [layer]
+        self.tool._fetch_layer_list = (
+            lambda sources, cache_key=None, allow_disk_cache=True: [layer]
+        )
         self.tool._get_extent_choices = lambda extent_type: []
         self.tool._warn = lambda message: None
         parameters = [
@@ -943,28 +954,14 @@ class ToolboxHelperTests(unittest.TestCase):
         self.assertEqual([24.2, 60.2], way_features[0]["geometry"]["coordinates"])
 
     def test_fetch_json_records_network_read_and_parse_separately(self):
-        class Response:
-            status = 200
-            headers = {"Content-Type": "application/json"}
-
-            def __enter__(self):
-                return self
-
-            def __exit__(self, exc_type, exc, tb):
-                return False
-
-            def read(self):
-                return b'{"features": []}'
-
-        original = MODULE.urllib.request.urlopen
-        MODULE.urllib.request.urlopen = lambda request, timeout=60: Response()
-        try:
-            timings = MODULE.PhaseMetrics()
-            data, raw, status, content_type = self.tool._fetch_json(
-                "https://example.test/wfs", timings=timings
-            )
-        finally:
-            MODULE.urllib.request.urlopen = original
+        transport = fake_http.FakeTransport([
+            fake_http.FakeResponse({"features": []}, read_seconds=0.01)
+        ])
+        self.tool._http_transport = transport
+        timings = MODULE.PhaseMetrics()
+        data, raw, status, content_type = self.tool._fetch_json(
+            "https://example.test/wfs", timings=timings
+        )
 
         self.assertEqual({"features": []}, data)
         self.assertEqual(200, status)
@@ -1002,7 +999,9 @@ class ToolboxHelperTests(unittest.TestCase):
         )
         conversion = MODULE.PhaseMetrics()
         conversion.set("JSONToFeatures", 0.125)
-        self.tool._json_to_temp_fc = lambda raw: ("temporary_fc", conversion)
+        self.tool._json_to_temp_fc = lambda raw, project_to_epsg=None: (
+            "temporary_fc", conversion
+        )
         chunks, found, requests, stats, cql_ok = self.tool._fetch_bbox_feature_chunks(
             "https://example.test/wfs", "other:test", "1,2,3,4",
             ["application/json"], 5000, source_name="Liiteri",
@@ -1111,6 +1110,238 @@ class ToolboxHelperTests(unittest.TestCase):
 
         self.assertTrue(defined)
         self.assertEqual([("osm_fc", 4326)], calls)
+
+
+class NetworkPathTests(unittest.TestCase):
+    """Sivutus, uudelleenyritys ja varareitit vale-HTTP-kerroksen päällä."""
+
+    def setUp(self):
+        self.tool = MODULE.VaylaWFSDownloader.__new__(MODULE.VaylaWFSDownloader)
+        self.tool._wfs_geometry_field_cache = {}
+        self.tool._wfs_sort_candidate_cache = {}
+        self.tool._wfs_sort_field_cache = {}
+        self.tool._wfs_output_format_cache = {}
+        self.tool._verbose_diagnostics = False
+        self.tool._http_max_attempts = 3
+        self.tool._page_workers = 1
+        self.tool._json_batch_pages = 1
+        self.messages = []
+        self.warnings = []
+        self.tool._msg = self.messages.append
+        self.tool._warn = self.warnings.append
+        self.tool.heavy_chunk_sources = []
+        self.converted = []
+
+        def fake_pages_to_fc(pages, project_to_epsg=None):
+            merged = MODULE.VaylaWFSDownloader._merge_feature_pages(pages)
+            if not merged or not merged.get("features"):
+                return None, MODULE.PhaseMetrics()
+            self.converted.append(len(merged["features"]))
+            timings = MODULE.PhaseMetrics()
+            timings.set("JSONToFeatures", 0.01)
+            return "fc_{}".format(len(self.converted)), timings
+
+        self.tool._pages_to_temp_fc = fake_pages_to_fc
+
+    def _install(self, transport):
+        self.tool._http_transport = transport
+        return transport
+
+    def test_sleeps_are_skipped(self):
+        # Testit eivät saa nukkua oikeita backoff-viiveitä.
+        self.assertTrue(hasattr(self.tool, "_retry_delay"))
+
+    def test_retries_transient_network_error_then_succeeds(self):
+        self.tool._retry_delay = lambda attempt, retry_after=None: 0.0
+        transport = self._install(fake_http.FakeTransport([
+            fake_http.FakeResponse(error=TimeoutError("timeout")),
+            fake_http.FakeResponse({"features": []}),
+        ]))
+        data, raw, status, ctype = self.tool._fetch_json("https://example.test/wfs")
+        self.assertEqual({"features": []}, data)
+        self.assertEqual(2, transport.call_count)
+        self.assertTrue(any("Verkkopyyntö epäonnistui" in w for w in self.warnings))
+
+    def test_retries_server_error_status(self):
+        self.tool._retry_delay = lambda attempt, retry_after=None: 0.0
+        transport = self._install(fake_http.FakeTransport([
+            fake_http.FakeResponse("gateway down", status=502, content_type="text/html"),
+            fake_http.FakeResponse({"features": []}),
+        ]))
+        data, _, status, _ = self.tool._fetch_json("https://example.test/wfs")
+        self.assertEqual({"features": []}, data)
+        self.assertEqual(200, status)
+        self.assertEqual(2, transport.call_count)
+
+    def test_client_error_is_not_retried(self):
+        self.tool._retry_delay = lambda attempt, retry_after=None: 0.0
+        transport = self._install(fake_http.FakeTransport([
+            fake_http.FakeResponse("request too long", status=414, content_type="text/html"),
+        ]))
+        data, _, status, _ = self.tool._fetch_json("https://example.test/wfs")
+        self.assertIsNone(data)
+        self.assertEqual(414, status)
+        self.assertEqual(1, transport.call_count)
+
+    def test_gives_up_after_max_attempts(self):
+        self.tool._retry_delay = lambda attempt, retry_after=None: 0.0
+        transport = self._install(fake_http.FakeTransport([
+            fake_http.FakeResponse(error=TimeoutError("t1")),
+            fake_http.FakeResponse(error=TimeoutError("t2")),
+            fake_http.FakeResponse(error=TimeoutError("t3")),
+        ]))
+        data, raw, status, _ = self.tool._fetch_json("https://example.test/wfs")
+        self.assertIsNone(data)
+        self.assertEqual(3, transport.call_count)
+
+    def test_serial_pagination_walks_start_index_to_the_end(self):
+        transport = self._install(fake_http.FakeTransport(
+            handler=fake_http.paged_handler(total_features=250, page_size=100)
+        ))
+        chunks, found, requests, stats, cql_ok = self.tool._fetch_bbox_feature_chunks(
+            "https://example.test/wfs", "other:test", "1,2,3,4",
+            ["application/json"], 100, source_name="Liiteri",
+        )
+        self.assertEqual(250, found)
+        self.assertEqual(3, requests)
+        self.assertEqual([0, 100, 200], transport.start_indexes())
+        self.assertFalse(stats["truncated"])
+
+    def test_parallel_prefetch_returns_same_features_as_serial(self):
+        self.tool._page_workers = 4
+        transport = self._install(fake_http.FakeTransport(
+            handler=fake_http.paged_handler(total_features=250, page_size=100)
+        ))
+        chunks, found, requests, stats, cql_ok = self.tool._fetch_bbox_feature_chunks(
+            "https://example.test/wfs", "other:test", "1,2,3,4",
+            ["application/json"], 100, source_name="Liiteri",
+        )
+        self.assertEqual(250, found)
+        # Kaikki sivut haettiin, eika yhtaan startIndexia haettu kahdesti.
+        indexes = transport.start_indexes()
+        self.assertEqual(len(indexes), len(set(indexes)))
+        self.assertTrue({0, 100, 200}.issubset(set(indexes)))
+
+    def test_prefetch_wave_is_capped_by_number_matched(self):
+        self.tool._page_workers = 4
+
+        def handler(url, method, headers, body):
+            import urllib.parse as up
+            query = dict(up.parse_qsl(up.urlsplit(url).query))
+            start = int(query.get("startIndex", 0))
+            count = min(100, max(0, 250 - start))
+            payload = fake_http.feature_page(count, start)
+            payload["numberMatched"] = 250
+            return fake_http.FakeResponse(payload)
+
+        transport = self._install(fake_http.FakeTransport(handler=handler))
+        chunks, found, requests, stats, cql_ok = self.tool._fetch_bbox_feature_chunks(
+            "https://example.test/wfs", "other:test", "1,2,3,4",
+            ["application/json"], 100, source_name="Liiteri",
+        )
+        self.assertEqual(250, found)
+        # numberMatched=250 -> hannasta ei haeta tyhjia sivuja.
+        self.assertEqual([0, 100, 200], sorted(transport.start_indexes()))
+
+    def test_batched_conversion_makes_one_call_per_batch(self):
+        self.tool._json_batch_pages = 3
+        self._install(fake_http.FakeTransport(
+            handler=fake_http.paged_handler(total_features=500, page_size=100)
+        ))
+        chunks, found, requests, stats, cql_ok = self.tool._fetch_bbox_feature_chunks(
+            "https://example.test/wfs", "other:test", "1,2,3,4",
+            ["application/json"], 100, source_name="Liiteri",
+        )
+        self.assertEqual(500, found)
+        # 5 taydellista sivua + 1 tyhja: erat 3 + 2 = kaksi muunnosta.
+        self.assertEqual([300, 200], self.converted)
+        self.assertEqual(2, len(chunks))
+
+    def test_merge_feature_pages_keeps_first_page_members(self):
+        merged = MODULE.VaylaWFSDownloader._merge_feature_pages([
+            {"type": "FeatureCollection", "crs": "EPSG:3067",
+             "geometry_name": "geom", "numberReturned": 2,
+             "features": [{"id": 1}, {"id": 2}]},
+            {"type": "FeatureCollection", "features": [{"id": 3}]},
+        ])
+        self.assertEqual("EPSG:3067", merged["crs"])
+        self.assertEqual("geom", merged["geometry_name"])
+        self.assertNotIn("numberReturned", merged)
+        self.assertEqual([1, 2, 3], [f["id"] for f in merged["features"]])
+
+    def test_truncation_is_reported_in_stats(self):
+        self._install(fake_http.FakeTransport(
+            handler=fake_http.paged_handler(total_features=10000, page_size=100)
+        ))
+        chunks, found, requests, stats, cql_ok = self.tool._fetch_bbox_feature_chunks(
+            "https://example.test/wfs", "other:test", "1,2,3,4",
+            ["application/json"], 100, max_requests=4, source_name="Liiteri",
+        )
+        self.assertTrue(stats["truncated"])
+        self.assertEqual(400, found)
+
+
+
+class LayerCatalogCacheTests(unittest.TestCase):
+    """Tasolistauksen levyvälimuisti."""
+
+    def setUp(self):
+        self.tool = MODULE.VaylaWFSDownloader.__new__(MODULE.VaylaWFSDownloader)
+        self.tool._layer_mapping = {}
+        self.tool._layer_cache_ttl_s = 86400
+        self.tmpdir = tempfile.mkdtemp()
+        self.cache_path = os.path.join(self.tmpdir, "catalog.json")
+        self.tool._layer_cache_file = lambda: self.cache_path
+        self.fetch_calls = []
+
+        def fake_entries(sources):
+            self.fetch_calls.append(list(sources))
+            self.tool._layer_mapping = {"Taso - Vayla": {"id": "vayla:taso"}}
+            return ["Taso - Vayla"]
+
+        self.tool._get_layer_entries_for_sources = fake_entries
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_second_call_is_served_from_disk_without_network(self):
+        first = self.tool._fetch_layer_list(["Vayla"], cache_key="k1")
+        self.assertEqual(["Taso - Vayla"], first)
+        self.assertEqual(1, len(self.fetch_calls))
+
+        # Uusi instanssi = uusi ArcGIS Pro -dialogin avaus.
+        fresh = MODULE.VaylaWFSDownloader.__new__(MODULE.VaylaWFSDownloader)
+        fresh._layer_mapping = {}
+        fresh._layer_cache_ttl_s = 86400
+        fresh._layer_cache_file = lambda: self.cache_path
+        fresh._get_layer_entries_for_sources = lambda sources: self.fail(
+            "levyvalimuistin pitaisi estaa verkkohaku"
+        )
+        second = fresh._fetch_layer_list(["Vayla"], cache_key="k1")
+        self.assertEqual(["Taso - Vayla"], second)
+        self.assertEqual({"Taso - Vayla": {"id": "vayla:taso"}}, fresh._layer_mapping)
+
+    def test_expired_cache_is_refetched(self):
+        self.tool._fetch_layer_list(["Vayla"], cache_key="k1")
+        old = time.time() - 10
+        os.utime(self.cache_path, (old, old))
+        self.tool._layer_cache_ttl_s = 1
+        self.tool._fetch_layer_list(["Vayla"], cache_key="k1")
+        self.assertEqual(2, len(self.fetch_calls))
+
+    def test_refresh_bypass_skips_disk_cache(self):
+        self.tool._fetch_layer_list(["Vayla"], cache_key="k1")
+        self.tool._fetch_layer_list(["Vayla"], cache_key="k1", allow_disk_cache=False)
+        self.assertEqual(2, len(self.fetch_calls))
+
+    def test_different_key_does_not_collide(self):
+        self.tool._fetch_layer_list(["Vayla"], cache_key="k1")
+        self.tool._fetch_layer_list(["Digiroad"], cache_key="k2")
+        self.assertEqual(2, len(self.fetch_calls))
+        self.assertEqual(
+            ["Taso - Vayla"], self.tool._fetch_layer_list(["Vayla"], cache_key="k1")
+        )
+        self.assertEqual(2, len(self.fetch_calls))
 
 
 if __name__ == "__main__":

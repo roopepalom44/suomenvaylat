@@ -16,6 +16,9 @@ import hashlib
 import math
 import shutil
 import tempfile
+import socket
+import threading
+import concurrent.futures
 import ctypes
 from ctypes import wintypes
 
@@ -113,6 +116,143 @@ class PhaseMetrics(object):
 
 class CQLRequestRejected(Exception):
     """CQL GET ja POST epäonnistuivat; kutsuja voi kokeilla pienempiä CQL-osia."""
+
+
+# Uudelleenyritettävät HTTP-tilakoodit. 4xx-virheitä ei yritetä uudelleen:
+# esimerkiksi 400 ja 414 ovat kutsujalle merkitseviä signaaleja (liian pitkä
+# CQL_FILTER), joiden varareitit hoidetaan ylempänä.
+RETRYABLE_HTTP_STATUS = frozenset([408, 425, 429, 500, 502, 503, 504])
+RETRYABLE_NETWORK_ERRORS = (
+    http.client.IncompleteRead,
+    http.client.RemoteDisconnected,
+    http.client.BadStatusLine,
+    http.client.CannotSendRequest,
+    http.client.ResponseNotReady,
+    urllib.error.URLError,
+    TimeoutError,
+    ConnectionError,
+    socket.timeout,
+    OSError,
+)
+
+
+class HttpTransport(object):
+    """Säiekohtainen HTTP-yhteyspooli, joka käyttää yhteyksiä uudelleen.
+
+    urllib avaa jokaiselle pyynnölle uuden TCP+TLS-yhteyden. Sivutetussa
+    WFS-haussa se tarkoittaa kymmeniä turhia kättelyitä. Tämä luokka pitää
+    yhteyden auki hostia kohti ja palaa urllibiin, jos jokin menee pieleen.
+
+    Pooli on ``threading.local``, joten rinnakkaiset sivuhaut eivät jaa
+    samaa socketia.
+    """
+
+    MAX_REDIRECTS = 5
+
+    def __init__(self):
+        self._local = threading.local()
+
+    def _pool(self):
+        pool = getattr(self._local, "pool", None)
+        if pool is None:
+            pool = {}
+            self._local.pool = pool
+        return pool
+
+    def _connection(self, scheme, host, port, timeout):
+        key = (scheme, host, port, timeout)
+        pool = self._pool()
+        conn = pool.get(key)
+        if conn is None:
+            if scheme == "https":
+                conn = http.client.HTTPSConnection(host, port, timeout=timeout)
+            else:
+                conn = http.client.HTTPConnection(host, port, timeout=timeout)
+            pool[key] = conn
+        return key, conn
+
+    def _drop(self, key):
+        conn = self._pool().pop(key, None)
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    def close_all(self):
+        pool = self._pool()
+        for key in list(pool.keys()):
+            self._drop(key)
+
+    def request(self, url, method="GET", headers=None, body=None, timeout=60):
+        """Palauta (status, headers, body_bytes, read_seconds).
+
+        Nostaa poikkeuksen verkkovirheessä. ``read_seconds`` erottelee
+        vastauksen lukemisen verkkopyynnön kokonaisajasta, jotta työkalun
+        vaihekohtainen loki säilyy yhtä tarkkana kuin urllib-toteutuksessa.
+        """
+        current_url = url
+        for _ in range(self.MAX_REDIRECTS + 1):
+            status, resp_headers, payload, location, read_s = self._single_request(
+                current_url, method, headers, body, timeout
+            )
+            if status in (301, 302, 303, 307, 308) and location:
+                current_url = urllib.parse.urljoin(current_url, location)
+                if status in (301, 302, 303) and method == "POST":
+                    # 303 (ja käytännössä 301/302) muuttaa POSTin GETiksi.
+                    method = "GET"
+                    body = None
+                continue
+            return status, resp_headers, payload, read_s
+        raise urllib.error.URLError("liian monta uudelleenohjausta: {}".format(url))
+
+    def _single_request(self, url, method, headers, body, timeout):
+        parsed = urllib.parse.urlsplit(url)
+        scheme = (parsed.scheme or "https").lower()
+        if scheme not in ("http", "https"):
+            raise urllib.error.URLError("tuntematon protokolla: {}".format(scheme))
+        host = parsed.hostname or ""
+        port = parsed.port
+        target = urllib.parse.urlunsplit(("", "", parsed.path or "/", parsed.query, ""))
+
+        send_headers = {"Connection": "keep-alive", "Accept-Encoding": "identity"}
+        send_headers.update(headers or {})
+        send_headers.setdefault("Host", parsed.netloc.split("@")[-1])
+
+        # Vanhentunut keep-alive-socket ei ole virhe vaan normaali tilanne:
+        # ensimmäinen yritys uusitaan aina kerran tuoreella yhteydellä.
+        last_error = None
+        for attempt in range(2):
+            key, conn = self._connection(scheme, host, port, timeout)
+            try:
+                conn.request(method, target, body=body, headers=send_headers)
+                response = conn.getresponse()
+                read_start = time.perf_counter()
+                payload = response.read()
+                read_s = time.perf_counter() - read_start
+                status = response.status
+                resp_headers = response.headers
+                location = response.headers.get("Location")
+                if response.will_close or _header_says_close(response.headers):
+                    self._drop(key)
+                return status, resp_headers, payload, location, read_s
+            except RETRYABLE_NETWORK_ERRORS as ex:
+                last_error = ex
+                self._drop(key)
+                if attempt == 0:
+                    continue
+                raise
+            except Exception:
+                self._drop(key)
+                raise
+        raise last_error if last_error else urllib.error.URLError("tuntematon verkkovirhe")
+
+
+def _header_says_close(headers):
+    try:
+        return "close" in (headers.get("Connection", "") or "").lower()
+    except Exception:
+        return False
 
 
 # =================================
@@ -728,14 +868,26 @@ class ShapefileFieldConverter(object):
 class ResilienceStrategy(object):
     """Fallback runner: try full extent, then smaller batches and finer grids."""
 
-    def __init__(self, max_batch_size=10000, grid_levels=None, progress_callback=None):
+    def __init__(self, max_batch_size=10000, grid_levels=None, progress_callback=None,
+                 cleanup_callback=None):
         self.max_batch_size = max_batch_size
         self.grid_levels = grid_levels or [1, 2, 4]
         self._progress = progress_callback  # callable(msg_str) or None
+        self._cleanup = cleanup_callback  # callable(dataset_path) or None
 
     def _log(self, msg):
         if self._progress:
             self._progress(msg)
+
+    def _discard(self, chunks):
+        """Poista keskeneräisen ruudukkotason väliaineistot."""
+        for chunk in chunks or []:
+            if self._cleanup is None:
+                break
+            try:
+                self._cleanup(chunk)
+            except Exception:
+                pass
 
     def execute_with_fallback(self, fetch_func, initial_bbox):
         last_grid = self.grid_levels[-1]
@@ -760,6 +912,10 @@ class ResilienceStrategy(object):
                 # Tämä ruudukkotaso epäonnistui (esim. liian iso pyyntö /
                 # aikakatkaisu) -> kokeile hienompaa ruudukkoa, tai nosta
                 # poikkeus jos tämä oli viimeinen taso.
+                #
+                # Keskeneräisen tason väliaineistot poistetaan aina: muuten ne
+                # jäisivät scratch-GDB:hen paisuttamaan sitä koko ajon ajaksi.
+                self._discard(current_chunks)
                 if grid_size == last_grid:
                     raise
                 self._log("  [INFO] Ruudukko {}x{} epäonnistui, kokeillaan hienompaa...".format(grid_size, grid_size))
@@ -871,6 +1027,21 @@ class VaylaWFSDownloader(object):
         self._run_id = None
         self._verbose_diagnostics = False
         self._run_had_layer_failures = False
+        # Verkkokerros: pysyvät yhteydet ja uudelleenyritys ohimenevissä virheissä.
+        self._http_transport = HttpTransport()
+        self._http_max_attempts = 3
+        # Rinnakkaisten sivuhakujen määrä. 1 = vanha sarjallinen toiminta.
+        self._page_workers = 4
+        # Montako sivua kootaan yhteen JSONToFeatures-kutsuun.
+        self._json_batch_pages = 8
+        # Tasolistauksen levyvälimuistin elinikä sekunteina (0 = pois).
+        self._layer_cache_ttl_s = 86400
+        self._layer_refresh_consumed = False
+        # Rinnakkaiset rasterilaattojen lataukset (Kapsi/WMTS).
+        self._tile_workers = 5
+        self._resources_dir_cache = "__unset__"
+        self._admin_gpkg_cache = "__unset__"
+        self._workspace_kind_cache = {}
 
     # ---------------------------
     # LOGGING
@@ -1448,12 +1619,32 @@ class VaylaWFSDownloader(object):
             pass
         arcpy.management.DeleteIdentical(feature_class, fields)
 
+    def _export_features_compat(self, source_fc, workspace, out_name, where_clause=None):
+        """Vie feature class työtilaan nykyisellä GP-työkalulla.
+
+        ``FeatureClassToFeatureClass`` on deprecated ArcGIS Pro 3.x:ssä ja
+        ``ExportFeatures`` on sen nopeampi seuraaja. Vanha työkalu jää
+        varareitiksi, jotta laajennus toimii myös vanhemmassa Prossa.
+        """
+        out_path = os.path.join(workspace, out_name)
+        export_features = getattr(arcpy.conversion, "ExportFeatures", None)
+        if export_features is not None:
+            try:
+                export_features(source_fc, out_path, where_clause)
+                return out_path
+            except AttributeError:
+                pass
+        arcpy.conversion.FeatureClassToFeatureClass(
+            source_fc, workspace, out_name, where_clause
+        )
+        return out_path
+
     def _feature_class_to_workspace(self, source_fc, workspace, out_name, where_clause=None):
         if self._is_filesystem_workspace(workspace):
             temp_name = "sel_{}".format(uuid.uuid4().hex[:8])
             temp_fc = os.path.join(self._scratch_gdb(), temp_name)
             try:
-                arcpy.conversion.FeatureClassToFeatureClass(
+                self._export_features_compat(
                     source_fc, self._scratch_gdb(), temp_name, where_clause
                 )
                 return self._copy_features_compatible(temp_fc, workspace, out_name)
@@ -1462,7 +1653,7 @@ class VaylaWFSDownloader(object):
 
         out_path = os.path.join(workspace, out_name)
         self._safe_delete(out_path)
-        arcpy.conversion.FeatureClassToFeatureClass(
+        self._export_features_compat(
             source_fc, workspace, out_name, where_clause
         )
         return out_path
@@ -1971,11 +2162,22 @@ class VaylaWFSDownloader(object):
             and self._runtime_workspace_is_folder is not None
         ):
             return self._runtime_workspace_is_folder
+        # Rasterilaattojen nimivalidointi kutsuu tätä kerran laattaa kohti.
+        # Describe samalle kansiolle sadasti ajossa on puhdasta hukkaa.
+        cache = getattr(self, "_workspace_kind_cache", None)
+        if cache is None:
+            cache = {}
+            self._workspace_kind_cache = cache
+        key = str(workspace)
+        if key in cache:
+            return cache[key]
         try:
             d = arcpy.Describe(workspace)
-            return (getattr(d, "workspaceType", "") or "").lower() == "filesystem"
+            result = (getattr(d, "workspaceType", "") or "").lower() == "filesystem"
         except Exception:
-            return False
+            result = False
+        cache[key] = result
+        return result
 
     def _init_workspace_cache(self, workspace: str):
         self._runtime_workspace = workspace
@@ -2229,6 +2431,17 @@ class VaylaWFSDownloader(object):
         return "'{}'".format(str(value).replace("'", "''"))
 
     def _find_resources_dir(self):
+        # Polku ei muutu ajon aikana, mutta updateMessages kutsuu tätä joka
+        # validaatiokierroksella. Ilman välimuistia dialogi tekee turhan
+        # levyhaun jokaisen näppäilyn jälkeen.
+        cached = getattr(self, "_resources_dir_cache", "__unset__")
+        if cached != "__unset__":
+            return cached
+        result = self._find_resources_dir_uncached()
+        self._resources_dir_cache = result
+        return result
+
+    def _find_resources_dir_uncached(self):
         base = os.path.dirname(os.path.abspath(__file__))
         candidates = []
         for up in range(0, 7):
@@ -2243,7 +2456,16 @@ class VaylaWFSDownloader(object):
 
     def _find_admin_gpkg(self, resources_dir=None):
         if resources_dir is None:
+            cached = getattr(self, "_admin_gpkg_cache", "__unset__")
+            if cached != "__unset__":
+                return cached
             resources_dir = self._find_resources_dir()
+            result = self._admin_gpkg_from_dir(resources_dir)
+            self._admin_gpkg_cache = result
+            return result
+        return self._admin_gpkg_from_dir(resources_dir)
+
+    def _admin_gpkg_from_dir(self, resources_dir):
         if not resources_dir:
             return None
         gpkg_path = os.path.join(resources_dir, self.admin_gpkg_name)
@@ -2560,8 +2782,43 @@ class VaylaWFSDownloader(object):
     # ---------------------------
     # HTTP / WFS
     # ---------------------------
+    def _transport(self):
+        """Palauta jaettu HTTP-yhteyspooli (luodaan tarvittaessa)."""
+        transport = getattr(self, "_http_transport", None)
+        if transport is None:
+            transport = HttpTransport()
+            self._http_transport = transport
+        return transport
+
+    def _log_retry(self, request_url, attempt, max_attempts, reason, delay, quiet=False):
+        """Kerro uudelleenyrityksestä ilman, että tunnisteet päätyvät lokiin.
+
+        Uudelleenyritys koskee vain ohimeneviä verkkovirheitä ja 5xx/429-
+        vastauksia. CQL:n varareittien 400/414 eivät koskaan päädy tänne, joten
+        tämä viesti kertoo aina aidosta häiriöstä ja lokitetaan aina.
+        """
+        try:
+            self._warn(
+                "[VAROITUS] Verkkopyyntö epäonnistui ({}) palvelussa {}. "
+                "Yritys {}/{}, uusi yritys {:.1f} s kuluttua.".format(
+                    reason, self._sanitize_url(request_url), attempt,
+                    max_attempts, delay,
+                )
+            )
+        except Exception:
+            pass
+
+    def _retry_delay(self, attempt, retry_after=None):
+        """Eksponentiaalinen viive; palvelimen Retry-After voittaa."""
+        if retry_after:
+            try:
+                return max(0.0, min(30.0, float(str(retry_after).strip())))
+            except Exception:
+                pass
+        return min(8.0, 0.5 * (2 ** max(0, attempt - 1)))
+
     def _fetch_json(self, request_url: str, timeout: int = 60, quiet: bool = False,
-                    extra_headers=None, post_data=None, timings=None):
+                    extra_headers=None, post_data=None, timings=None, max_attempts=None):
         timings = timings if timings is not None else PhaseMetrics()
         build_start = time.perf_counter()
         headers = {
@@ -2573,47 +2830,71 @@ class VaylaWFSDownloader(object):
         if extra_headers:
             headers.update(extra_headers)
         body = urllib.parse.urlencode(post_data).encode("utf-8") if post_data is not None else None
-        req = urllib.request.Request(request_url, data=body, headers=headers)
+        method = "POST" if post_data is not None else "GET"
+        if body is not None:
+            headers["Content-Length"] = str(len(body))
         timings.add("requestin muodostaminen", time.perf_counter() - build_start)
         status = None
         ctype = ""
         raw_text = ""
 
-        try:
+        if max_attempts is None:
+            max_attempts = getattr(self, "_http_max_attempts", 3)
+        max_attempts = max(1, int(max_attempts))
+        transport = self._transport()
+        raw_bytes = None
+        last_error = None
+
+        for attempt in range(1, max_attempts + 1):
             network_start = time.perf_counter()
-            response = urllib.request.urlopen(req, timeout=timeout)
-            timings.add("verkkopyyntö", time.perf_counter() - network_start)
-            with response:
-                status = getattr(response, "status", None)
-                ctype = response.headers.get("Content-Type", "") or ""
-                read_start = time.perf_counter()
-                raw_bytes = response.read()
-                timings.add("vastauksen lukeminen", time.perf_counter() - read_start)
-            decode_start = time.perf_counter()
-            raw_text = raw_bytes.decode("utf-8", errors="replace").strip()
-            timings.add("vastauksen dekoodaus", time.perf_counter() - decode_start)
-        except urllib.error.HTTPError as e:
-            timings.add("verkkopyyntö", time.perf_counter() - network_start)
-            status = getattr(e, "code", None)
             try:
-                ctype = e.headers.get("Content-Type", "") or ""
-            except Exception:
-                ctype = ""
-            try:
-                read_start = time.perf_counter()
-                raw_bytes = e.read()
-                timings.add("vastauksen lukeminen", time.perf_counter() - read_start)
-                decode_start = time.perf_counter()
-                raw_text = raw_bytes.decode("utf-8", errors="replace").strip()
-                timings.add("vastauksen dekoodaus", time.perf_counter() - decode_start)
-            except Exception:
-                raw_text = ""
-        except Exception:
-            try:
+                status, resp_headers, raw_bytes, read_s = transport.request(
+                    request_url, method=method, headers=headers,
+                    body=body, timeout=timeout,
+                )
+                elapsed = time.perf_counter() - network_start
+                timings.add("verkkopyyntö", max(0.0, elapsed - read_s))
+                timings.add("vastauksen lukeminen", read_s)
+                try:
+                    ctype = resp_headers.get("Content-Type", "") or ""
+                except Exception:
+                    ctype = ""
+                if status in RETRYABLE_HTTP_STATUS and attempt < max_attempts:
+                    retry_after = None
+                    try:
+                        retry_after = resp_headers.get("Retry-After")
+                    except Exception:
+                        retry_after = None
+                    delay = self._retry_delay(attempt, retry_after)
+                    self._log_retry(request_url, attempt, max_attempts,
+                                    "HTTP {}".format(status), delay, quiet)
+                    time.sleep(delay)
+                    continue
+                last_error = None
+                break
+            except RETRYABLE_NETWORK_ERRORS as ex:
                 timings.add("verkkopyyntö", time.perf_counter() - network_start)
-            except Exception:
-                pass
+                last_error = ex
+                raw_bytes = None
+                if attempt < max_attempts:
+                    delay = self._retry_delay(attempt)
+                    self._log_retry(request_url, attempt, max_attempts,
+                                    type(ex).__name__, delay, quiet)
+                    time.sleep(delay)
+                    continue
+                break
+            except Exception as ex:
+                timings.add("verkkopyyntö", time.perf_counter() - network_start)
+                last_error = ex
+                raw_bytes = None
+                break
+
+        if raw_bytes is None:
             return None, "", status, ctype
+
+        decode_start = time.perf_counter()
+        raw_text = raw_bytes.decode("utf-8", errors="replace").strip()
+        timings.add("vastauksen dekoodaus", time.perf_counter() - decode_start)
 
         if not raw_text:
             return None, raw_text, status, ctype
@@ -2844,6 +3125,55 @@ class VaylaWFSDownloader(object):
             return False
 
 
+    @staticmethod
+    def _merge_feature_pages(page_payloads):
+        """Yhdistä useamman sivun GeoJSON yhdeksi FeatureCollectioniksi.
+
+        Ensimmäinen sivu toimii pohjana, joten palvelun omat ylätason jäsenet
+        (esim. ``crs`` ja ``geometry_name``) säilyvät ennallaan. Vain
+        ``features`` kootaan yhteen.
+        """
+        merged = None
+        features = []
+        for payload in page_payloads:
+            if not isinstance(payload, dict):
+                continue
+            if merged is None:
+                merged = {
+                    key: value for key, value in payload.items()
+                    if key != "features"
+                }
+            page_features = payload.get("features") or []
+            if page_features:
+                features.extend(page_features)
+        if merged is None:
+            return None
+        merged["type"] = merged.get("type") or "FeatureCollection"
+        merged["features"] = features
+        # Sivukohtaiset laskurit eivät päde yhdistetylle aineistolle.
+        for stale_key in ("numberReturned", "numberMatched", "links"):
+            merged.pop(stale_key, None)
+        return merged
+
+    def _pages_to_temp_fc(self, page_payloads, project_to_epsg=None):
+        """Muunna monta sivua yhdellä JSONToFeatures-kutsulla.
+
+        Yksi GP-kutsu sivua kohti oli mittausten mukaan merkittävä osa ison
+        tason latausajasta. Sivujen kokoaminen eräksi vähentää sekä
+        GP-käynnistyksiä että myöhemmän Mergen syötteiden määrää.
+        """
+        merged = self._merge_feature_pages(page_payloads)
+        if merged is None or not merged.get("features"):
+            return None, PhaseMetrics()
+        serialize_start = time.perf_counter()
+        raw_text = json.dumps(merged)
+        serialize_s = time.perf_counter() - serialize_start
+        temp_fc, timings = self._json_to_temp_fc(
+            raw_text, project_to_epsg=project_to_epsg
+        )
+        timings.add("sivujen yhdistäminen", serialize_s)
+        return temp_fc, timings
+
     def _json_to_temp_fc(self, raw_text: str, project_to_epsg=None):
         timings = PhaseMetrics()
         temp_json_path = os.path.join(self._scratch_folder(), f"temp_{uuid.uuid4().hex}.json")
@@ -2905,14 +3235,31 @@ class VaylaWFSDownloader(object):
             "decode_s": 0.0, "json_parse_s": 0.0, "json_write_s": 0.0,
             "json_to_features_s": 0.0, "projection_s": 0.0,
             "json_temp_delete_s": 0.0, "pages": 0, "mode": "OGC_API",
-            "fetch_total_s": 0.0,
+            "fetch_total_s": 0.0, "truncated": False,
         }
         page_fcs = []
+        pending_pages = []
+        json_batch_pages = max(1, int(getattr(self, "_json_batch_pages", 1) or 1))
         total_features = 0
         current_url = None
         visited = set()
         base = str(endpoint or "").rstrip("/")
         collection_q = urllib.parse.quote(str(collection_id), safe="")
+
+        def _accumulate_conversion_stats(conversion_timing, target_timing):
+            for timing_name, timing_value in conversion_timing.seconds.items():
+                if not isinstance(timing_value, (int, float)):
+                    continue
+                if target_timing is not None:
+                    target_timing.add(timing_name, timing_value)
+                if timing_name == "projektointi":
+                    stats["projection_s"] += timing_value
+                elif timing_name == "JSONToFeatures":
+                    stats["json_to_features_s"] += timing_value
+                elif timing_name == "väliaikaisen JSON-tiedoston kirjoittaminen":
+                    stats["json_write_s"] += timing_value
+                elif timing_name == "väliaikaisen JSON-tiedoston poistaminen":
+                    stats["json_temp_delete_s"] += timing_value
 
         while len(visited) < max_requests:
             page_start = time.perf_counter()
@@ -2967,23 +3314,18 @@ class VaylaWFSDownloader(object):
                     )
                 break
 
-            page_fc, conversion_timing = self._json_to_temp_fc(
-                raw_text, project_to_epsg=3067
-            )
-            for timing_name, timing_value in conversion_timing.seconds.items():
-                if not isinstance(timing_value, (int, float)):
-                    continue
-                page_timing.add(timing_name, timing_value)
-                if timing_name == "projektointi":
-                    stats["projection_s"] += timing_value
-                elif timing_name == "JSONToFeatures":
-                    stats["json_to_features_s"] += timing_value
-                elif timing_name == "väliaikaisen JSON-tiedoston kirjoittaminen":
-                    stats["json_write_s"] += timing_value
-                elif timing_name == "väliaikaisen JSON-tiedoston poistaminen":
-                    stats["json_temp_delete_s"] += timing_value
-            if page_fc:
-                page_fcs.append(page_fc)
+            # OGC API:n sivutus seuraa palvelun next-linkkiä, joten sivuja ei
+            # voi hakea rinnakkain. JSONToFeatures ajetaan silti erissä, jotta
+            # GP-kutsujen määrä ei kasva sivumäärän mukana.
+            pending_pages.append(json_data)
+            if len(pending_pages) >= json_batch_pages:
+                page_fc, conversion_timing = self._pages_to_temp_fc(
+                    pending_pages, project_to_epsg=3067
+                )
+                pending_pages = []
+                _accumulate_conversion_stats(conversion_timing, page_timing)
+                if page_fc:
+                    page_fcs.append(page_fc)
             got = len(features)
             total_features += got
             for phase_name, stat_name in (
@@ -3020,7 +3362,17 @@ class VaylaWFSDownloader(object):
                 break
             current_url = urllib.parse.urljoin(current_url, str(next_url))
 
-        if len(visited) >= max_requests:
+        if pending_pages:
+            page_fc, conversion_timing = self._pages_to_temp_fc(
+                pending_pages, project_to_epsg=3067
+            )
+            pending_pages = []
+            _accumulate_conversion_stats(conversion_timing, None)
+            if page_fc:
+                page_fcs.append(page_fc)
+
+        stats["truncated"] = len(visited) >= max_requests
+        if stats["truncated"]:
             self._warn(
                 "[VAROITUS] Maksimipyyntömäärä saavutettu OGC API -kokoelmassa "
                 "'{}' (max_requests={}).".format(collection_id, max_requests)
@@ -3039,6 +3391,7 @@ class VaylaWFSDownloader(object):
             "json_to_features_s": 0.0, "json_temp_delete_s": 0.0,
             "http_s": 0.0, "gp_s": 0.0, "gp_json_s": 0.0,
             "pages": 0, "mode": "BBOX", "fetch_total_s": 0.0,
+            "truncated": False,
         }
 
         def _accumulate_page_timing(page_timing):
@@ -3066,6 +3419,8 @@ class VaylaWFSDownloader(object):
             stats["mode"] = "CQL"
 
         page_fcs = []
+        pending_pages = []
+        json_batch_pages = max(1, int(getattr(self, "_json_batch_pages", 1) or 1))
         request_count = 0
         total_features = 0
         start_index = 0
@@ -3073,25 +3428,97 @@ class VaylaWFSDownloader(object):
         prev_hash = None
         cql_disabled = False
 
-        while request_count < max_requests:
-            page_start = time.perf_counter()
-            page_timing = PhaseMetrics()
-            request_count += 1
-            active_cql = cql_filter if (use_cql and not cql_disabled) else None
-            cql_post_tried = False
+        # Rinnakkainen esihaku. Ensimmäinen sivu haetaan aina sarjallisesti,
+        # jotta outputFormat-, geometriakenttä- ja sortBy-päättely sekä
+        # CQL:n varareitit tapahtuvat täsmälleen kuten ennenkin. Vasta kun
+        # sivutus on todistetusti käynnissä, seuraavat sivut haetaan
+        # rinnakkain — WFS:n startIndex tekee niistä toisistaan riippumattomia.
+        prefetch_buffer = []
+        prefetch_post = False
+        reported_total = None
 
-            json_data, raw_text, status, ctype = self._fetch_wfs_page(
+        def _fetch_page_at(index, use_post):
+            page_metrics = PhaseMetrics()
+            result = self._fetch_wfs_page(
                 base_wfs=base_wfs,
                 layer_clean=layer_clean,
                 bbox_str=bbox_str,
                 max_features=max_features,
-                start_index=start_index,
+                start_index=index,
                 output_formats=output_formats,
                 extra_headers=extra_headers,
-                cql_filter=active_cql,
+                cql_filter=cql_filter if (use_cql and not cql_disabled) else None,
+                prefer_post=use_post,
                 geometry_only=False,
-                timings=page_timing,
+                timings=page_metrics,
             )
+            return (index,) + tuple(result) + (page_metrics,)
+
+        def _fill_prefetch(from_index, budget, use_post, known_total=None):
+            workers = max(1, int(getattr(self, "_page_workers", 1) or 1))
+            wave = min(workers, max(0, budget))
+            if known_total is not None:
+                # Palvelu kertoi kokonaismäärän: älä hae hännästä tyhjiä sivuja.
+                remaining = max(0, known_total - from_index)
+                pages_left = int(math.ceil(remaining / float(max_features)))
+                wave = min(wave, pages_left)
+            if workers <= 1 or wave <= 0:
+                return []
+            indexes = [from_index + step * max_features for step in range(wave)]
+            with concurrent.futures.ThreadPoolExecutor(max_workers=wave) as pool:
+                return list(pool.map(lambda i: _fetch_page_at(i, use_post), indexes))
+
+        def _number_matched(payload):
+            if not isinstance(payload, dict):
+                return None
+            for key in ("numberMatched", "totalFeatures"):
+                value = payload.get(key)
+                if isinstance(value, int) and value >= 0:
+                    return value
+                try:
+                    if isinstance(value, str) and value.isdigit():
+                        return int(value)
+                except Exception:
+                    continue
+            return None
+
+        while request_count < max_requests:
+            page_start = time.perf_counter()
+            active_cql = cql_filter if (use_cql and not cql_disabled) else None
+            cql_post_tried = False
+            json_data = None
+            raw_text = ""
+            status = None
+            ctype = ""
+            page_timing = None
+
+            if prefetch_buffer:
+                page_index, json_data, raw_text, status, ctype, page_timing = \
+                    prefetch_buffer.pop(0)
+                start_index = page_index
+                if json_data is None:
+                    # Esihaettu sivu epäonnistui: tyhjennä jono ja hae sama sivu
+                    # sarjallisesti, jotta virhe- ja varareittilogiikka toimii
+                    # täsmälleen kuten ilman esihakua.
+                    prefetch_buffer = []
+                    page_timing = None
+
+            if page_timing is None:
+                page_timing = PhaseMetrics()
+                json_data, raw_text, status, ctype = self._fetch_wfs_page(
+                    base_wfs=base_wfs,
+                    layer_clean=layer_clean,
+                    bbox_str=bbox_str,
+                    max_features=max_features,
+                    start_index=start_index,
+                    output_formats=output_formats,
+                    extra_headers=extra_headers,
+                    cql_filter=active_cql,
+                    geometry_only=False,
+                    timings=page_timing,
+                )
+
+            request_count += 1
 
             if json_data is None and active_cql and not cql_disabled and not cql_post_tried:
                 if status == 414:
@@ -3119,6 +3546,8 @@ class VaylaWFSDownloader(object):
                 )
                 if json_data is not None:
                     stats["mode"] = "CQL_POST"
+                    # Esihaku käyttää jatkossa samaa POST-muotoa.
+                    prefetch_post = True
 
             if json_data is None:
                 if active_cql and not cql_disabled:
@@ -3147,6 +3576,10 @@ class VaylaWFSDownloader(object):
                     for fc in page_fcs:
                         self._safe_delete(fc)
                     page_fcs = []
+                    pending_pages = []
+                    prefetch_buffer = []
+                    prefetch_post = False
+                    reported_total = None
                     total_features = 0
                     start_index = 0
                     request_count = 0
@@ -3213,12 +3646,17 @@ class VaylaWFSDownloader(object):
                     )
                 break
 
-            page_fc, conversion_timing = self._json_to_temp_fc(raw_text)
-            for timing_name, timing_value in conversion_timing.seconds.items():
-                if isinstance(timing_value, (int, float)):
-                    page_timing.add(timing_name, timing_value)
-            if page_fc:
-                page_fcs.append(page_fc)
+            # Sivut kootaan eräksi, jotta JSONToFeatures ajetaan kerran usean
+            # sivun yli yhden GP-kutsun sijaan sivua kohti.
+            pending_pages.append(json_data)
+            if len(pending_pages) >= json_batch_pages:
+                page_fc, conversion_timing = self._pages_to_temp_fc(pending_pages)
+                pending_pages = []
+                for timing_name, timing_value in conversion_timing.seconds.items():
+                    if isinstance(timing_value, (int, float)):
+                        page_timing.add(timing_name, timing_value)
+                if page_fc:
+                    page_fcs.append(page_fc)
             stats["pages"] += 1
 
             got = len(features)
@@ -3251,7 +3689,31 @@ class VaylaWFSDownloader(object):
             if got < max_features:
                 break
 
-        if request_count >= max_requests:
+            # Sivu oli täysi, joten sivutus jatkuu. Täytä esihakujono, jotta
+            # verkko ja geoprosessointi eivät odota vuorotellen toisiaan.
+            if reported_total is None:
+                reported_total = _number_matched(json_data)
+            if not prefetch_buffer:
+                remaining_budget = max_requests - request_count
+                prefetch_buffer = _fill_prefetch(
+                    start_index, remaining_budget, prefetch_post, reported_total
+                )
+
+        # Viimeinen vajaa erä on muunnettava myös.
+        if pending_pages:
+            page_fc, conversion_timing = self._pages_to_temp_fc(pending_pages)
+            pending_pages = []
+            tail_timing = PhaseMetrics()
+            for timing_name, timing_value in conversion_timing.seconds.items():
+                if isinstance(timing_value, (int, float)):
+                    tail_timing.add(timing_name, timing_value)
+            _accumulate_page_timing(tail_timing)
+            if page_fc:
+                page_fcs.append(page_fc)
+
+        truncated = request_count >= max_requests
+        stats["truncated"] = truncated
+        if truncated:
             self._warn(
                 "[VAROITUS] Maksimipyyntömäärä saavutettu tasolla '{}' (max_requests={}).".format(
                     layer_clean, max_requests
@@ -3743,6 +4205,10 @@ class VaylaWFSDownloader(object):
                         batch_index, len(tile_batches), batch_tiles
                     )
                 )
+            # Laattojen bbox-laskenta on puhdasta aritmetiikkaa, joten koko erä
+            # voidaan suunnitella kerralla ja ladata rinnakkain. Lataus on
+            # verkkosidonnaista, joten tämä on erän suurin yksittäinen säästö.
+            batch_plan = []
             for row_i in range(row_start, row_end):
                 for col_i in range(col_start, col_end):
                     if exact_scale:
@@ -3770,22 +4236,43 @@ class VaylaWFSDownloader(object):
                         "BBOX": "{},{},{},{}".format(t_xmin, t_ymin, t_xmax, t_ymax),
                     }
                     request_url = "{}?{}".format(service_base, urllib.parse.urlencode(params))
-                    raw = self._download_kapsi_image_bytes(request_url)
-
+                    # Nimi varataan pääsäikeessä, jotta rinnakkaiset lataukset
+                    # eivät voi päätyä samaan tiedostonimeen.
                     tile_name = self._validated_name(
                         "Kapsi_{}_tile_{}_{}".format(service_layer, row_i, col_i), raster_dir
                     ) + ".jpg"
-                    tile_path = os.path.join(raster_dir, tile_name)
-                    with open(tile_path, "wb") as handle:
-                        handle.write(raw)
+                    batch_plan.append({
+                        "url": request_url,
+                        "path": os.path.join(raster_dir, tile_name),
+                        "bounds": (t_xmin, t_ymin, t_xmax, t_ymax),
+                    })
 
-                    # Create a simple Extent-like object for the world file
-                    class _TileExt:
-                        pass
-                    te = _TileExt()
-                    te.XMin, te.YMin, te.XMax, te.YMax = t_xmin, t_ymin, t_xmax, t_ymax
-                    self._write_world_file(tile_path, te, tile_px, tile_px)
-                    tile_paths.append(tile_path)
+            workers = max(1, int(getattr(self, "_tile_workers", 1) or 1))
+            workers = min(workers, len(batch_plan)) or 1
+            if workers > 1:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+                    payloads = list(pool.map(
+                        lambda item: self._download_kapsi_image_bytes(item["url"]),
+                        batch_plan,
+                    ))
+            else:
+                payloads = [
+                    self._download_kapsi_image_bytes(item["url"])
+                    for item in batch_plan
+                ]
+
+            for item, raw in zip(batch_plan, payloads):
+                tile_path = item["path"]
+                with open(tile_path, "wb") as handle:
+                    handle.write(raw)
+
+                # Create a simple Extent-like object for the world file
+                class _TileExt:
+                    pass
+                te = _TileExt()
+                te.XMin, te.YMin, te.XMax, te.YMax = item["bounds"]
+                self._write_world_file(tile_path, te, tile_px, tile_px)
+                tile_paths.append(tile_path)
 
         if len(tile_paths) == 1:
             # Single tile – rename to final output name
@@ -3839,13 +4326,6 @@ class VaylaWFSDownloader(object):
                 self._warn("[VAROITUS] Tiilien yhdistäminen mosaiikiksi epäonnistui: {}. Palautetaan ensimmäinen tiili.".format(ex))
                 return tile_paths[0]
             return out_path
-
-    def _find_wmts_credentials_file(self):
-        resources_dir = self._find_resources_dir()
-        if not resources_dir:
-            return None
-        wmts_creds = os.path.join(resources_dir, "credentials.wmts")
-        return wmts_creds if os.path.exists(wmts_creds) else None
 
     def _raster_folder(self, workspace: str) -> str:
         """Return a plain folder for raster output — GDBs cannot hold loose image files."""
@@ -4250,38 +4730,57 @@ class VaylaWFSDownloader(object):
         tile_span = MML_WMTS_TILE_SIZE * resolution
 
         try:
-            downloaded = 0
+            # Sama rinnakkaistus kuin Kapsin laatoissa: verkkosidonnainen työ
+            # tehdään säikeissä, tiedostojen kirjoitus pääsäikeessä.
+            tile_plan = []
             for row in range(first_row, last_row + 1):
                 for column in range(first_col, last_col + 1):
-                    request_url = self._mml_wmts_tile_url(
-                        layer_id, level, row, column, key
-                    )
-                    raw = self._download_mml_wmts_tile(request_url, key)
                     tile_stem = self._sanitize_table_name(
                         "MML_{}_L{}_R{}_C{}".format(layer_id, level, row, column)
                     )
-                    png_path = os.path.join(temporary_dir, tile_stem + ".png")
-                    with open(png_path, "wb") as handle:
-                        handle.write(raw)
+                    tile_plan.append({
+                        "url": self._mml_wmts_tile_url(layer_id, level, row, column, key),
+                        "png_path": os.path.join(temporary_dir, tile_stem + ".png"),
+                        "row": row,
+                        "column": column,
+                    })
 
-                    class _TileExtent:
-                        pass
+            workers = max(1, int(getattr(self, "_tile_workers", 1) or 1))
+            workers = min(workers, len(tile_plan)) or 1
+            if workers > 1:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+                    payloads = list(pool.map(
+                        lambda item: self._download_mml_wmts_tile(item["url"], key),
+                        tile_plan,
+                    ))
+            else:
+                payloads = [
+                    self._download_mml_wmts_tile(item["url"], key)
+                    for item in tile_plan
+                ]
 
-                    tile_ext = _TileExtent()
-                    tile_ext.XMin = MML_WMTS_ORIGIN_X + column * tile_span
-                    tile_ext.XMax = tile_ext.XMin + tile_span
-                    tile_ext.YMax = MML_WMTS_ORIGIN_Y - row * tile_span
-                    tile_ext.YMin = tile_ext.YMax - tile_span
-                    self._write_world_file(
-                        png_path, tile_ext, MML_WMTS_TILE_SIZE, MML_WMTS_TILE_SIZE
-                    )
-                    png_paths.append((png_path, tile_ext))
-                    downloaded += 1
-                    self._msg(
-                        "[EDISTYMINEN] Ladatut tiilet {}/{}".format(
-                            downloaded, tile_count
-                        )
-                    )
+            downloaded = 0
+            for item, raw in zip(tile_plan, payloads):
+                png_path = item["png_path"]
+                with open(png_path, "wb") as handle:
+                    handle.write(raw)
+
+                class _TileExtent:
+                    pass
+
+                tile_ext = _TileExtent()
+                tile_ext.XMin = MML_WMTS_ORIGIN_X + item["column"] * tile_span
+                tile_ext.XMax = tile_ext.XMin + tile_span
+                tile_ext.YMax = MML_WMTS_ORIGIN_Y - item["row"] * tile_span
+                tile_ext.YMin = tile_ext.YMax - tile_span
+                self._write_world_file(
+                    png_path, tile_ext, MML_WMTS_TILE_SIZE, MML_WMTS_TILE_SIZE
+                )
+                png_paths.append((png_path, tile_ext))
+                downloaded += 1
+            self._msg(
+                "[EDISTYMINEN] Ladatut tiilet {}/{}".format(downloaded, tile_count)
+            )
 
             self._msg(
                 "[INFO] Kaikkien tiilien lataus valmis: {}/{}".format(
@@ -4470,6 +4969,17 @@ class VaylaWFSDownloader(object):
         p_karttakuva_pass.value = self._get_saved_secret("karttakuva_pass")
         p_karttakuva_pass.enabled = False
 
+        # Uudet parametrit lisätään aina listan loppuun, jotta aiemmat
+        # indeksit (parameters[0]..[10]) pysyvät voimassa.
+        p_refresh_layers = arcpy.Parameter(
+            displayName="Päivitä tasolistaus palvelusta (ohita välimuisti)",
+            name="refresh_layer_catalog",
+            datatype="GPBoolean",
+            parameterType="Optional",
+            direction="Input"
+        )
+        p_refresh_layers.value = False
+
         return [
             p_wfs_sources,
             p_layer_search, p_layers,
@@ -4477,7 +4987,8 @@ class VaylaWFSDownloader(object):
             p_mml_api_key,
             p_karttapaikka_api_key,
             p_karttakuva_user,
-            p_karttakuva_pass
+            p_karttakuva_pass,
+            p_refresh_layers
         ]
 
     def updateParameters(self, parameters):
@@ -4527,10 +5038,29 @@ class VaylaWFSDownloader(object):
                 self._secret_cache_key(karttakuva_pass)
             )
             self._last_layer_source_key = source_key
+            refresh_requested = bool(
+                parameters[11].value if len(parameters) > 11 else False
+            )
+            if refresh_requested and not getattr(self, "_layer_refresh_consumed", False):
+                # Kertaluonteinen ohitus: tyhjennä muisti- ja levyvälimuisti,
+                # hae kerran palvelusta ja palauta valinta pois päältä.
+                self._layer_refresh_consumed = True
+                self._all_wfs_layers_cache.pop(source_key, None)
+                self._layer_mapping_cache.pop(source_key, None)
+                try:
+                    parameters[11].value = False
+                except Exception:
+                    pass
+            elif not refresh_requested:
+                self._layer_refresh_consumed = False
+
             if source_key not in self._all_wfs_layers_cache:
                 fetch_error = None
                 try:
-                    self._all_wfs_layers_cache[source_key] = self._fetch_layer_list(source_values)
+                    self._all_wfs_layers_cache[source_key] = self._fetch_layer_list(
+                        source_values, cache_key=source_key,
+                        allow_disk_cache=not getattr(self, "_layer_refresh_consumed", False),
+                    )
                 except Exception as fe:
                     fetch_error = fe
                     self._all_wfs_layers_cache[source_key] = []
@@ -4932,7 +5462,10 @@ class VaylaWFSDownloader(object):
             for src in all_available_sources:
                 if l_clean.endswith(" - " + src) or (" - " + src) in l_clean:
                     needed_sources.add(src)
-        self._fetch_layer_list(list(needed_sources))
+        self._fetch_layer_list(
+            list(needed_sources),
+            cache_key=getattr(self, "_last_layer_source_key", None),
+        )
         self._tool_metrics.set(
             "tasomääritysten muodostaminen", time.perf_counter() - definitions_start
         )
@@ -5180,6 +5713,11 @@ class VaylaWFSDownloader(object):
                         service_label=service_label,
                     )
                     temp_feature_classes.extend(chunks)
+                    if ogc_stats.get("truncated"):
+                        raise Exception(
+                            "OGC API -sivutuksen maksimipyyntömäärä täyttyi, joten taso "
+                            "jäisi vaillinaiseksi. Rajaa alue pienemmäksi."
+                        )
                     layer_http_s += ogc_stats.get("network_s", 0.0)
                     layer_gp_json_s += ogc_stats.get("json_to_features_s", 0.0)
                     stat_to_phase = {
@@ -5364,9 +5902,12 @@ class VaylaWFSDownloader(object):
                     self._msg("  [INFO] Haetaan kohteet perus-BBOXilla...")
                 try:
                     cql_state = {"effective": False, "split": False}
+                    truncation_state = {"hit": False}
 
                     def _record_wfs_stats(stats):
                         nonlocal layer_http_s, layer_gp_json_s
+                        if stats.get("truncated"):
+                            truncation_state["hit"] = True
                         layer_http_s += stats.get("network_s", stats.get("http_s", 0.0))
                         layer_gp_json_s += stats.get("json_to_features_s", stats.get("gp_json_s", 0.0))
                         stat_to_phase = {
@@ -5464,9 +6005,18 @@ class VaylaWFSDownloader(object):
                     resilience = ResilienceStrategy(
                         max_batch_size=max_features,
                         progress_callback=self._msg if self._verbose_diagnostics else None,
+                        cleanup_callback=self._safe_delete,
                     )
                     chunks, total_found, used_grid = resilience.execute_with_fallback(_fetch_bbox_once, bbox_str)
                     temp_feature_classes.extend(chunks)
+                    if truncation_state["hit"]:
+                        # Vaillinainen aineisto on vaarallisempi kuin puuttuva:
+                        # se näyttää kartalla täydeltä. Kaadetaan taso, jolloin
+                        # ajon yhteenveto kertoo asiasta selkeästi.
+                        raise Exception(
+                            "Sivutuksen maksimipyyntömäärä täyttyi, joten taso jäisi "
+                            "vaillinaiseksi. Rajaa alue pienemmäksi tai nosta rajaa."
+                        )
                     cql_split_effective = cql_state["split"]
                     skip_clip = cql_state["effective"] and used_grid == 1
                 except Exception as ex:
@@ -5859,9 +6409,81 @@ class VaylaWFSDownloader(object):
     # ---------------------------
     # LAYER LIST
     # ---------------------------
-    def _fetch_layer_list(self, source_names=None):
+    def _layer_cache_file(self):
+        appdata = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA") or ""
+        if appdata:
+            return os.path.join(appdata, "Suomenvaylat", "layer_catalog_cache.json")
+        return os.path.join(tempfile.gettempdir(), "suomenvaylat_layer_catalog_cache.json")
+
+    def _read_layer_disk_cache(self, cache_key):
+        """Lue tasolistaus levyltä, jos merkintä on tuore.
+
+        Tasolistaus haetaan GetCapabilities-pyynnöillä, jotka kestävät
+        sekunteja. Ilman levyvälimuistia jokainen työkalun avaus maksaa saman
+        odotuksen uudelleen, koska muistivälimuisti elää vain instanssin ajan.
+        """
+        ttl = max(0, int(getattr(self, "_layer_cache_ttl_s", 86400)))
+        if ttl <= 0:
+            return None
+        path = self._layer_cache_file()
+        try:
+            if not os.path.isfile(path):
+                return None
+            if (time.time() - os.path.getmtime(path)) > ttl:
+                return None
+            with open(path, "r", encoding="utf-8") as handle:
+                store = json.load(handle)
+        except Exception:
+            return None
+        if not isinstance(store, dict):
+            return None
+        entry = store.get(cache_key)
+        if not isinstance(entry, dict):
+            return None
+        layers = entry.get("layers")
+        mapping = entry.get("mapping")
+        if not isinstance(layers, list) or not isinstance(mapping, dict):
+            return None
+        return layers, mapping
+
+    def _write_layer_disk_cache(self, cache_key, layers, mapping):
+        if max(0, int(getattr(self, "_layer_cache_ttl_s", 86400))) <= 0:
+            return
+        path = self._layer_cache_file()
+        store = {}
+        try:
+            if os.path.isfile(path):
+                with open(path, "r", encoding="utf-8") as handle:
+                    loaded = json.load(handle)
+                if isinstance(loaded, dict):
+                    store = loaded
+        except Exception:
+            store = {}
+        store[cache_key] = {"layers": list(layers), "mapping": dict(mapping)}
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            # Kirjoita väliaikaistiedoston kautta, jottei rinnakkainen ArcGIS
+            # Pro -istunto näe puolikasta JSONia.
+            temp_path = "{}.{}".format(path, uuid.uuid4().hex[:8])
+            with open(temp_path, "w", encoding="utf-8") as handle:
+                json.dump(store, handle, ensure_ascii=False)
+            os.replace(temp_path, path)
+        except Exception:
+            pass
+
+    def _fetch_layer_list(self, source_names=None, cache_key=None, allow_disk_cache=True):
         selected_sources = source_names or ["Väylä", "DigiRoad"]
+        if allow_disk_cache and cache_key:
+            cached = self._read_layer_disk_cache(cache_key)
+            if cached is not None:
+                layers, mapping = cached
+                self._layer_mapping = dict(mapping)
+                return list(layers)
         layer_list = self._get_layer_entries_for_sources(selected_sources)
+        if cache_key and layer_list:
+            self._write_layer_disk_cache(
+                cache_key, layer_list, dict(self._layer_mapping)
+            )
         return layer_list
 
 

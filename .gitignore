@@ -48,3 +48,9 @@ obj/
 # Python cache files
 __pycache__/
 *.py[cod]
+
+# ArcGIS-yhteystiedostot sisaltavat tunnisteita - ei koskaan versionhallintaan
+*.wmts
+*.ags
+*.acs
+*.sde

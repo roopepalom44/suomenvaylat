@@ -150,7 +150,6 @@ $packageFiles = @(
     @{ Relative = 'Install\suomenvaylat.deps.json'; Source = (Join-Path $assemblyDirectory 'suomenvaylat.deps.json'); Required = $false },
     @{ Relative = 'Install\suomenvaylat.runtimeconfig.json'; Source = (Join-Path $assemblyDirectory 'suomenvaylat.runtimeconfig.json'); Required = $false },
     @{ Relative = 'Install\Toolboxes\VaylaWFSDownloader.pyt'; Source = (Join-Path $root 'Toolboxes\VaylaWFSDownloader.pyt'); Required = $true },
-    @{ Relative = 'Install\Toolboxes\Resources\credentials.wmts'; Source = (Join-Path $root 'Toolboxes\Resources\credentials.wmts'); Required = $true },
     @{ Relative = 'Install\Toolboxes\Resources\hallinnolliset_aluejaot.gpkg'; Source = (Join-Path $root 'Toolboxes\Resources\hallinnolliset_aluejaot.gpkg'); Required = $true }
 )
 $packageFiles = @($packageFiles | Where-Object {
