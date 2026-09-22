@@ -806,6 +806,8 @@ class ToolboxHelperTests(unittest.TestCase):
         self.assertTrue(selected.visibility)
         self.assertFalse(other.visibility)
         self.assertTrue(group_node.visibility)
+        self.assertEqual([group_node], definition.subLayers)
+        self.assertEqual([selected], group_node.subLayers)
         self.assertTrue(self.tool._runtime_map.wms.definition_set)
         self.assertEqual("Aino WMS – Taustakartta", result["wms"].name)
         self.assertIn(
@@ -855,6 +857,54 @@ class ToolboxHelperTests(unittest.TestCase):
                 "runtime-secret",
             )
         self.assertEqual([self.tool._runtime_map.layer], self.tool._runtime_map.removed)
+
+    def test_aino_wms_grouping_removes_original_service_duplicate(self):
+        class Layer:
+            def __init__(self, name, group=False):
+                self.name = name
+                self.isGroupLayer = group
+                self.visible = False
+                self.children = []
+
+            def listLayers(self):
+                return list(self.children)
+
+        class Map:
+            def __init__(self):
+                self.group = Layer("Aino WMS", group=True)
+                self.service = Layer("Sitowise Aino Web Map Service")
+                self.removed = []
+
+            def listLayers(self):
+                return [self.group, self.service]
+
+            def addDataFromPath(self, path, data_type=None, custom_parameters=None):
+                return self.service
+
+            def addLayerToGroup(self, group, layer, position):
+                copied = Layer(layer.name)
+                copied.visible = layer.visible
+                group.children.insert(0, copied)
+
+            def removeLayer(self, layer):
+                self.removed.append(layer)
+
+        self.tool._runtime_map_loaded = True
+        self.tool._runtime_map = Map()
+        self.tool._msg = lambda message: None
+        self.tool._select_wms_sublayer_in_cim = lambda root, name, title: True
+        result = self.tool._add_aino_wms_layer(
+            "https://aino.sitowise.com/ows",
+            "aineisto:test",
+            "Testitaso",
+            "runtime-secret",
+        )
+
+        self.assertEqual([self.tool._runtime_map.service], self.tool._runtime_map.removed)
+        self.assertEqual(1, len(self.tool._runtime_map.group.children))
+        grouped = self.tool._runtime_map.group.children[0]
+        self.assertIs(grouped, result["wms"])
+        self.assertEqual("Aino WMS – Testitaso", grouped.name)
 
     def test_aino_background_group_is_moved_below_operational_layers(self):
         background = types.SimpleNamespace(name="Taustakartta", longName="Taustakartta")

@@ -133,9 +133,15 @@ WMS-valinnan polku on erillinen:
    GetCapabilities-, GetMap- ja GetFeatureInfo-pyyntöihin mutta ei URL-lokiin;
 3. ArcGISin WMS-komposiittitasosta etsitään ensisijaisesti valittu tekninen
    `ServiceLayerID` ja toissijaisesti palvelun otsikko;
-4. muut WMS-alitasot kytketään pois näkyvistä;
+4. muut WMS-alitasot kytketään pois ja poistetaan palvelun CIM-puusta;
 5. `taustakartat`-nimiavaruus sijoitetaan **Taustakartta**-ryhmään kartan
    tasopinon alimmaiseksi ja muut tasot **Aino WMS** -ryhmään.
+
+ArcGIS Pron WMS-komposiittitasosta rajataan lisäksi pois muut kuin valittu
+alitaso ja siihen johtava yläpolku. Ryhmään lisääminen kopioi ArcGISissa tason,
+joten työkalu poistaa tämän jälkeen alkuperäisen juuritason palvelukopion.
+Contents-paneeliin jää näin yksi palvelutaso valintaa kohti eikä koko 175 tason
+palvelupuuta tai juuritason kaksoiskappaletta.
 
 WMS-tasoa ei leikata aluerajauksella eikä kopioida tulosgeodatabaseen, koska se
 säilyy ArcGIS Prossa dynaamisena karttapalveluna. Jos valittua alitasoa ei löydy

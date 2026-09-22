@@ -44,7 +44,7 @@ Skripti käyttää vain käännöksen build-kansiossa olevaa DLL:ää eikä kosk
 automaattisesti ArcGIS Pron AssemblyCache-kopiota. Se rakentaa uuden
 `bin\Debug\net8.0-windows\suomenvaylat.esriAddInX`-paketin tyhjästä, sijoittaa
 DLL:n ja työkalut viralliseen `Install\`-hakemistoon, tarkistaa CLR-tyypit ja
-validoi paketin sisällön. Paketti käyttää versiota `1.0.15`, jotta ArcGIS Pro
+validoi paketin sisällön. Paketti käyttää versiota `1.0.16`, jotta ArcGIS Pro
 tunnistaa sen päivitykseksi.
 
 Kapsin tarkat mittakaavatasot jaetaan tarvittaessa useaan enintään 25 laatan latauserään ja yhdistetään lopuksi yhdeksi rasteriksi.
@@ -83,7 +83,7 @@ polku parametrilla `-MSBuildPath`.
 
 ### TypeNotFound / command unavailable
 
-Jos ArcGIS Pro näyttää virheen `TypeNotFound` tai ilmoittaa komennon olevan unavailable, paketissa on ollut vanha/väärä DLL tai väärä AddInX-rakenne. `package-addin.ps1` tarkistaa nyt assemblyn nimen, varmistaa että DLL sisältää tyypit `suomenvaylat.Module1` ja `suomenvaylat.OpenSuomenvaylatToolButton`, sekä pakottaa runtime-tiedostot `Install\`-hakemistoon. Add-in-versiona on `1.0.15`, jotta ArcGIS Pro tunnistaa tämän päivitykseksi.
+Jos ArcGIS Pro näyttää virheen `TypeNotFound` tai ilmoittaa komennon olevan unavailable, paketissa on ollut vanha/väärä DLL tai väärä AddInX-rakenne. `package-addin.ps1` tarkistaa nyt assemblyn nimen, varmistaa että DLL sisältää tyypit `suomenvaylat.Module1` ja `suomenvaylat.OpenSuomenvaylatToolButton`, sekä pakottaa runtime-tiedostot `Install\`-hakemistoon. Add-in-versiona on `1.0.16`, jotta ArcGIS Pro tunnistaa tämän päivitykseksi.
 
 Jos tarkistus ilmoittaa väärästä DLL:stä, käännä C#-projekti ArcGIS Pro SDK:n kanssa ja anna tulos suoraan:
 
@@ -211,7 +211,7 @@ Saman aineiston WFS- ja WMS-versiot erotetaan nimissä `(WFS)`- ja
 
 Jos token on kopioitu lähteestä, jossa yhtäsuuruusmerkki on koodattu muotoon
 `=3D`, kenttään voi päätyä ylimääräinen `3D` varsinaisen tokenin alkuun. Versio
-1.0.15 tunnistaa ja korjaa tämän tarkan kopiointimuodon automaattisesti. Haku
+1.0.15 ja uudemmat tunnistavat ja korjaavat tämän tarkan kopiointimuodon. Haku
 raportoi lisäksi HTTP 401/403 -tunnistusvirheen suoraan tokenkentässä sen sijaan,
 että aineistolista jäisi selityksettä tyhjäksi.
 
@@ -228,6 +228,12 @@ tokenin ArcGIS Pron erillisenä palveluparametrina, kytkee näkyviin vain valitu
 WMS-alitason ja sijoittaa `taustakartat`-nimiavaruuden tason
 **Taustakartta**-ryhmään karttatasopinon alimmaiseksi. Muut WMS-tasot
 sijoitetaan **Aino WMS** -ryhmään.
+
+Versiosta 1.0.16 alkaen WMS-palvelun CIM-puusta poistetaan muut kuin valittu
+alitaso ja sen välttämätön yläpolku. ArcGIS Pron Contents-paneeliin ei siten
+jää kaikkia 175 pois kytkettyä Aino-alitasoa. Ryhmään kopioinnin jälkeen myös
+alkuperäinen kartan juuritason palvelukopio poistetaan, joten valittu WMS-taso
+näkyy kartassa vain kerran.
 
 Rajapinnan sisältö, protokollat, koordinaatistot ja yhteystestit on dokumentoitu
 tiedostossa [`docs/AINO.md`](docs/AINO.md).

@@ -1567,6 +1567,38 @@ class VaylaWFSDownloader(object):
                 node.visibility = id(node) in enabled_nodes
             except Exception:
                 pass
+
+        # Pelkkä visibility=False jättäisi kaikki palvelun 175 alitasoa
+        # Contents-paneeliin. Säilytä CIM-puussa vain valittu alitaso,
+        # mahdolliset sen lapset sekä valintaan johtava välttämätön yläpolku.
+        # Näin palveluyhteys säilyy oikeana WMS:nä, mutta käyttäjä ei saa
+        # karttaan koko Ainon tasopuuta.
+        def pruned_path(nodes):
+            kept = []
+            for node in list(nodes or []):
+                if node is selected_node:
+                    kept.append(node)
+                    continue
+                children = list(getattr(node, "subLayers", None) or [])
+                kept_children = pruned_path(children)
+                if kept_children:
+                    try:
+                        node.subLayers = kept_children
+                    except Exception:
+                        pass
+                    try:
+                        node.visibility = True
+                    except Exception:
+                        pass
+                    kept.append(node)
+            return kept
+
+        try:
+            definition.subLayers = pruned_path(
+                getattr(definition, "subLayers", None)
+            )
+        except Exception:
+            return False
         try:
             set_definition(definition)
             return True
@@ -1677,9 +1709,41 @@ class VaylaWFSDownloader(object):
             )
 
         display_name = "Aino WMS – {}".format(layer_title or layer_name)
-        top_layer = self._configure_group_layers(
-            active_map, group_layer, roots, display_name, visible=True
-        )
+        top_layer = roots[0]
+        for root in roots:
+            try:
+                root.visible = True
+            except Exception:
+                pass
+        try:
+            top_layer.name = display_name
+        except Exception:
+            pass
+
+        if group_layer is not None:
+            # addLayerToGroup kopioi jo kartassa olevan tason ryhmään. Nimeä
+            # ja rajaa taso ennen kopiointia, hae uusi ryhmäkopio ja poista
+            # alkuperäinen, jotta karttaan ei jää kuvan kaltaisia tuplatasoja.
+            for root in roots:
+                self._put_layer_in_group(active_map, group_layer, root)
+            list_group_layers = getattr(group_layer, "listLayers", None)
+            if callable(list_group_layers):
+                try:
+                    candidates = [
+                        candidate for candidate in list_group_layers()
+                        if getattr(candidate, "name", "") == display_name
+                    ]
+                    if candidates:
+                        top_layer = candidates[0]
+                except Exception:
+                    pass
+            remove_layer = getattr(active_map, "removeLayer", None)
+            if callable(remove_layer):
+                for root in roots:
+                    try:
+                        remove_layer(root)
+                    except Exception:
+                        pass
         self._msg("[INFO] Aino live-WMS lisätty: {}".format(layer_title or layer_name))
         return {"wms": top_layer, "group": group_name}
 

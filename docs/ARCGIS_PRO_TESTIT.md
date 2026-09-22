@@ -137,3 +137,7 @@ Yhdistetyn JSONin tai suoran feature class -kirjoituksen toteutusta ei pidä ott
     normalisoida tunnettu kopiointimuoto ja näyttää edelleen 113 WFS- ja 175
     WMS-valintaa. Muulla virheellisellä tokenilla tokenkentässä pitää näkyä
     HTTP 401/403 -virhe tyhjän, selityksettömän aineistolistan sijaan.
+11. Lisää yksi Aino WMS -taso ja laajenna se Contents-paneelissa. Puussa saa
+    näkyä vain valittu alitaso ja sen välttämätön yläpolku, ei kaikkia 175 Aino-
+    tasoa. Samasta valinnasta ei saa jäädä erillistä kopiota sekä kartan juureen
+    että **Aino WMS**- tai **Taustakartta**-ryhmään.
