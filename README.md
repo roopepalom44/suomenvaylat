@@ -44,7 +44,7 @@ Skripti käyttää vain käännöksen build-kansiossa olevaa DLL:ää eikä kosk
 automaattisesti ArcGIS Pron AssemblyCache-kopiota. Se rakentaa uuden
 `bin\Debug\net8.0-windows\suomenvaylat.esriAddInX`-paketin tyhjästä, sijoittaa
 DLL:n ja työkalut viralliseen `Install\`-hakemistoon, tarkistaa CLR-tyypit ja
-validoi paketin sisällön. Paketti käyttää versiota `1.0.12`, jotta ArcGIS Pro
+validoi paketin sisällön. Paketti käyttää versiota `1.0.13`, jotta ArcGIS Pro
 tunnistaa sen päivitykseksi.
 
 Kapsin tarkat mittakaavatasot jaetaan tarvittaessa useaan enintään 25 laatan latauserään ja yhdistetään lopuksi yhdeksi rasteriksi.
@@ -83,7 +83,7 @@ polku parametrilla `-MSBuildPath`.
 
 ### TypeNotFound / command unavailable
 
-Jos ArcGIS Pro näyttää virheen `TypeNotFound` tai ilmoittaa komennon olevan unavailable, paketissa on ollut vanha/väärä DLL tai väärä AddInX-rakenne. `package-addin.ps1` tarkistaa nyt assemblyn nimen, varmistaa että DLL sisältää tyypit `suomenvaylat.Module1` ja `suomenvaylat.OpenSuomenvaylatToolButton`, sekä pakottaa runtime-tiedostot `Install\`-hakemistoon. Add-in-versiona on `1.0.12`, jotta ArcGIS Pro tunnistaa tämän päivitykseksi.
+Jos ArcGIS Pro näyttää virheen `TypeNotFound` tai ilmoittaa komennon olevan unavailable, paketissa on ollut vanha/väärä DLL tai väärä AddInX-rakenne. `package-addin.ps1` tarkistaa nyt assemblyn nimen, varmistaa että DLL sisältää tyypit `suomenvaylat.Module1` ja `suomenvaylat.OpenSuomenvaylatToolButton`, sekä pakottaa runtime-tiedostot `Install\`-hakemistoon. Add-in-versiona on `1.0.13`, jotta ArcGIS Pro tunnistaa tämän päivitykseksi.
 
 Jos tarkistus ilmoittaa väärästä DLL:stä, käännä C#-projekti ArcGIS Pro SDK:n kanssa ja anna tulos suoraan:
 
@@ -200,6 +200,25 @@ pienempiä ruutuja.
 Rajapinnan, vertailuaineiston ja luokkaryhmien tarkempi kartoitus on tiedostossa
 [`docs/OSM_POI.md`](docs/OSM_POI.md).
 
+## Sitowise Aino
+
+**Aino** on tokenilla suojattu WFS-lähde. Työkalu hakee tasoluettelon
+dynaamisesti palvelun GetCapabilities-vastauksesta ja näyttää kaikki käytössä
+olevat WFS-vektoritasot samalla tavoin kuin muut WFS-lähteet. Sama OWS-palvelu
+sisältää myös WMS-karttatasoja, mutta niitä ei esitetä attribuutteineen
+ladattavina feature classeina. Syötä token käyttöliittymän
+piilotettuun **Aino-token**-kenttään.
+
+Aino käyttää WFS 1.1.0:aa. Suomenväylät muodostaa sille palvelun vaatimat
+`typeName`- ja `maxFeatures`-parametrit, sivuttaa `startIndex`-parametrilla,
+pyytää GeoJSONin EPSG:3067:ssä ja tekee lopullisen tarkan Clip-rajauksen
+paikallisesti. Token lisätään kaikkiin GetCapabilities-, DescribeFeatureType-,
+GetFeature- ja POST-pyyntöihin, mutta lokiin ja levyvälimuistin tasomäärityksiin
+se ei tallennu.
+
+Rajapinnan sisältö, protokollat, koordinaatistot ja yhteystestit on dokumentoitu
+tiedostossa [`docs/AINO.md`](docs/AINO.md).
+
 Karttapaikka-lähde käyttää nykyisiä Maanmittauslaitoksen INSPIRE WFS -palveluja. Vanhat
 `avoin-karttakuva.maanmittauslaitos.fi/inspire/wfs`- ja
 `.../geoserver/maastotiedot/wfs`-osoitteet eivät enää ole käytössä. API-avaimella
@@ -224,7 +243,7 @@ palveluosoite, jotta rakennusten piste- ja polygoniversiot eivät sekoitu.
 > tiedoston poisto ei peruuta jo paljastunutta tunnusta.
 
 
-API-avaimet ja salasanat ovat käyttöliittymässä piilotettuja kenttiä. Tallennetut tunnisteet suojataan Windowsin käyttäjäkohtaisella DPAPI-salauksella. Aiemman version selväkieliset arvot migroidaan salattuun muotoon niitä luettaessa. Lokissa WFS-palvelusta näytetään vain sanitisoitu perusosoite ilman query-parametreja, käyttäjätunnusta tai salasanaa.
+API-avaimet, Aino-token ja salasanat ovat käyttöliittymässä piilotettuja kenttiä. Tallennetut tunnisteet suojataan Windowsin käyttäjäkohtaisella DPAPI-salauksella. Aiemman version selväkieliset arvot migroidaan salattuun muotoon niitä luettaessa. Lokissa WFS-palvelusta näytetään vain sanitisoitu perusosoite ilman query-parametreja, käyttäjätunnusta tai salasanaa.
 
 Jos tunniste on ehtinyt näkyä jaetussa ArcGIS-lokissa, vaihda se palveluntarjoajan hallinnassa. Lokin poistaminen ei yksin peruuta paljastunutta avainta.
 

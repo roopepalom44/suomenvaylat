@@ -290,6 +290,14 @@ class WFSSourceRegistry(object):
                 ],
                 "description": "SYKE INSPIRE Protected Sites"
             },
+            "Aino": {
+                "type": "wfs",
+                # Sitowise Aino julkaisee WFS 1.1.0 -rajapinnan. Käyttäjän
+                # token lisätään ajonaikaisesti jokaiseen pyyntöön eikä sitä
+                # tallenneta lähdekoodiin tai tasoluettelon levyvälimuistiin.
+                "endpoints": ["https://aino.sitowise.com/ows"],
+                "description": "Sitowise Aino WFS"
+            },
             "Karttapaikka": {
                 "type": "mml_combined",
                 "endpoints": [
@@ -355,6 +363,7 @@ class WFSSourceRegistry(object):
             "Kapsi",
             "Liiteri",
             "Syke",
+            "Aino",
             "Karttapaikka",
             "OpenStreetMap"
         ]
@@ -992,6 +1001,7 @@ class VaylaWFSDownloader(object):
         self._mml_layer_mapping_cache = {}
         self._runtime_mml_api_key = ""
         self._runtime_karttapaikka_api_key = ""
+        self._runtime_aino_token = ""
         self._credentials_cache = None
         self._wfs_output_format_cache = {}
         self._wfs_geometry_field_cache = {}
@@ -1079,11 +1089,18 @@ class VaylaWFSDownloader(object):
         for secret in (
             getattr(self, "_runtime_mml_api_key", ""),
             getattr(self, "_runtime_karttapaikka_api_key", ""),
+            getattr(self, "_runtime_aino_token", ""),
             getattr(self, "_runtime_karttakuva_user", ""),
             getattr(self, "_runtime_karttakuva_pass", ""),
         ):
             if secret:
-                text = text.replace(secret, "[PIILOTETTU]")
+                for candidate in {
+                    secret,
+                    urllib.parse.quote(secret, safe=""),
+                    urllib.parse.quote_plus(secret, safe=""),
+                }:
+                    if candidate:
+                        text = text.replace(candidate, "[PIILOTETTU]")
         return text
 
     @staticmethod
@@ -1674,6 +1691,41 @@ class VaylaWFSDownloader(object):
             return self.wfs_digiroad
         return self.wfs_vayla
 
+    @staticmethod
+    def _set_url_query_parameter(raw_url, name, value):
+        """Lisää tai korvaa yksi query-parametri rikkomatta muuta osoitetta."""
+        parsed = urllib.parse.urlsplit(str(raw_url or ""))
+        pairs = [
+            (key, item_value)
+            for key, item_value in urllib.parse.parse_qsl(
+                parsed.query, keep_blank_values=True
+            )
+            if key.lower() != str(name).lower()
+        ]
+        pairs.append((str(name), str(value)))
+        return urllib.parse.urlunsplit((
+            parsed.scheme, parsed.netloc, parsed.path,
+            urllib.parse.urlencode(pairs), parsed.fragment,
+        ))
+
+    def _source_endpoint_with_credentials(self, source_name, endpoint):
+        """Palauta ajonaikainen palveluosoite lähteen tunnisteilla."""
+        if source_name != "Aino":
+            return endpoint
+        token = (getattr(self, "_runtime_aino_token", "") or "").strip()
+        if not token:
+            return endpoint
+        return self._set_url_query_parameter(endpoint, "token", token)
+
+    @staticmethod
+    def _wfs_version_for_endpoint(endpoint):
+        """Aino on WFS 1.1; muut nykyiset lähteet käyttävät WFS 2.0:aa."""
+        try:
+            host = (urllib.parse.urlsplit(str(endpoint or "")).hostname or "").lower()
+        except Exception:
+            host = ""
+        return "1.1.0" if host == "aino.sitowise.com" else "2.0.0"
+
     def _build_source_auth_headers(self, source_name: str, endpoint=None,
                                    layer_kind=None):
         """Muodosta tunnisteheaderit palvelutyypin mukaan.
@@ -1712,8 +1764,13 @@ class VaylaWFSDownloader(object):
         return headers
 
     def _fetch_wfs_capabilities_with_headers(self, endpoint, headers=None):
-        sep = "&" if "?" in endpoint else "?"
-        url = "{}{}service=WFS&request=GetCapabilities".format(endpoint, sep)
+        url = endpoint
+        for key, value in (
+            ("service", "WFS"),
+            ("request", "GetCapabilities"),
+            ("version", self._wfs_version_for_endpoint(endpoint)),
+        ):
+            url = self._set_url_query_parameter(url, key, value)
         req_headers = {"User-Agent": "ArcGISPro-Arcpy-WFSDownloader/1.4"}
         if headers:
             req_headers.update(headers)
@@ -1740,6 +1797,17 @@ class VaylaWFSDownloader(object):
                     "kind": "wfs"
                 })
         return layers
+
+    def _get_aino_layers(self):
+        """Hae Aino WFS -tasot käyttäjän ajonaikaisella tokenilla."""
+        token = (getattr(self, "_runtime_aino_token", "") or "").strip()
+        if not token:
+            return []
+        endpoint = self.wfs_registry.get_endpoint("Aino")
+        if not endpoint:
+            return []
+        request_endpoint = self._source_endpoint_with_credentials("Aino", endpoint)
+        return self._fetch_wfs_capabilities_with_headers(request_endpoint)
 
     def _get_karttapaikka_layers(self):
         layers = []
@@ -1952,6 +2020,16 @@ class VaylaWFSDownloader(object):
                     source_entries = self._get_karttapaikka_layers()
                 except Exception as ex:
                     self._warn("[VAROITUS] Karttapaikka-tasojen listaus epäonnistui: {}".format(ex))
+                    source_entries = []
+            elif source_name == "Aino":
+                try:
+                    source_entries = self._get_aino_layers()
+                except Exception as ex:
+                    self._warn(
+                        "[VAROITUS] Aino-tasojen listaus epäonnistui: {}".format(
+                            self._redact_secrets(ex)
+                        )
+                    )
                     source_entries = []
             else:
                 try:
@@ -2918,15 +2996,23 @@ class VaylaWFSDownloader(object):
     def _build_wfs_getfeature_url(self, base_wfs: str, layer_clean: str, max_features: int,
                                   start_index: int, output_format: str, bbox_str: str = None,
                                   cql_filter: str = None, geometry_only: bool = True) -> str:
+        wfs_version = self._wfs_version_for_endpoint(base_wfs)
+        is_wfs_11 = wfs_version == "1.1.0"
         type_names_q = urllib.parse.quote(layer_clean, safe=":")
         outfmt_q = urllib.parse.quote(output_format, safe=";/,+=")
+        separator = "&" if urllib.parse.urlsplit(base_wfs).query else "?"
+        type_name_parameter = "typeName" if is_wfs_11 else "typeNames"
+        limit_parameter = "maxFeatures" if is_wfs_11 else "count"
+        exception_format = (
+            "application/vnd.ogc.se_xml" if is_wfs_11 else "application/json"
+        )
         url = (
-            f"{base_wfs}?service=WFS&version=2.0.0"
-            f"&request=GetFeature&typeNames={type_names_q}"
+            f"{base_wfs}{separator}service=WFS&version={wfs_version}"
+            f"&request=GetFeature&{type_name_parameter}={type_names_q}"
             f"&outputFormat={outfmt_q}"
-            f"&exceptions=application/json"
+            f"&exceptions={urllib.parse.quote(exception_format, safe='/')}"
             f"&srsName=EPSG:3067"
-            f"&count={max_features}&startIndex={start_index}"
+            f"&{limit_parameter}={max_features}&startIndex={start_index}"
         )
         sort_field = getattr(self, "_wfs_sort_field_cache", {}).get(layer_clean)
         if sort_field:
@@ -2941,16 +3027,21 @@ class VaylaWFSDownloader(object):
         return url
 
     def _wfs_getfeature_form(self, layer_clean, max_features, start_index, output_format,
-                             bbox_str=None, cql_filter=None, geometry_only=True):
+                             bbox_str=None, cql_filter=None, geometry_only=True,
+                             wfs_version="2.0.0"):
+        is_wfs_11 = wfs_version == "1.1.0"
         form = {
             "service": "WFS",
-            "version": "2.0.0",
+            "version": wfs_version,
             "request": "GetFeature",
-            "typeNames": layer_clean,
+            "typeName" if is_wfs_11 else "typeNames": layer_clean,
             "outputFormat": output_format,
-            "exceptions": "application/json",
+            "exceptions": (
+                "application/vnd.ogc.se_xml" if is_wfs_11
+                else "application/json"
+            ),
             "srsName": "EPSG:3067",
-            "count": str(max_features),
+            "maxFeatures" if is_wfs_11 else "count": str(max_features),
             "startIndex": str(start_index),
         }
         sort_field = getattr(self, "_wfs_sort_field_cache", {}).get(layer_clean)
@@ -2994,11 +3085,12 @@ class VaylaWFSDownloader(object):
             self._wfs_sort_field_cache = {}
         if layer_clean in self._wfs_geometry_field_cache and layer_clean in self._wfs_sort_candidate_cache:
             return
+        wfs_version = self._wfs_version_for_endpoint(base_wfs)
         query = urllib.parse.urlencode({
             "service": "WFS",
-            "version": "2.0.0",
+            "version": wfs_version,
             "request": "DescribeFeatureType",
-            "typeNames": layer_clean,
+            "typeName" if wfs_version == "1.1.0" else "typeNames": layer_clean,
         })
         request_url = "{}{}{}".format(base_wfs, "&" if "?" in base_wfs else "?", query)
         headers = {"User-Agent": "ArcGISPro-Suomenvaylat/1.0"}
@@ -3074,9 +3166,11 @@ class VaylaWFSDownloader(object):
         def _try_request(fmt, use_post):
             compose_start = time.perf_counter()
             if use_post:
+                wfs_version = self._wfs_version_for_endpoint(base_wfs)
                 form = self._wfs_getfeature_form(
                     layer_clean, max_features, start_index, fmt,
                     bbox_str=bbox_str, cql_filter=cql_filter, geometry_only=geometry_only,
+                    wfs_version=wfs_version,
                 )
                 timings.add("requestin muodostaminen", time.perf_counter() - compose_start)
                 return self._fetch_json(
@@ -4980,6 +5074,16 @@ class VaylaWFSDownloader(object):
         )
         p_refresh_layers.value = False
 
+        p_aino_token = arcpy.Parameter(
+            displayName="Aino-token",
+            name="aino_token",
+            datatype="GPStringHidden",
+            parameterType="Optional",
+            direction="Input"
+        )
+        p_aino_token.value = self._get_saved_secret("aino_token")
+        p_aino_token.enabled = False
+
         return [
             p_wfs_sources,
             p_layer_search, p_layers,
@@ -4988,7 +5092,8 @@ class VaylaWFSDownloader(object):
             p_karttapaikka_api_key,
             p_karttakuva_user,
             p_karttakuva_pass,
-            p_refresh_layers
+            p_refresh_layers,
+            p_aino_token
         ]
 
     def updateParameters(self, parameters):
@@ -5003,10 +5108,15 @@ class VaylaWFSDownloader(object):
             karttapaikka_api_key = (parameters[8].valueAsText or "").strip()
             karttakuva_user = (parameters[9].valueAsText or "").strip()
             karttakuva_pass = (parameters[10].valueAsText or "").strip()
+            aino_token = (
+                (parameters[12].valueAsText or "").strip()
+                if len(parameters) > 12 else ""
+            )
             self._runtime_mml_api_key = mml_api_key
             self._runtime_karttapaikka_api_key = karttapaikka_api_key
             self._runtime_karttakuva_user = karttakuva_user
             self._runtime_karttakuva_pass = karttakuva_pass
+            self._runtime_aino_token = aino_token
 
             parameters[0].enabled = True
             parameters[1].enabled = True
@@ -5026,16 +5136,20 @@ class VaylaWFSDownloader(object):
             uses_mml = "MML" in source_values
             uses_karttapaikka = "Karttapaikka" in source_values
             uses_karttakuva = "MML Karttakuva" in source_values
+            uses_aino = "Aino" in source_values
             parameters[7].enabled = uses_mml
             parameters[8].enabled = uses_karttapaikka
             parameters[9].enabled = uses_karttakuva
             parameters[10].enabled = uses_karttakuva
+            if len(parameters) > 12:
+                parameters[12].enabled = uses_aino
 
-            source_key = "{}|mml:{}|kartta:{}|kk:{}:{}".format(
+            source_key = "{}|mml:{}|kartta:{}|kk:{}:{}|aino:{}".format(
                 "|".join(source_values), self._secret_cache_key(mml_api_key),
                 self._secret_cache_key(karttapaikka_api_key),
                 self._secret_cache_key(karttakuva_user),
-                self._secret_cache_key(karttakuva_pass)
+                self._secret_cache_key(karttakuva_pass),
+                self._secret_cache_key(aino_token)
             )
             self._last_layer_source_key = source_key
             refresh_requested = bool(
@@ -5132,6 +5246,10 @@ class VaylaWFSDownloader(object):
         karttapaikka_api_key = parameters[8].valueAsText or ""
         karttakuva_user = (parameters[9].valueAsText or "").strip()
         karttakuva_pass = (parameters[10].valueAsText or "").strip()
+        aino_token = (
+            (parameters[12].valueAsText or "").strip()
+            if len(parameters) > 12 else ""
+        )
         source_values = self._source_values_from_param(parameters[0], restore_empty=False)
         selected_layers = [
             value for value in self._parse_multivalue_param(parameters[2])
@@ -5200,6 +5318,16 @@ class VaylaWFSDownloader(object):
             parameters[10].setErrorMessage("MML Karttakuva vaatii salasanan.")
         else:
             parameters[10].clearMessage()
+
+        uses_aino = "Aino" in source_values or any(
+            (self._layer_mapping.get(lbl) or {}).get("source") == "Aino"
+            for lbl in (selected_layers or [])
+        )
+        if len(parameters) > 12:
+            if uses_aino and not aino_token:
+                parameters[12].setErrorMessage("Aino-rajapinta vaatii tokenin.")
+            else:
+                parameters[12].clearMessage()
 
         if extent_type in ["Koko Suomi", "Kunta/Kaupunki", "Maakunta", "Elinvoimakeskus", "Hyvinvointialue"]:
             gpkg = self._find_admin_gpkg()
@@ -5307,10 +5435,15 @@ class VaylaWFSDownloader(object):
         karttapaikka_api_key = parameters[8].valueAsText or ""
         karttakuva_user = (parameters[9].valueAsText or "").strip()
         karttakuva_pass = (parameters[10].valueAsText or "").strip()
+        aino_token = (
+            (parameters[12].valueAsText or "").strip()
+            if len(parameters) > 12 else ""
+        )
         self._runtime_mml_api_key = mml_api_key.strip()
         self._runtime_karttapaikka_api_key = karttapaikka_api_key.strip()
         self._runtime_karttakuva_user = karttakuva_user
         self._runtime_karttakuva_pass = karttakuva_pass
+        self._runtime_aino_token = aino_token
         sel_vals = self._parse_multivalue(extent_value_text)
 
         if extent_type in ["Kunta/Kaupunki", "Maakunta", "Elinvoimakeskus", "Hyvinvointialue"] and not sel_vals:
@@ -5319,6 +5452,10 @@ class VaylaWFSDownloader(object):
 
         if extent_type == "Oma aineisto (Polygon/Polyline)" and (not custom_layer or str(custom_layer).strip() == ""):
             self._error("[VIRHE] Valitsit 'Oma aineisto', mutta rajausaineisto puuttuu.")
+            raise arcpy.ExecuteError
+
+        if "Aino" in source_names and not aino_token:
+            self._error("[VIRHE] Aino-rajapinta vaatii tokenin.")
             raise arcpy.ExecuteError
 
         self._tool_metrics.set(
@@ -5533,6 +5670,9 @@ class VaylaWFSDownloader(object):
             base_wfs = (
                 layer_info.get("endpoint")
                 or self._choose_wfs_endpoint(layer_clean, source_name)
+            )
+            base_wfs = self._source_endpoint_with_credentials(
+                source_name, base_wfs
             )
             auth_headers = self._build_source_auth_headers(
                 source_name, endpoint=base_wfs, layer_kind=layer_kind
@@ -6239,6 +6379,8 @@ class VaylaWFSDownloader(object):
         if karttakuva_user and karttakuva_pass:
             self._set_saved_secret("karttakuva_user", karttakuva_user)
             self._set_saved_secret("karttakuva_pass", karttakuva_pass)
+        if aino_token:
+            self._set_saved_secret("aino_token", aino_token)
 
         self._msg("[INFO] Lisätään aineistoa kartalle.")
         map_all_start = time.perf_counter()

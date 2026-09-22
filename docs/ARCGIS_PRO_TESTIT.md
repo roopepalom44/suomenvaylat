@@ -103,3 +103,22 @@ Yhdistetyn JSONin tai suoran feature class -kirjoituksen toteutusta ei pidä ott
    selvästi epätyhjä pistetaso. Jos Overpass palauttaa kohteita mutta ArcGISin
    GeoJSON-muunnos tuottaa nolla kohdetta, ajon pitää päättyä näkyvään
    virheeseen eikä onnistuneeksi merkittyyn tyhjään tasoon.
+
+## 10. Sitowise Aino / WFS 1.1
+
+1. Valitse lähteeksi **Aino**. Ilman tokenia **Aino-token**-kentässä pitää näkyä
+   pakollisuusvirhe eikä tasoluetteloa saa yrittää ladata tunnisteetta.
+2. Syötä voimassa oleva token ja valitse **Päivitä tasolistaus palvelusta**.
+   Listaan pitää tulla palvelun dynaaminen tasoluettelo; kartoitushetkellä siinä
+   oli 113 tasoa neljässä nimiavaruudessa.
+3. Lataa pienellä Oulun rajauksella vähintään yksi piste-, viiva- ja
+   polygonitaso. Esimerkit ovat `Fintraffic lentoasemat`, `Digiroad Linkki` ja
+   `Museovirasto NBA Muinaisjäännökset, alueet`.
+4. Varmista lokista WFS 1.1 -haku, BBOX + paikallinen Clip sekä sanitisoitu
+   palveluosoite. Token ei saa näkyä lokissa, virheessä, tasoluettelon
+   levyvälimuistissa eikä tulostason attribuuteissa.
+5. Tarkista tulosten koordinaatistoksi ETRS89 / TM35FIN (EPSG:3067), oikeat
+   geometriatyypit ja lähteen attribuuttikentät.
+6. Testaa monisivuinen taso, esimerkiksi `Digiroad Linkki`. Sivujen pitää
+   jatkua eri kohteilla; luonnollisen järjestyksen puuttuessa työkalun pitää
+   lukea DescribeFeatureType ja käyttää vakaata `sortBy`-kenttää.

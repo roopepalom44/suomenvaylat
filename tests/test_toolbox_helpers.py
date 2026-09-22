@@ -44,6 +44,7 @@ class ToolboxHelperTests(unittest.TestCase):
         self.tool._wfs_sort_candidate_cache = {}
         self.tool._wfs_sort_field_cache = {}
         self.tool._verbose_diagnostics = False
+        self.tool._runtime_aino_token = ""
 
     def test_sanitized_url_drops_credentials_query_and_fragment(self):
         value = self.tool._sanitize_url(
@@ -56,12 +57,96 @@ class ToolboxHelperTests(unittest.TestCase):
     def test_runtime_secrets_are_redacted_from_log_text(self):
         self.tool._runtime_mml_api_key = "key-value"
         self.tool._runtime_karttapaikka_api_key = ""
+        self.tool._runtime_aino_token = "aino-value"
         self.tool._runtime_karttakuva_user = "user-value"
         self.tool._runtime_karttakuva_pass = "pass-value"
         value = self.tool._redact_secrets(
-            "key-value user-value pass-value"
+            "key-value aino-value user-value pass-value"
         )
-        self.assertEqual("[PIILOTETTU] [PIILOTETTU] [PIILOTETTU]", value)
+        self.assertEqual(
+            "[PIILOTETTU] [PIILOTETTU] [PIILOTETTU] [PIILOTETTU]",
+            value,
+        )
+
+    def test_aino_registry_uses_clean_endpoint_and_requires_runtime_token(self):
+        registry = MODULE.WFSSourceRegistry()
+        endpoint = registry.get_endpoint("Aino")
+        self.assertEqual("https://aino.sitowise.com/ows", endpoint)
+        self.assertNotIn("token", endpoint)
+        self.assertIn("Aino", registry.get_sources_list())
+
+        self.tool.wfs_registry = registry
+        self.tool._runtime_aino_token = "CaseSensitive+Aino/Token"
+        secured = self.tool._source_endpoint_with_credentials("Aino", endpoint)
+        query = MODULE.urllib.parse.parse_qs(
+            MODULE.urllib.parse.urlsplit(secured).query
+        )
+        self.assertEqual(["CaseSensitive+Aino/Token"], query["token"])
+        self.assertEqual("https://aino.sitowise.com/ows", self.tool._sanitize_url(secured))
+        self.assertNotIn(
+            "CaseSensitive%2BAino%2FToken",
+            self.tool._redact_secrets(secured),
+        )
+        self.assertIn("[PIILOTETTU]", self.tool._redact_secrets(secured))
+
+    def test_aino_layer_discovery_passes_token_without_storing_it_in_entries(self):
+        self.tool.wfs_registry = MODULE.WFSSourceRegistry()
+        self.tool._runtime_aino_token = "aino-secret"
+        captured = {}
+
+        def fake_capabilities(endpoint, headers=None):
+            captured["endpoint"] = endpoint
+            return [{"id": "aluejaot:test", "title": "Testitaso", "kind": "wfs"}]
+
+        self.tool._fetch_wfs_capabilities_with_headers = fake_capabilities
+        layers = self.tool._get_aino_layers()
+        self.assertEqual("aluejaot:test", layers[0]["id"])
+        self.assertNotIn("endpoint", layers[0])
+        self.assertEqual(
+            ["aino-secret"],
+            MODULE.urllib.parse.parse_qs(
+                MODULE.urllib.parse.urlsplit(captured["endpoint"]).query
+            )["token"],
+        )
+
+    def test_aino_token_is_hidden_parameter_appended_after_existing_parameters(self):
+        class Filter:
+            def __init__(self):
+                self.type = None
+                self.list = []
+
+        class Parameter:
+            def __init__(self, **kwargs):
+                for key, value in kwargs.items():
+                    setattr(self, key, value)
+                self.value = None
+                self.values = None
+                self.enabled = True
+                self.filter = Filter()
+                self.filters = [Filter()]
+
+        sentinel = object()
+        original_parameter = getattr(MODULE.arcpy, "Parameter", sentinel)
+        MODULE.arcpy.Parameter = Parameter
+        tool = MODULE.VaylaWFSDownloader.__new__(MODULE.VaylaWFSDownloader)
+        tool.wfs_registry = MODULE.WFSSourceRegistry()
+        tool._get_saved_secret = lambda name: (
+            "saved-aino-token" if name == "aino_token" else ""
+        )
+        try:
+            parameters = tool.getParameterInfo()
+        finally:
+            if original_parameter is sentinel:
+                delattr(MODULE.arcpy, "Parameter")
+            else:
+                MODULE.arcpy.Parameter = original_parameter
+
+        self.assertEqual(13, len(parameters))
+        self.assertEqual("refresh_layer_catalog", parameters[11].name)
+        self.assertEqual("aino_token", parameters[12].name)
+        self.assertEqual("GPStringHidden", parameters[12].datatype)
+        self.assertEqual("saved-aino-token", parameters[12].value)
+        self.assertFalse(parameters[12].enabled)
 
     def test_layer_label_removes_redundant_digiroad_parenthesis(self):
         self.assertEqual(
@@ -738,6 +823,32 @@ class ToolboxHelperTests(unittest.TestCase):
         self.assertIn("CQL_FILTER=INTERSECTS", url)
         self.assertNotIn(" ", url)
         self.assertNotIn("bbox=", url)
+
+    def test_aino_getfeature_uses_wfs_11_parameters_and_preserves_token(self):
+        base = "https://aino.sitowise.com/ows?token=aino-secret"
+        url = self.tool._build_wfs_getfeature_url(
+            base, "aluejaot:test", 5000, 5000,
+            "application/json", bbox_str="1,2,3,4", geometry_only=False,
+        )
+        query = MODULE.urllib.parse.parse_qs(
+            MODULE.urllib.parse.urlsplit(url).query
+        )
+        self.assertEqual(["aino-secret"], query["token"])
+        self.assertEqual(["1.1.0"], query["version"])
+        self.assertEqual(["aluejaot:test"], query["typeName"])
+        self.assertEqual(["5000"], query["maxFeatures"])
+        self.assertEqual(["5000"], query["startIndex"])
+        self.assertNotIn("typeNames", query)
+        self.assertNotIn("count", query)
+
+        form = self.tool._wfs_getfeature_form(
+            "aluejaot:test", 5000, 0, "application/json",
+            bbox_str="1,2,3,4", geometry_only=False, wfs_version="1.1.0",
+        )
+        self.assertEqual("aluejaot:test", form["typeName"])
+        self.assertEqual("5000", form["maxFeatures"])
+        self.assertNotIn("typeNames", form)
+        self.assertNotIn("count", form)
 
     def test_remote_output_name_uses_run_id_without_exists_loop(self):
         self.tool._runtime_workspace = None
