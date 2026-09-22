@@ -153,6 +153,12 @@ Käyttöliittymän **Aino-token** on `GPStringHidden`-kenttä. Token:
 - korvataan SHA-256-tiivisteellä tasoluettelon välimuistiavaimessa;
 - ei sisälly tasomäärityksiin, lähdekoodiin eikä Git-historiaan.
 
+Jos token on kopioitu quoted-printable-muotoisesta tekstistä, URL:n `=` voi
+näkyä muodossa `=3D` ja kenttään voi päätyä ylimääräinen `3D`-etuliite.
+Työkalu poistaa etuliitteen vain, kun arvo vastaa tarkasti Ainon nykyistä
+48 merkin kopiointivirhemuotoa, josta jää 46 merkin aakkosnumeerinen token.
+Palvelun hylkäämä token näytetään tokenkentän HTTP 401/403 -virheenä.
+
 ## Tehdyt yhteystestit
 
 - WMS 1.3.0 GetCapabilities: HTTP 200, 175 nimettyä tasoa.

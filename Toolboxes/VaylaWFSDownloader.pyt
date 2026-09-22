@@ -1003,6 +1003,8 @@ class VaylaWFSDownloader(object):
         self._runtime_mml_api_key = ""
         self._runtime_karttapaikka_api_key = ""
         self._runtime_aino_token = ""
+        self._aino_catalog_errors = {}
+        self._aino_catalog_counts = {}
         self._credentials_cache = None
         self._wfs_output_format_cache = {}
         self._wfs_geometry_field_cache = {}
@@ -1111,6 +1113,41 @@ class VaylaWFSDownloader(object):
         if not text:
             return ""
         return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _normalize_aino_token(value):
+        """Korjaa yleiset Aino-tokenin kopiointimuodot.
+
+        Joissakin sähköposti-/HTML-lähteissä URL:n yhtäsuuruusmerkki näkyy
+        quoted-printable-muodossa ``=3D``. Tällöin käyttäjälle voi päätyä
+        varsinaisen 46-merkkisen tokenin eteen teksti ``3D``. Aino hylkää
+        sellaisen arvon HTTP 401:llä.
+        """
+        token = str(value or "").strip().strip("'\"")
+        if not token:
+            return ""
+        try:
+            parsed = urllib.parse.urlsplit(token)
+            if parsed.scheme and parsed.netloc:
+                for key, item_value in urllib.parse.parse_qsl(
+                    parsed.query, keep_blank_values=True
+                ):
+                    if key.casefold() == "token":
+                        token = item_value.strip()
+                        break
+        except Exception:
+            pass
+        token = urllib.parse.unquote(token).strip()
+        if token.casefold().startswith("token="):
+            token = token.split("=", 1)[1].strip()
+        if token.startswith("=3D"):
+            token = token[3:]
+        # Ainon nykyinen tunniste on 46 aakkosnumeerista merkkiä. Rajattu
+        # muototarkistus estää aidosti "3D":llä alkavan muun pituisen tokenin
+        # muuttamisen.
+        if re.fullmatch(r"3D[A-Za-z0-9]{46}", token):
+            token = token[2:]
+        return token
 
     def _format_phase(self, metrics, name):
         value = metrics.get(name)
@@ -1934,7 +1971,9 @@ class VaylaWFSDownloader(object):
         """Palauta ajonaikainen palveluosoite lähteen tunnisteilla."""
         if source_name != "Aino":
             return endpoint
-        token = (getattr(self, "_runtime_aino_token", "") or "").strip()
+        token = self._normalize_aino_token(
+            getattr(self, "_runtime_aino_token", "")
+        )
         if not token:
             return endpoint
         return self._set_url_query_parameter(endpoint, "token", token)
@@ -2070,15 +2109,52 @@ class VaylaWFSDownloader(object):
 
     def _get_aino_layers(self):
         """Hae Ainon WFS- ja kaikki nimetyt WMS-tasot ajonaikaisella tokenilla."""
-        token = (getattr(self, "_runtime_aino_token", "") or "").strip()
+        token = self._normalize_aino_token(
+            getattr(self, "_runtime_aino_token", "")
+        )
         if not token:
             return []
+        self._runtime_aino_token = token
         endpoint = self.wfs_registry.get_endpoint("Aino")
         if not endpoint:
             return []
         request_endpoint = self._source_endpoint_with_credentials("Aino", endpoint)
-        wfs_layers = self._fetch_wfs_capabilities_with_headers(request_endpoint)
-        wms_layers = self._fetch_wms_capabilities_with_headers(request_endpoint)
+        wfs_layers = []
+        wms_layers = []
+        errors = {}
+        try:
+            wfs_layers = self._fetch_wfs_capabilities_with_headers(request_endpoint)
+        except Exception as ex:
+            errors["WFS"] = ex
+        try:
+            wms_layers = self._fetch_wms_capabilities_with_headers(request_endpoint)
+        except Exception as ex:
+            errors["WMS"] = ex
+        self._aino_catalog_errors = {
+            service: self._aino_catalog_error_text(error)
+            for service, error in errors.items()
+        }
+        self._aino_catalog_counts = {
+            "WFS": len(wfs_layers),
+            "WMS": len(wms_layers),
+        }
+        if not wfs_layers and not wms_layers:
+            if not self._aino_catalog_errors:
+                self._aino_catalog_errors = {
+                    "OWS": "palvelu ei palauttanut yhtään tasoa"
+                }
+            details = "; ".join(
+                "{}: {}".format(service, self._aino_catalog_errors[service])
+                for service in sorted(self._aino_catalog_errors)
+            ) or "palvelu ei palauttanut tasoja"
+            raise Exception("Aino-tasoluetteloa ei saatu. {}".format(details))
+        for service, error_text in sorted(self._aino_catalog_errors.items()):
+            self._warn(
+                "[VAROITUS] Ainon {}-tasoluettelo epäonnistui; toinen "
+                "palvelutyyppi pidetään käytettävissä: {}".format(
+                    service, error_text
+                )
+            )
         result = []
         for entry in wfs_layers:
             item = dict(entry)
@@ -2096,6 +2172,17 @@ class VaylaWFSDownloader(object):
             item["endpoint"] = endpoint
             result.append(item)
         return result
+
+    @staticmethod
+    def _aino_catalog_error_text(error):
+        """Muodosta käyttäjälle turvallinen Aino-luettelovirhe ilman URL:ia."""
+        if isinstance(error, urllib.error.HTTPError):
+            if error.code in (401, 403):
+                return "token hylättiin (HTTP {})".format(error.code)
+            return "palvelin vastasi HTTP {}".format(error.code)
+        if isinstance(error, (urllib.error.URLError, TimeoutError, socket.timeout)):
+            return "yhteys epäonnistui"
+        return "{}".format(type(error).__name__)
 
     def _get_karttapaikka_layers(self):
         layers = []
@@ -5371,7 +5458,9 @@ class VaylaWFSDownloader(object):
             parameterType="Optional",
             direction="Input"
         )
-        p_aino_token.value = self._get_saved_secret("aino_token")
+        p_aino_token.value = self._normalize_aino_token(
+            self._get_saved_secret("aino_token")
+        )
         p_aino_token.enabled = False
 
         return [
@@ -5398,10 +5487,15 @@ class VaylaWFSDownloader(object):
             karttapaikka_api_key = (parameters[8].valueAsText or "").strip()
             karttakuva_user = (parameters[9].valueAsText or "").strip()
             karttakuva_pass = (parameters[10].valueAsText or "").strip()
-            aino_token = (
+            raw_aino_token = (
                 (parameters[12].valueAsText or "").strip()
                 if len(parameters) > 12 else ""
             )
+            aino_token = self._normalize_aino_token(raw_aino_token)
+            if len(parameters) > 12 and aino_token != raw_aino_token:
+                # Korjaa myös piilotetun kentän arvo, jotta execute-vaihe ja
+                # DPAPI-tallennus käyttävät samaa palvelun hyväksymää tokenia.
+                parameters[12].value = aino_token
             self._runtime_mml_api_key = mml_api_key
             self._runtime_karttapaikka_api_key = karttapaikka_api_key
             self._runtime_karttakuva_user = karttakuva_user
@@ -5462,6 +5556,11 @@ class VaylaWFSDownloader(object):
 
             if source_key not in self._all_wfs_layers_cache:
                 fetch_error = None
+                if uses_aino:
+                    # Älä näytä edellisen tokenin virhettä uuden tokenin tai
+                    # onnistuneen levyvälimuistiosuman yhteydessä.
+                    self._aino_catalog_errors = {}
+                    self._aino_catalog_counts = {}
                 try:
                     self._all_wfs_layers_cache[source_key] = self._fetch_layer_list(
                         source_values, cache_key=source_key,
@@ -5538,7 +5637,7 @@ class VaylaWFSDownloader(object):
         karttapaikka_api_key = parameters[8].valueAsText or ""
         karttakuva_user = (parameters[9].valueAsText or "").strip()
         karttakuva_pass = (parameters[10].valueAsText or "").strip()
-        aino_token = (
+        aino_token = self._normalize_aino_token(
             (parameters[12].valueAsText or "").strip()
             if len(parameters) > 12 else ""
         )
@@ -5618,6 +5717,21 @@ class VaylaWFSDownloader(object):
         if len(parameters) > 12:
             if uses_aino and not aino_token:
                 parameters[12].setErrorMessage("Aino-rajapinta vaatii tokenin.")
+            elif uses_aino and getattr(self, "_aino_catalog_errors", None):
+                counts = getattr(self, "_aino_catalog_counts", {}) or {}
+                details = "; ".join(
+                    "{}: {}".format(service, error_text)
+                    for service, error_text in sorted(
+                        self._aino_catalog_errors.items()
+                    )
+                )
+                message = "Aino-tasoluettelo: {}".format(details)
+                if sum(int(value or 0) for value in counts.values()) <= 0:
+                    parameters[12].setErrorMessage(message)
+                else:
+                    set_warning = getattr(parameters[12], "setWarningMessage", None)
+                    if callable(set_warning):
+                        set_warning(message)
             else:
                 parameters[12].clearMessage()
 
@@ -5727,7 +5841,7 @@ class VaylaWFSDownloader(object):
         karttapaikka_api_key = parameters[8].valueAsText or ""
         karttakuva_user = (parameters[9].valueAsText or "").strip()
         karttakuva_pass = (parameters[10].valueAsText or "").strip()
-        aino_token = (
+        aino_token = self._normalize_aino_token(
             (parameters[12].valueAsText or "").strip()
             if len(parameters) > 12 else ""
         )

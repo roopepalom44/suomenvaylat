@@ -89,6 +89,19 @@ class ToolboxHelperTests(unittest.TestCase):
         )
         self.assertIn("[PIILOTETTU]", self.tool._redact_secrets(secured))
 
+    def test_aino_token_normalizes_quoted_printable_prefix_and_url_copy(self):
+        actual = "a" * 46
+        self.assertEqual(actual, self.tool._normalize_aino_token("3D" + actual))
+        self.assertEqual(actual, self.tool._normalize_aino_token("=3D" + actual))
+        self.assertEqual(
+            actual,
+            self.tool._normalize_aino_token(
+                "https://aino.sitowise.com/ows?service=WMS&token=" + actual
+            ),
+        )
+        # Muu kuin tarkka tunnettu 48 merkin kopiointimuoto säilyy ennallaan.
+        self.assertEqual("3Dshort", self.tool._normalize_aino_token("3Dshort"))
+
     def test_aino_layer_discovery_combines_wfs_and_wms_without_storing_token(self):
         self.tool.wfs_registry = MODULE.WFSSourceRegistry()
         self.tool._runtime_aino_token = "aino-secret"
@@ -124,6 +137,43 @@ class ToolboxHelperTests(unittest.TestCase):
                 )["token"],
             )
         self.assertNotIn("aino-secret", repr(layers))
+
+    def test_aino_catalog_keeps_wfs_layers_when_wms_temporarily_fails(self):
+        self.tool.wfs_registry = MODULE.WFSSourceRegistry()
+        self.tool._runtime_aino_token = "a" * 46
+        warnings = []
+        self.tool._warn = warnings.append
+        self.tool._fetch_wfs_capabilities_with_headers = lambda endpoint: [{
+            "id": "aluejaot:test", "title": "Testitaso", "kind": "wfs"
+        }]
+
+        def fail_wms(endpoint):
+            raise MODULE.urllib.error.HTTPError(endpoint, 503, "Unavailable", {}, None)
+
+        self.tool._fetch_wms_capabilities_with_headers = fail_wms
+        layers = self.tool._get_aino_layers()
+
+        self.assertEqual(["aluejaot:test"], [item["id"] for item in layers])
+        self.assertEqual({"WFS": 1, "WMS": 0}, self.tool._aino_catalog_counts)
+        self.assertEqual("palvelin vastasi HTTP 503", self.tool._aino_catalog_errors["WMS"])
+        self.assertTrue(any("toinen palvelutyyppi" in item for item in warnings))
+
+    def test_aino_catalog_reports_rejected_token_without_leaking_url(self):
+        self.tool.wfs_registry = MODULE.WFSSourceRegistry()
+        self.tool._runtime_aino_token = "b" * 46
+        self.tool._warn = lambda message: None
+
+        def reject(endpoint):
+            raise MODULE.urllib.error.HTTPError(endpoint, 401, "Unauthorized", {}, None)
+
+        self.tool._fetch_wfs_capabilities_with_headers = reject
+        self.tool._fetch_wms_capabilities_with_headers = reject
+        with self.assertRaises(Exception) as caught:
+            self.tool._get_aino_layers()
+        message = str(caught.exception)
+        self.assertIn("token hylättiin (HTTP 401)", message)
+        self.assertNotIn("https://", message)
+        self.assertNotIn("b" * 46, message)
 
     def test_aino_wms_capabilities_returns_every_named_layer_and_background_flag(self):
         class Response:

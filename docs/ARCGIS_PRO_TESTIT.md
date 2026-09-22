@@ -133,3 +133,7 @@ Yhdistetyn JSONin tai suoran feature class -kirjoituksen toteutusta ei pidä ott
 9. Valitse saman aineiston `(WFS)`- ja `(WMS)`-versiot yhtä aikaa. WFS:n pitää
    valmistua paikalliseksi feature classiksi ja WMS:n live-palvelutasoksi ilman,
    että valinnat korvaavat toisiaan.
+10. Lisää toimivan 46-merkkisen tokenin eteen testiksi `3D`. Työkalun pitää
+    normalisoida tunnettu kopiointimuoto ja näyttää edelleen 113 WFS- ja 175
+    WMS-valintaa. Muulla virheellisellä tokenilla tokenkentässä pitää näkyä
+    HTTP 401/403 -virhe tyhjän, selityksettömän aineistolistan sijaan.

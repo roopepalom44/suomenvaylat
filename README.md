@@ -44,7 +44,7 @@ Skripti käyttää vain käännöksen build-kansiossa olevaa DLL:ää eikä kosk
 automaattisesti ArcGIS Pron AssemblyCache-kopiota. Se rakentaa uuden
 `bin\Debug\net8.0-windows\suomenvaylat.esriAddInX`-paketin tyhjästä, sijoittaa
 DLL:n ja työkalut viralliseen `Install\`-hakemistoon, tarkistaa CLR-tyypit ja
-validoi paketin sisällön. Paketti käyttää versiota `1.0.14`, jotta ArcGIS Pro
+validoi paketin sisällön. Paketti käyttää versiota `1.0.15`, jotta ArcGIS Pro
 tunnistaa sen päivitykseksi.
 
 Kapsin tarkat mittakaavatasot jaetaan tarvittaessa useaan enintään 25 laatan latauserään ja yhdistetään lopuksi yhdeksi rasteriksi.
@@ -83,7 +83,7 @@ polku parametrilla `-MSBuildPath`.
 
 ### TypeNotFound / command unavailable
 
-Jos ArcGIS Pro näyttää virheen `TypeNotFound` tai ilmoittaa komennon olevan unavailable, paketissa on ollut vanha/väärä DLL tai väärä AddInX-rakenne. `package-addin.ps1` tarkistaa nyt assemblyn nimen, varmistaa että DLL sisältää tyypit `suomenvaylat.Module1` ja `suomenvaylat.OpenSuomenvaylatToolButton`, sekä pakottaa runtime-tiedostot `Install\`-hakemistoon. Add-in-versiona on `1.0.14`, jotta ArcGIS Pro tunnistaa tämän päivitykseksi.
+Jos ArcGIS Pro näyttää virheen `TypeNotFound` tai ilmoittaa komennon olevan unavailable, paketissa on ollut vanha/väärä DLL tai väärä AddInX-rakenne. `package-addin.ps1` tarkistaa nyt assemblyn nimen, varmistaa että DLL sisältää tyypit `suomenvaylat.Module1` ja `suomenvaylat.OpenSuomenvaylatToolButton`, sekä pakottaa runtime-tiedostot `Install\`-hakemistoon. Add-in-versiona on `1.0.15`, jotta ArcGIS Pro tunnistaa tämän päivitykseksi.
 
 Jos tarkistus ilmoittaa väärästä DLL:stä, käännä C#-projekti ArcGIS Pro SDK:n kanssa ja anna tulos suoraan:
 
@@ -208,6 +208,12 @@ valittavina oli 113 WFS-vektoritasoa ja kaikki 175 nimettyä WMS-karttatasoa.
 Saman aineiston WFS- ja WMS-versiot erotetaan nimissä `(WFS)`- ja
 `(WMS)`-tunnisteilla. Syötä token käyttöliittymän piilotettuun
 **Aino-token**-kenttään.
+
+Jos token on kopioitu lähteestä, jossa yhtäsuuruusmerkki on koodattu muotoon
+`=3D`, kenttään voi päätyä ylimääräinen `3D` varsinaisen tokenin alkuun. Versio
+1.0.15 tunnistaa ja korjaa tämän tarkan kopiointimuodon automaattisesti. Haku
+raportoi lisäksi HTTP 401/403 -tunnistusvirheen suoraan tokenkentässä sen sijaan,
+että aineistolista jäisi selityksettä tyhjäksi.
 
 Aino käyttää WFS 1.1.0:aa. Suomenväylät muodostaa sille palvelun vaatimat
 `typeName`- ja `maxFeatures`-parametrit, sivuttaa `startIndex`-parametrilla,
