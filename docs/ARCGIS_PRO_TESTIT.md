@@ -104,13 +104,15 @@ Yhdistetyn JSONin tai suoran feature class -kirjoituksen toteutusta ei pidä ott
    GeoJSON-muunnos tuottaa nolla kohdetta, ajon pitää päättyä näkyvään
    virheeseen eikä onnistuneeksi merkittyyn tyhjään tasoon.
 
-## 10. Sitowise Aino / WFS 1.1
+## 10. Sitowise Aino / WFS 1.1 ja WMS 1.3
 
 1. Valitse lähteeksi **Aino**. Ilman tokenia **Aino-token**-kentässä pitää näkyä
    pakollisuusvirhe eikä tasoluetteloa saa yrittää ladata tunnisteetta.
 2. Syötä voimassa oleva token ja valitse **Päivitä tasolistaus palvelusta**.
    Listaan pitää tulla palvelun dynaaminen tasoluettelo; kartoitushetkellä siinä
-   oli 113 tasoa neljässä nimiavaruudessa.
+   oli 113 `(WFS)`-valintaa ja 175 `(WMS)`-valintaa. Tarkista, että mukana ovat
+   kaikki kuusi WMS-nimiavaruutta: `aineisto`, `ymparistoaineistot`, `aluejaot`,
+   `kaavoitus`, `geologia` ja `taustakartat`.
 3. Lataa pienellä Oulun rajauksella vähintään yksi piste-, viiva- ja
    polygonitaso. Esimerkit ovat `Fintraffic lentoasemat`, `Digiroad Linkki` ja
    `Museovirasto NBA Muinaisjäännökset, alueet`.
@@ -122,3 +124,12 @@ Yhdistetyn JSONin tai suoran feature class -kirjoituksen toteutusta ei pidä ott
 6. Testaa monisivuinen taso, esimerkiksi `Digiroad Linkki`. Sivujen pitää
    jatkua eri kohteilla; luonnollisen järjestyksen puuttuessa työkalun pitää
    lukea DescribeFeatureType ja käyttää vakaata `sortBy`-kenttää.
+7. Valitse `taustakartat`-nimiavaruuden `(WMS)`-taso. Sen pitää tulla aktiivisen
+   kartan **Taustakartta**-ryhmään live-WMS-palveluna. Vain valittu alitaso saa
+   olla näkyvissä; tasoa ei saa kopioida geodatabaseen eikä leikata rajauksella.
+8. Valitse jokin muu `(WMS)`-taso. Sen pitää tulla **Aino WMS** -ryhmään ja
+   säilyttää palvelimen oma piirtoasu. Panoroi ja zoomaa niin, että ArcGIS tekee
+   uusia GetMap-pyyntöjä. Token ei saa näkyä työkalun lokissa tai tason URL:ssa.
+9. Valitse saman aineiston `(WFS)`- ja `(WMS)`-versiot yhtä aikaa. WFS:n pitää
+   valmistua paikalliseksi feature classiksi ja WMS:n live-palvelutasoksi ilman,
+   että valinnat korvaavat toisiaan.

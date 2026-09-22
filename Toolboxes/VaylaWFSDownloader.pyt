@@ -291,12 +291,13 @@ class WFSSourceRegistry(object):
                 "description": "SYKE INSPIRE Protected Sites"
             },
             "Aino": {
-                "type": "wfs",
-                # Sitowise Aino julkaisee WFS 1.1.0 -rajapinnan. Käyttäjän
-                # token lisätään ajonaikaisesti jokaiseen pyyntöön eikä sitä
-                # tallenneta lähdekoodiin tai tasoluettelon levyvälimuistiin.
+                "type": "aino",
+                # Sitowise Aino julkaisee samasta osoitteesta WFS 1.1.0- ja
+                # WMS 1.3.0 -rajapinnat. Käyttäjän token lisätään vain
+                # ajonaikaisiin pyyntöihin eikä sitä tallenneta lähdekoodiin
+                # tai tasoluettelon levyvälimuistiin.
                 "endpoints": ["https://aino.sitowise.com/ows"],
-                "description": "Sitowise Aino WFS"
+                "description": "Sitowise Aino WFS + WMS"
             },
             "Karttapaikka": {
                 "type": "mml_combined",
@@ -1270,6 +1271,31 @@ class VaylaWFSDownloader(object):
         return None
 
     @staticmethod
+    def _move_group_to_map_bottom(active_map, group_layer):
+        """Siirrä taustakarttaryhmä kartan pinon alimmaiseksi, jos mahdollista."""
+        if group_layer is None:
+            return
+        move_layer = getattr(active_map, "moveLayer", None)
+        if not callable(move_layer):
+            return
+        try:
+            top_level = []
+            for layer in active_map.listLayers():
+                if layer is group_layer:
+                    continue
+                long_name = str(getattr(layer, "longName", "") or "")
+                # ArcPy käyttää kenoviivaa ryhmäpolun erottimena. Tyhjä
+                # longName tulkitaan ylintason tasoksi vanhojen Pro-versioiden
+                # yhteensopivuuden vuoksi.
+                if not long_name or "\\" not in long_name:
+                    top_level.append(layer)
+            if top_level:
+                move_layer(top_level[-1], group_layer, "AFTER")
+        except Exception:
+            # Piirtojärjestys ei saa estää palvelutason lisäämistä.
+            pass
+
+    @staticmethod
     def _as_layer_list(value):
         if value is None:
             return []
@@ -1423,6 +1449,202 @@ class VaylaWFSDownloader(object):
         )
         self._msg("[INFO] MML vector tile -taso lisätty: {}".format(display_name))
         return {"vector_tile": vector_layer}
+
+    @staticmethod
+    def _wms_match_key(value):
+        """Normalisoi WMS:n tekninen nimi tai otsikko vertailua varten."""
+        return unicodedata.normalize("NFKC", str(value or "")).strip().casefold()
+
+    def _select_wms_sublayer_in_cim(self, service_layer, layer_name, layer_title):
+        """Valitse yksi WMS-alitaso CIM:n ServiceLayerID:n perusteella.
+
+        WMS-palvelun tekninen ``Name`` päätyy ArcGIS Pron CIM-mallissa yleensä
+        ``serviceLayerID``-kenttään, kun taas Contents-paneelissa näkyvä nimi on
+        palvelun ``Title``. Tekninen nimi on siksi aina ensisijainen.
+        """
+        get_definition = getattr(service_layer, "getDefinition", None)
+        set_definition = getattr(service_layer, "setDefinition", None)
+        if not callable(get_definition) or not callable(set_definition):
+            return False
+        try:
+            definition = get_definition("V3")
+        except Exception:
+            return False
+
+        records = []
+
+        def visit(nodes, ancestors):
+            for node in list(nodes or []):
+                records.append((node, tuple(ancestors)))
+                visit(getattr(node, "subLayers", None), ancestors + [node])
+
+        visit(getattr(definition, "subLayers", None), [])
+        if not records:
+            return False
+
+        technical_key = self._wms_match_key(layer_name)
+        local_key = self._wms_match_key(str(layer_name or "").split(":")[-1])
+        title_key = self._wms_match_key(layer_title)
+        selected_record = None
+        for record in records:
+            service_id = self._wms_match_key(
+                getattr(record[0], "serviceLayerID", None)
+            )
+            if service_id and service_id == technical_key:
+                selected_record = record
+                break
+        if selected_record is None:
+            # Joissakin Pro-versioissa nimiavaruus jää ServiceLayerID:stä pois.
+            for record in records:
+                service_id = self._wms_match_key(
+                    getattr(record[0], "serviceLayerID", None)
+                )
+                if service_id and service_id == local_key:
+                    selected_record = record
+                    break
+        if selected_record is None:
+            for record in records:
+                node_name = self._wms_match_key(getattr(record[0], "name", None))
+                if node_name in (technical_key, local_key):
+                    selected_record = record
+                    break
+        if selected_record is None:
+            for record in records:
+                if self._wms_match_key(getattr(record[0], "name", None)) == title_key:
+                    selected_record = record
+                    break
+        if selected_record is None:
+            return False
+
+        selected_node, ancestors = selected_record
+        enabled_nodes = set([id(selected_node)] + [id(node) for node in ancestors])
+
+        def add_descendants(node):
+            for child in list(getattr(node, "subLayers", None) or []):
+                enabled_nodes.add(id(child))
+                add_descendants(child)
+
+        add_descendants(selected_node)
+        for node, _ in records:
+            try:
+                node.visibility = id(node) in enabled_nodes
+            except Exception:
+                pass
+        try:
+            set_definition(definition)
+            return True
+        except Exception:
+            return False
+
+    def _select_wms_sublayer_in_layer_tree(self, service_layer, layer_name,
+                                           layer_title):
+        """ArcPy-varareitti WMS-alitason valintaan komposiittitason puusta."""
+        list_layers = getattr(service_layer, "listLayers", None)
+        if not callable(list_layers):
+            return False
+        try:
+            sublayers = list(list_layers() or [])
+        except Exception:
+            return False
+        if not sublayers:
+            return False
+
+        keys = {
+            self._wms_match_key(layer_name),
+            self._wms_match_key(str(layer_name or "").split(":")[-1]),
+            self._wms_match_key(layer_title),
+        }
+        selected = None
+        for sublayer in sublayers:
+            names = {
+                self._wms_match_key(getattr(sublayer, "name", None)),
+                self._wms_match_key(getattr(sublayer, "longName", None)),
+            }
+            if keys.intersection(names):
+                selected = sublayer
+                break
+        if selected is None:
+            return False
+        selected_long_name = self._wms_match_key(
+            getattr(selected, "longName", None)
+        )
+        selected_is_group = bool(getattr(selected, "isGroupLayer", False))
+        for sublayer in sublayers:
+            try:
+                sublayer_long_name = self._wms_match_key(
+                    getattr(sublayer, "longName", None)
+                )
+                is_descendant = bool(
+                    selected_is_group
+                    and selected_long_name
+                    and sublayer_long_name.startswith(selected_long_name + "\\")
+                )
+                sublayer.visible = bool(
+                    sublayer is selected
+                    or is_descendant
+                    or getattr(sublayer, "isGroupLayer", False)
+                )
+            except Exception:
+                pass
+        return True
+
+    def _add_aino_wms_layer(self, endpoint, layer_name, layer_title, token,
+                            is_background=False):
+        """Lisää yksi Ainon nimetty taso aktiiviseen karttaan live-WMS:nä."""
+        token = (token or "").strip()
+        if not token:
+            raise Exception("Aino WMS vaatii tokenin.")
+        endpoint = self._sanitize_url(endpoint)
+        if not endpoint:
+            raise Exception("Aino WMS -palveluosoite puuttuu.")
+        if not (layer_name or "").strip():
+            raise Exception("Aino WMS -tason tekninen nimi puuttuu.")
+
+        active_map = self._active_map_for_background()
+        group_name = "Taustakartta" if is_background else "Aino WMS"
+        group_layer = self._find_or_create_group_layer(active_map, group_name)
+        if is_background:
+            self._move_group_to_map_bottom(active_map, group_layer)
+        if group_layer is not None:
+            try:
+                group_layer.visible = True
+            except Exception:
+                pass
+
+        # custom_parameters välittyy GetCapabilities-, GetMap- ja
+        # GetFeatureInfo-pyyntöihin. Token ei näin päädy URL:iin tai lokiin.
+        added = active_map.addDataFromPath(endpoint, "WMS", {"token": token})
+        roots = self._as_layer_list(added)
+        if not roots:
+            raise Exception("ArcGIS Pro ei palauttanut lisättyä Aino WMS -tasoa.")
+
+        selected = False
+        for root in roots:
+            if self._select_wms_sublayer_in_cim(root, layer_name, layer_title):
+                selected = True
+                break
+            if self._select_wms_sublayer_in_layer_tree(root, layer_name, layer_title):
+                selected = True
+                break
+        if not selected:
+            remove_layer = getattr(active_map, "removeLayer", None)
+            if callable(remove_layer):
+                for root in roots:
+                    try:
+                        remove_layer(root)
+                    except Exception:
+                        pass
+            raise Exception(
+                "ArcGIS Pro lisäsi WMS-palvelun, mutta valittua alitasoa '{}' "
+                "ei löytynyt palvelutasosta.".format(layer_name)
+            )
+
+        display_name = "Aino WMS – {}".format(layer_title or layer_name)
+        top_layer = self._configure_group_layers(
+            active_map, group_layer, roots, display_name, visible=True
+        )
+        self._msg("[INFO] Aino live-WMS lisätty: {}".format(layer_title or layer_name))
+        return {"wms": top_layer, "group": group_name}
 
     def _parse_source_values(self, value_as_text):
         values = self._parse_multivalue(value_as_text)
@@ -1798,8 +2020,56 @@ class VaylaWFSDownloader(object):
                 })
         return layers
 
+    def _fetch_wms_capabilities_with_headers(self, endpoint, headers=None):
+        """Hae WMS 1.3.0 -tasot ja säilytä palvelun tekninen nimi."""
+        url = endpoint
+        for key, value in (
+            ("service", "WMS"),
+            ("request", "GetCapabilities"),
+            ("version", "1.3.0"),
+        ):
+            url = self._set_url_query_parameter(url, key, value)
+        req_headers = {"User-Agent": "ArcGISPro-Arcpy-WFSDownloader/1.4"}
+        if headers:
+            req_headers.update(headers)
+        req = urllib.request.Request(url, headers=req_headers)
+        with urllib.request.urlopen(req, timeout=60) as response:
+            xml_bytes = response.read()
+        root = ET.fromstring(xml_bytes)
+        layers = []
+        seen = set()
+        for elem in root.iter():
+            if not elem.tag.endswith("Layer"):
+                continue
+            name_text = None
+            title_text = None
+            for child in list(elem):
+                if child.tag.endswith("Name") and child.text and not name_text:
+                    name_text = child.text.strip()
+                elif child.tag.endswith("Title") and child.text and not title_text:
+                    title_text = child.text.strip()
+            if not name_text or name_text in seen:
+                continue
+            seen.add(name_text)
+            namespace = name_text.split(":", 1)[0] if ":" in name_text else ""
+            normalized_name = self._wms_match_key(name_text)
+            normalized_title = self._wms_match_key(title_text)
+            layers.append({
+                "id": name_text,
+                "title": title_text or name_text.split(":")[-1],
+                "source": "Aino",
+                "kind": "aino_wms",
+                "wms_title": title_text or name_text.split(":")[-1],
+                "is_background": (
+                    namespace.casefold() == "taustakartat"
+                    or "taustakartta" in normalized_name
+                    or "taustakartta" in normalized_title
+                ),
+            })
+        return layers
+
     def _get_aino_layers(self):
-        """Hae Aino WFS -tasot käyttäjän ajonaikaisella tokenilla."""
+        """Hae Ainon WFS- ja kaikki nimetyt WMS-tasot ajonaikaisella tokenilla."""
         token = (getattr(self, "_runtime_aino_token", "") or "").strip()
         if not token:
             return []
@@ -1807,7 +2077,25 @@ class VaylaWFSDownloader(object):
         if not endpoint:
             return []
         request_endpoint = self._source_endpoint_with_credentials("Aino", endpoint)
-        return self._fetch_wfs_capabilities_with_headers(request_endpoint)
+        wfs_layers = self._fetch_wfs_capabilities_with_headers(request_endpoint)
+        wms_layers = self._fetch_wms_capabilities_with_headers(request_endpoint)
+        result = []
+        for entry in wfs_layers:
+            item = dict(entry)
+            item["title"] = "{} (WFS)".format(
+                item.get("title") or item.get("id", "")
+            )
+            item["endpoint"] = endpoint
+            result.append(item)
+        for entry in wms_layers:
+            item = dict(entry)
+            item["wms_title"] = item.get("wms_title") or item.get("title")
+            item["title"] = "{} (WMS)".format(
+                item.get("title") or item.get("id", "")
+            )
+            item["endpoint"] = endpoint
+            result.append(item)
+        return result
 
     def _get_karttapaikka_layers(self):
         layers = []
@@ -2053,6 +2341,8 @@ class VaylaWFSDownloader(object):
                     "title": title,
                     "endpoint": entry.get("endpoint"),
                     "geometry_field": entry.get("geometry_field"),
+                    "wms_title": entry.get("wms_title"),
+                    "is_background": bool(entry.get("is_background", False)),
                 }
                 entries.append(unique_label)
 
@@ -5144,7 +5434,9 @@ class VaylaWFSDownloader(object):
             if len(parameters) > 12:
                 parameters[12].enabled = uses_aino
 
-            source_key = "{}|mml:{}|kartta:{}|kk:{}:{}|aino:{}".format(
+            # Versioi avain, jotta vanhan 113 WFS -tason Aino-välimuisti ei
+            # peitä uuden version 175 WMS -valintaa päivityksen jälkeen.
+            source_key = "catalog-v2|{}|mml:{}|kartta:{}|kk:{}:{}|aino:{}".format(
                 "|".join(source_values), self._secret_cache_key(mml_api_key),
                 self._secret_cache_key(karttapaikka_api_key),
                 self._secret_cache_key(karttakuva_user),
@@ -5744,7 +6036,31 @@ class VaylaWFSDownloader(object):
                     self._msg("  [TASO] Paikallinen välitulos: {}".format(staged_fc))
                     self._msg("  [TASO] Lopputulos: {}".format(proposed_output_path))
 
-            if layer_kind == "osm":
+            elif layer_kind == "aino_wms":
+                requested_mode = "Aino WMS 1.3.0 live-karttataso"
+                self._msg("  [TASO] Näyttönimi: {}".format(layer_ui_name))
+                self._msg("  [TASO] Lähde: Aino")
+                self._msg("  [TASO] WMS-palvelu: {}".format(
+                    self._sanitize_url(layer_info.get("endpoint") or base_wfs)
+                ))
+                self._msg("  [TASO] WMS-alitaso: {}".format(layer_clean))
+                self._msg("  [TASO] Hakutapa: {}".format(requested_mode))
+
+            if layer_kind == "aino_wms":
+                try:
+                    self._add_aino_wms_layer(
+                        layer_info.get("endpoint") or base_wfs,
+                        layer_clean,
+                        layer_info.get("wms_title") or layer_info.get("title"),
+                        aino_token,
+                        is_background=bool(layer_info.get("is_background")),
+                    )
+                except Exception as ex:
+                    _record_layer_failure(layer_ui_name, self._redact_secrets(ex))
+                    continue
+                self._msg("  [INFO] Taso valmis.")
+                continue
+            elif layer_kind == "osm":
                 if layer_clean == GeofabrikPOIAdapter.LAYER_ID:
                     requested_mode = (
                         "OpenStreetMap Overpass API + Geofabrik POI-luokitus + "

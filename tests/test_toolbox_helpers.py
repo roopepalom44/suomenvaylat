@@ -89,25 +89,119 @@ class ToolboxHelperTests(unittest.TestCase):
         )
         self.assertIn("[PIILOTETTU]", self.tool._redact_secrets(secured))
 
-    def test_aino_layer_discovery_passes_token_without_storing_it_in_entries(self):
+    def test_aino_layer_discovery_combines_wfs_and_wms_without_storing_token(self):
         self.tool.wfs_registry = MODULE.WFSSourceRegistry()
         self.tool._runtime_aino_token = "aino-secret"
         captured = {}
 
         def fake_capabilities(endpoint, headers=None):
-            captured["endpoint"] = endpoint
+            captured["wfs_endpoint"] = endpoint
             return [{"id": "aluejaot:test", "title": "Testitaso", "kind": "wfs"}]
 
+        def fake_wms_capabilities(endpoint, headers=None):
+            captured["wms_endpoint"] = endpoint
+            return [{
+                "id": "taustakartat:test",
+                "title": "Testitausta",
+                "kind": "aino_wms",
+                "wms_title": "Testitausta",
+                "is_background": True,
+            }]
+
         self.tool._fetch_wfs_capabilities_with_headers = fake_capabilities
+        self.tool._fetch_wms_capabilities_with_headers = fake_wms_capabilities
         layers = self.tool._get_aino_layers()
         self.assertEqual("aluejaot:test", layers[0]["id"])
-        self.assertNotIn("endpoint", layers[0])
-        self.assertEqual(
-            ["aino-secret"],
-            MODULE.urllib.parse.parse_qs(
-                MODULE.urllib.parse.urlsplit(captured["endpoint"]).query
-            )["token"],
+        self.assertEqual("Testitaso (WFS)", layers[0]["title"])
+        self.assertEqual("taustakartat:test", layers[1]["id"])
+        self.assertEqual("Testitausta (WMS)", layers[1]["title"])
+        self.assertEqual("https://aino.sitowise.com/ows", layers[1]["endpoint"])
+        for key in ("wfs_endpoint", "wms_endpoint"):
+            self.assertEqual(
+                ["aino-secret"],
+                MODULE.urllib.parse.parse_qs(
+                    MODULE.urllib.parse.urlsplit(captured[key]).query
+                )["token"],
+            )
+        self.assertNotIn("aino-secret", repr(layers))
+
+    def test_aino_wms_capabilities_returns_every_named_layer_and_background_flag(self):
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            @staticmethod
+            def read():
+                return '''<WMS_Capabilities xmlns="http://www.opengis.net/wms">
+                  <Capability><Layer><Title>Service</Title>
+                    <Layer><Name>taustakartat:tausta</Name><Title>Taustakartta</Title></Layer>
+                    <Layer><Title>Ryhmä</Title>
+                      <Layer><Name>aineisto:kohteet</Name><Title>Kohteet</Title></Layer>
+                    </Layer>
+                  </Layer></Capability>
+                </WMS_Capabilities>'''.encode("utf-8")
+
+        calls = []
+        original_open = MODULE.urllib.request.urlopen
+        MODULE.urllib.request.urlopen = lambda request, timeout=60: (
+            calls.append(request.full_url) or Response()
         )
+        try:
+            layers = self.tool._fetch_wms_capabilities_with_headers(
+                "https://aino.sitowise.com/ows?token=secret"
+            )
+        finally:
+            MODULE.urllib.request.urlopen = original_open
+
+        self.assertEqual(
+            ["taustakartat:tausta", "aineisto:kohteet"],
+            [item["id"] for item in layers],
+        )
+        self.assertTrue(layers[0]["is_background"])
+        self.assertFalse(layers[1]["is_background"])
+        query = MODULE.urllib.parse.parse_qs(
+            MODULE.urllib.parse.urlsplit(calls[0]).query
+        )
+        self.assertEqual(["WMS"], query["service"])
+        self.assertEqual(["GetCapabilities"], query["request"])
+        self.assertEqual(["1.3.0"], query["version"])
+
+    def test_aino_wms_parser_has_no_layer_limit_at_175(self):
+        named_layers = "".join(
+            "<Layer><Name>aineisto:taso_{}</Name><Title>Taso {}</Title></Layer>".format(
+                index, index
+            )
+            for index in range(175)
+        )
+        xml = (
+            '<WMS_Capabilities xmlns="http://www.opengis.net/wms">'
+            "<Capability><Layer><Title>Service</Title>{}</Layer></Capability>"
+            "</WMS_Capabilities>"
+        ).format(named_layers).encode("utf-8")
+
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return xml
+
+        original_open = MODULE.urllib.request.urlopen
+        MODULE.urllib.request.urlopen = lambda request, timeout=60: Response()
+        try:
+            layers = self.tool._fetch_wms_capabilities_with_headers(
+                "https://aino.sitowise.com/ows?token=secret"
+            )
+        finally:
+            MODULE.urllib.request.urlopen = original_open
+        self.assertEqual(175, len(layers))
+        self.assertEqual(175, len({item["id"] for item in layers}))
 
     def test_aino_token_is_hidden_parameter_appended_after_existing_parameters(self):
         class Filter:
@@ -603,6 +697,133 @@ class ToolboxHelperTests(unittest.TestCase):
             ),
             self.tool._runtime_map.calls,
         )
+
+    def test_aino_wms_adds_clean_service_and_selects_technical_sublayer(self):
+        class CimNode:
+            def __init__(self, service_id, name, children=None):
+                self.serviceLayerID = service_id
+                self.name = name
+                self.subLayers = list(children or [])
+                self.visibility = True
+
+        selected = CimNode("taustakartat:tausta", "Taustakartta")
+        other = CimNode("aineisto:muu", "Muu taso")
+        group_node = CimNode("", "Palvelu", [selected, other])
+        definition = types.SimpleNamespace(subLayers=[group_node])
+
+        class Layer:
+            def __init__(self, name, group=False):
+                self.name = name
+                self.isGroupLayer = group
+                self.visible = False
+                self.definition_set = False
+
+            def getDefinition(self, version):
+                self.requested_version = version
+                return definition
+
+            def setDefinition(self, value):
+                self.definition_set = value is definition
+
+        class Map:
+            def __init__(self):
+                self.group = Layer("Taustakartta", group=True)
+                self.wms = Layer("service")
+                self.calls = []
+
+            def listLayers(self):
+                return [self.group]
+
+            def addDataFromPath(self, path, data_type=None, custom_parameters=None):
+                self.calls.append((path, data_type, custom_parameters))
+                return self.wms
+
+            def addLayerToGroup(self, group, layer, position):
+                self.calls.append(("group", group.name, layer, position))
+
+        self.tool._runtime_map_loaded = True
+        self.tool._runtime_map = Map()
+        self.tool._msg = lambda message: None
+        result = self.tool._add_aino_wms_layer(
+            "https://aino.sitowise.com/ows?token=must-not-leak",
+            "taustakartat:tausta",
+            "Taustakartta",
+            "runtime-secret",
+            is_background=True,
+        )
+
+        self.assertEqual("Taustakartta", result["group"])
+        self.assertTrue(selected.visibility)
+        self.assertFalse(other.visibility)
+        self.assertTrue(group_node.visibility)
+        self.assertTrue(self.tool._runtime_map.wms.definition_set)
+        self.assertEqual("Aino WMS – Taustakartta", result["wms"].name)
+        self.assertIn(
+            (
+                "https://aino.sitowise.com/ows",
+                "WMS",
+                {"token": "runtime-secret"},
+            ),
+            self.tool._runtime_map.calls,
+        )
+
+    def test_aino_wms_removes_service_if_requested_sublayer_is_missing(self):
+        class Layer:
+            name = "service"
+            visible = True
+
+            @staticmethod
+            def listLayers():
+                return [types.SimpleNamespace(name="Muu taso", visible=True)]
+
+        class Map:
+            def __init__(self):
+                self.layer = Layer()
+                self.removed = []
+
+            @staticmethod
+            def listLayers():
+                return []
+
+            def createGroupLayer(self, name):
+                return types.SimpleNamespace(name=name, isGroupLayer=True, visible=True)
+
+            def addDataFromPath(self, path, data_type=None, custom_parameters=None):
+                return self.layer
+
+            def removeLayer(self, layer):
+                self.removed.append(layer)
+
+        self.tool._runtime_map_loaded = True
+        self.tool._runtime_map = Map()
+        self.tool._msg = lambda message: None
+        with self.assertRaisesRegex(Exception, "ei löytynyt"):
+            self.tool._add_aino_wms_layer(
+                "https://aino.sitowise.com/ows",
+                "aineisto:puuttuu",
+                "Puuttuu",
+                "runtime-secret",
+            )
+        self.assertEqual([self.tool._runtime_map.layer], self.tool._runtime_map.removed)
+
+    def test_aino_background_group_is_moved_below_operational_layers(self):
+        background = types.SimpleNamespace(name="Taustakartta", longName="Taustakartta")
+        roads = types.SimpleNamespace(name="Tiet", longName="Tiet")
+
+        class Map:
+            def __init__(self):
+                self.calls = []
+
+            @staticmethod
+            def listLayers():
+                return [background, roads]
+
+            def moveLayer(self, reference_layer, move_layer, position):
+                self.calls.append((reference_layer, move_layer, position))
+
+        active_map = Map()
+        self.tool._move_group_to_map_bottom(active_map, background)
+        self.assertEqual([(roads, background, "AFTER")], active_map.calls)
 
     def test_fixed_mml_wmts_range_and_tile_url(self):
         span = MODULE.MML_WMTS_TILE_SIZE * (2 ** (13 - 9))

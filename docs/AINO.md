@@ -12,8 +12,10 @@ Sama OWS-osoite julkaisee kaksi OGC-palvelua:
   karttatasoa;
 - WFS 1.1.0, palvelun nimi **Sitowise Aino Web Feature Service**.
 
-Suomenväylät käyttää WFS-palvelua, koska tarkoitus on tuoda muokattavat
-vektorikohteet attribuutteineen ArcGIS Prohon. GetCapabilities-pyyntö palauttaa
+Suomenväylät käyttää kumpaakin palvelua käyttötarkoituksen mukaan. WFS-valinta
+tuo muokattavat vektorikohteet attribuutteineen feature classiksi. WMS-valinta
+lisää palvelimen valmiiksi piirtämän karttakuvan ArcGIS Pron aktiiviseen karttaan
+live-palvelutasona. GetCapabilities-pyyntö palauttaa
 WFS 1.1.0:n myös silloin, kun pyynnössä ehdotetaan versiota 2.0.0. WFS 2.0:n
 GetFeature-parametrit hylätään HTTP 403 -vastauksella, joten Aino-haut tehdään
 nimenomaisesti WFS 1.1 -muodossa:
@@ -38,17 +40,33 @@ kuului erityisesti kaavoitus- ja taustakarttatasoja, MML:n maastotietokannan
 yhdistelmäkarttoja sekä muita valmiiksi tyyliteltyjä karttatuotteita.
 
 WMS GetMap tukee muun muassa PNG-, JPEG-, TIFF/GeoTIFF-, PDF-, SVG-, KML- ja
-KMZ-tuloksia. EPSG:3067 on laajasti tuettu. WMS palauttaa kuitenkin palvelimen
-piirtämän kuvan ilman WFS-kohteiden attribuutti- ja muokkausominaisuuksia.
-Suomenväylien Aino-lähde listaa siksi WFS:n 113 vektoritasoa eikä esitä 63:a
-WMS-only-karttatasoa virheellisesti ladattavina feature classeina.
+KMZ-tuloksia. EPSG:3067 on laajasti tuettu. WMS palauttaa palvelimen piirtämän
+kuvan ilman WFS-kohteiden attribuutti- ja muokkausominaisuuksia. Suomenväylät
+listaa kaikki 175 WMS-tasoa nimenomaan live-WMS-valintoina, joten 63 WMS-only-
+tasoa eivät näyttäydy virheellisesti feature classeina. WFS- ja WMS-valinnat
+erotetaan `(WFS)`- ja `(WMS)`-tunnisteilla; luettelossa on kartoitushetken
+sisällöllä yhteensä 288 Aino-valintaa.
 
-## Tasoluettelo
+## WFS- ja WMS-tasoluettelot
 
 WFS GetCapabilities palautti kartoitushetkellä 113 tasoa. Työkalu ei kovakoodaa
 tasojen nimiä, vaan lukee luettelon palvelusta aina token- ja välimuistiavaimen
 mukaisesti. Näin palveluun myöhemmin lisättävät tai sieltä poistettavat tasot
 päivittyvät käyttöliittymään.
+
+Myös WMS-luettelo luetaan dynaamisesti. Vain sellaiset WMS `Layer` -elementit,
+joilla on tekninen `Name`, tuodaan valittaviksi. Otsikko näytetään käyttäjälle,
+mutta tekninen nimi säilytetään ArcGIS Pron alitason yksiselitteistä valintaa
+varten. Kartoitushetken 175 WMS-tasoa jakautuivat näin:
+
+| Nimiavaruus | Tasoja |
+|---|---:|
+| `aineisto` | 60 |
+| `ymparistoaineistot` | 53 |
+| `aluejaot` | 21 |
+| `kaavoitus` | 20 |
+| `geologia` | 20 |
+| `taustakartat` | 1 |
 
 | Nimiavaruus | Tasoja | Sisällön pääryhmät |
 |---|---:|---|
@@ -108,6 +126,22 @@ Ainolle käytetään BBOX-hakua ja paikallista Clip-vaihetta. Näin toteutus ei 
 riippuvainen palvelinkohtaisen CQL-suodatuksen yksityiskohdista, ja lopullinen
 rajaus vastaa tarkasti Suomenväylien muita lähteitä.
 
+WMS-valinnan polku on erillinen:
+
+1. palvelun puhdas OWS-osoite annetaan ArcGIS Prolle palvelutyypillä `WMS`;
+2. token annetaan `custom_parameters`-sanakirjassa, jolloin se välittyy
+   GetCapabilities-, GetMap- ja GetFeatureInfo-pyyntöihin mutta ei URL-lokiin;
+3. ArcGISin WMS-komposiittitasosta etsitään ensisijaisesti valittu tekninen
+   `ServiceLayerID` ja toissijaisesti palvelun otsikko;
+4. muut WMS-alitasot kytketään pois näkyvistä;
+5. `taustakartat`-nimiavaruus sijoitetaan **Taustakartta**-ryhmään kartan
+   tasopinon alimmaiseksi ja muut tasot **Aino WMS** -ryhmään.
+
+WMS-tasoa ei leikata aluerajauksella eikä kopioida tulosgeodatabaseen, koska se
+säilyy ArcGIS Prossa dynaamisena karttapalveluna. Jos valittua alitasoa ei löydy
+ArcGISin palvelupuusta, lisätty palvelu poistetaan ja ajo ilmoittaa virheen;
+koko 175 tason palvelua ei jätetä vahingossa näkyviin.
+
 ## Tunnisteen käsittely
 
 Käyttöliittymän **Aino-token** on `GPStringHidden`-kenttä. Token:
@@ -121,7 +155,7 @@ Käyttöliittymän **Aino-token** on `GPStringHidden`-kenttä. Token:
 
 ## Tehdyt yhteystestit
 
-- WMS 1.3.0 GetCapabilities: HTTP 200.
+- WMS 1.3.0 GetCapabilities: HTTP 200, 175 nimettyä tasoa.
 - WFS 1.1.0 GetCapabilities: HTTP 200, 113 tasoa.
 - DescribeFeatureType: 113/113 tasoa onnistui.
 - Oulun testirajauksessa piste-, viiva-, polygoni- ja multipolygonikohteet
