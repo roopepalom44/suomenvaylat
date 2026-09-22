@@ -1,0 +1,137 @@
+[
+  {
+    "id": "osm_fences",
+    "title": "Aidat",
+    "query": "(way[\"barrier\"=\"fence\"]({bbox}););out geom;"
+  },
+  {
+    "id": "osm_addresses",
+    "title": "Osoitteet",
+    "query": "(node[\"addr:housenumber\"]({bbox});way[\"addr:housenumber\"]({bbox}););out geom;"
+  },
+  {
+    "id": "osm_admin",
+    "title": "Hallinnolliset alueet",
+    "query": "(relation[\"boundary\"=\"administrative\"]({bbox}););out geom;"
+  },
+  {
+    "id": "osm_buildings",
+    "title": "Rakennukset",
+    "query": "(way[\"building\"]({bbox});relation[\"building\"]({bbox}););out geom;"
+  },
+  {
+    "id": "osm_bridges",
+    "title": "Sillat",
+    "query": "(way[\"bridge\"]({bbox}););out geom;"
+  },
+  {
+    "id": "osm_bus_stops",
+    "title": "Bussipysakit",
+    "query": "(node[\"highway\"=\"bus_stop\"]({bbox}););out geom;"
+  },
+  {
+    "id": "osm_cycleways",
+    "title": "Pyoratiet",
+    "query": "(way[\"highway\"=\"cycleway\"]({bbox}););out geom;"
+  },
+  {
+    "id": "osm_fire_stations",
+    "title": "Paloasemat",
+    "query": "(node[\"amenity\"=\"fire_station\"]({bbox});way[\"amenity\"=\"fire_station\"]({bbox}););out geom;"
+  },
+  {
+    "id": "osm_forests",
+    "title": "Metsat",
+    "query": "(way[\"landuse\"=\"forest\"]({bbox});relation[\"landuse\"=\"forest\"]({bbox}););out geom;"
+  },
+  {
+    "id": "osm_healthcare",
+    "title": "Terveyspalvelut",
+    "query": "(node[\"amenity\"=\"hospital\"]({bbox});node[\"amenity\"=\"clinic\"]({bbox});way[\"amenity\"=\"hospital\"]({bbox});way[\"amenity\"=\"clinic\"]({bbox}););out geom;"
+  },
+  {
+    "id": "osm_roads",
+    "title": "Tiet",
+    "query": "(way[\"highway\"]({bbox}););out geom;"
+  },
+  {
+    "id": "osm_roads_major",
+    "title": "Paavaylat",
+    "query": "(way[\"highway\"~\"motorway|trunk|primary|secondary\"]({bbox}););out geom;"
+  },
+  {
+    "id": "osm_railways",
+    "title": "Rautatiet",
+    "query": "(way[\"railway\"]({bbox}););out geom;"
+  },
+  {
+    "id": "osm_landuse",
+    "title": "Maankaytto",
+    "query": "(way[\"landuse\"]({bbox});relation[\"landuse\"]({bbox}););out geom;"
+  },
+  {
+    "id": "osm_nature",
+    "title": "Luonnonsuojelu",
+    "query": "(relation[\"boundary\"=\"protected_area\"]({bbox});way[\"boundary\"=\"protected_area\"]({bbox}););out geom;"
+  },
+  {
+    "id": "osm_parking",
+    "title": "Pysakointi",
+    "query": "(way[\"amenity\"=\"parking\"]({bbox});node[\"amenity\"=\"parking\"]({bbox}););out geom;"
+  },
+  {
+    "id": "osm_parks",
+    "title": "Puistot",
+    "query": "(way[\"leisure\"=\"park\"]({bbox});relation[\"leisure\"=\"park\"]({bbox}););out geom;"
+  },
+  {
+    "id": "osm_poi_points",
+    "title": "POI-pisteet",
+    "query": null
+  },
+  {
+    "id": "osm_poi",
+    "title": "Palvelupisteet",
+    "query": "(node[\"amenity\"]({bbox});way[\"amenity\"]({bbox}););out geom;"
+  },
+  {
+    "id": "osm_power",
+    "title": "Sahkoverkko",
+    "query": "(way[\"power\"]({bbox});node[\"power\"]({bbox}););out geom;"
+  },
+  {
+    "id": "osm_schools",
+    "title": "Koulut",
+    "query": "(node[\"amenity\"=\"school\"]({bbox});way[\"amenity\"=\"school\"]({bbox}););out geom;"
+  },
+  {
+    "id": "osm_shops",
+    "title": "Kaupat",
+    "query": "(node[\"shop\"]({bbox});way[\"shop\"]({bbox}););out geom;"
+  },
+  {
+    "id": "osm_sport",
+    "title": "Urheilupaikat",
+    "query": "(way[\"leisure\"=\"sports_centre\"]({bbox});way[\"leisure\"=\"pitch\"]({bbox});node[\"leisure\"=\"sports_centre\"]({bbox}););out geom;"
+  },
+  {
+    "id": "osm_trails",
+    "title": "Polut",
+    "query": "(way[\"highway\"=\"path\"]({bbox});way[\"highway\"=\"footway\"]({bbox}););out geom;"
+  },
+  {
+    "id": "osm_tourism",
+    "title": "Matkailukohteet",
+    "query": "(node[\"tourism\"]({bbox});way[\"tourism\"]({bbox}););out geom;"
+  },
+  {
+    "id": "osm_water",
+    "title": "Vesistot",
+    "query": "(way[\"waterway\"]({bbox});way[\"natural\"=\"water\"]({bbox});relation[\"natural\"=\"water\"]({bbox}););out geom;"
+  },
+  {
+    "id": "osm_wood",
+    "title": "Puumetsat",
+    "query": "(way[\"natural\"=\"wood\"]({bbox});relation[\"natural\"=\"wood\"]({bbox}););out geom;"
+  }
+]

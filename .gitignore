@@ -54,3 +54,7 @@ __pycache__/
 *.ags
 *.acs
 *.sde
+qgis_plugin/dist/
+qgis_plugin/smoke_*.gpkg
+qgis_plugin/smoke_*.tif
+qgis_plugin/smoke_*.tif.aux.xml

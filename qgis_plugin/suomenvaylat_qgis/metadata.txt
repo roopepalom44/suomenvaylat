@@ -1,0 +1,11 @@
+[general]
+name=Suomenväylät
+description=Suomalaisten paikkatietopalvelujen aineistot QGISiin
+about=Hae väylä-, ympäristö- ja MML-aineistoja alueittain. Lisää taustakarttoja projektiin.
+version=0.1.0
+qgisMinimumVersion=3.44
+author=Roope Palomaa
+repository=https://github.com/roopepalom44/suomenvaylat
+category=Web
+icon=icon.png
+experimental=True
