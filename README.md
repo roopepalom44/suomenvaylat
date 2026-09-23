@@ -1,6 +1,6 @@
 # Suomenväylät - ArcGIS Pro Add-in
 
-**QGIS-versio (esijulkaisu):** [asennus ja nykyinen toiminnallisuus](qgis_plugin/README.md). Ladattava ZIP on [GitHub-julkaisussa](https://github.com/roopepalom44/suomenvaylat/releases/tag/qgis-v0.1.0).
+**QGIS-versio (esijulkaisu):** [asennus ja nykyinen toiminnallisuus](qgis_plugin/README.md). Ladattava ZIP on [GitHub-julkaisussa](https://github.com/roopepalom44/suomenvaylat/releases/tag/qgis-v0.2.0).
 
 ArcGIS Pro -laajennus Suomenväylät-aineistojen lataamiseen WFS-rajapinnoista.
 

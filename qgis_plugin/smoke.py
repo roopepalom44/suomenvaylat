@@ -4,6 +4,7 @@ app = QgsApplication([], False)
 app.initQgis()
 from suomenvaylat_qgis.services import area_choices, selection_geometry, catalog
 from suomenvaylat_qgis.plugin import SuomenvaylatDialog
+import suomenvaylat_qgis.plugin as plugin_module
 from suomenvaylat_qgis import classFactory
 import suomenvaylat_qgis.services as services
 from pathlib import Path
@@ -14,6 +15,18 @@ geometry, crs = selection_geometry('Maakunta', names[:1])
 assert not geometry.isEmpty() and crs.authid() == 'EPSG:3067'
 print('areas passed', len(names), flush=True)
 dialog = SuomenvaylatDialog()
+from qgis.PyQt.QtCore import Qt
+for index in range(dialog.sources.count()):
+    if dialog.sources.item(index).text() == 'DigiRoad':
+        dialog.sources.item(index).setCheckState(Qt.Checked)
+old_catalog = plugin_module.catalog
+plugin_module.catalog = lambda source, key='', password='': ([{'source': source, 'kind': 'wfs',
+    'id': source.lower(), 'title': source, 'endpoint': 'https://example.test/'}], [])
+try:
+    dialog._load_catalog()
+    assert {entry['source'] for entry in dialog.entries} == {'Väylä', 'DigiRoad'}
+finally:
+    plugin_module.catalog = old_catalog
 dialog.close()
 print('dialog constructed', flush=True)
 class Interface:
@@ -24,6 +37,15 @@ class Interface:
     def removeToolBarIcon(self, *args): pass
 plugin = classFactory(Interface())
 plugin.initGui()
+from qgis.PyQt.QtCore import QUrl
+from qgis.PyQt.QtNetwork import QNetworkRequest
+plugin.aino_token = 'dummy-token'
+request = QNetworkRequest(QUrl('https://aino.sitowise.com/ows?SERVICE=WMS'))
+plugin._preprocess_aino(request)
+assert 'token=dummy-token' in request.url().toString()
+unrelated = QNetworkRequest(QUrl('https://example.org/ows'))
+plugin._preprocess_aino(unrelated)
+assert 'token=' not in unrelated.url().toString()
 plugin.unload()
 print('plugin lifecycle passed', flush=True)
 mask, crs = selection_geometry('Kunta/Kaupunki', ['Helsinki'])
@@ -46,3 +68,24 @@ try:
 finally:
     services._request_json = old_request
     QgsProject.instance().removeAllMapLayers()
+class FakeResponse:
+    def __init__(self, data): self.data = data
+    def __enter__(self): return self
+    def __exit__(self, *args): return False
+    def read(self): return self.data
+old_urlopen = services.urllib.request.urlopen
+def fake_urlopen(request, timeout=45):
+    url = request if isinstance(request, str) else request.full_url
+    if 'SERVICE=WMS' in url:
+        return FakeResponse(b'<WMS_Capabilities><Layer><Name>aino:map</Name><Title>Aino map</Title></Layer></WMS_Capabilities>')
+    return FakeResponse(b'<WFS_Capabilities><FeatureType><Name>aino:data</Name><Title>Aino data</Title></FeatureType></WFS_Capabilities>')
+services.urllib.request.urlopen = fake_urlopen
+try:
+    entries, errors = services.catalog('Aino', 'dummy')
+    assert len(entries) == 2 and not errors
+    assert {entry['kind'] for entry in entries} == {'wfs', 'aino_wms'}
+    karttakuva, errors = services.catalog('MML Karttakuva', 'user', 'password')
+    assert len(karttakuva) == 1 and karttakuva[0]['kind'] == 'karttakuva_wms' and not errors
+    print('Aino WFS/WMS catalog passed', flush=True)
+finally:
+    services.urllib.request.urlopen = old_urlopen

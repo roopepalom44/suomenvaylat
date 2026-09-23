@@ -49,6 +49,7 @@ KAPSI_SERVICES = {
     "Taustakartta": "https://tiles.kartat.kapsi.fi/taustakartta",
     "Ortokuva": "https://tiles.kartat.kapsi.fi/ortokuva",
 }
+KARTTAKUVA_WMS = "https://karttakuva.maanmittauslaitos.fi/maasto/wms"
 OVERPASS_ENDPOINTS = [
     "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
     "https://overpass-api.de/api/interpreter",
@@ -69,9 +70,31 @@ def _request_json(url, key=""):
         return json.load(response)
 
 
-def catalog(source, api_key=""):
+def catalog(source, api_key="", password=""):
     """Fetch live WFS/OGC API catalog. Entries contain source, id and endpoint."""
     entries, errors = [], []
+    if source == "MML Karttakuva":
+        if not api_key or not password:
+            raise ValueError("MML Karttakuva vaatii käyttäjätunnuksen ja salasanan")
+        credentials = base64.b64encode(f"{api_key}:{password}".encode("utf-8")).decode("ascii")
+        request = urllib.request.Request(KARTTAKUVA_WMS + "?SERVICE=WMS&REQUEST=GetCapabilities",
+                                         headers={"Authorization": "Basic " + credentials})
+        try:
+            with urllib.request.urlopen(request, timeout=45) as response:
+                root = ET.fromstring(response.read())
+        except Exception as exc:
+            raise RuntimeError(f"MML Karttakuva -tasoluettelo ei avaudu: {str(exc).replace(api_key, '[PIILOTETTU]').replace(password, '[PIILOTETTU]')}") from None
+        for element in root.iter():
+            if element.tag.split("}")[-1] != "Layer":
+                continue
+            children = {child.tag.split("}")[-1]: (child.text or "").strip() for child in element}
+            name = children.get("Name")
+            if name:
+                entries.append({"source": source, "kind": "karttakuva_wms", "id": name,
+                                "title": children.get("Title") or name, "endpoint": KARTTAKUVA_WMS})
+        if not entries:
+            raise RuntimeError("MML Karttakuva ei palauttanut karttatasoja")
+        return entries, []
     if source == "Kapsi":
         by_key = {}
         for service, endpoint in KAPSI_SERVICES.items():
@@ -124,6 +147,23 @@ def catalog(source, api_key=""):
                                     "title": children.get("Title") or name, "endpoint": endpoint})
         except Exception as exc:
             errors.append(f"{source}: {str(exc).replace(api_key, '[PIILOTETTU]') if api_key else exc}")
+    if source == "Aino":
+        endpoint = "https://aino.sitowise.com/ows"
+        url = endpoint + "?" + urllib.parse.urlencode({"token": api_key,
+                                                         "SERVICE": "WMS", "REQUEST": "GetCapabilities"})
+        try:
+            with urllib.request.urlopen(url, timeout=45) as response:
+                root = ET.fromstring(response.read())
+            for element in root.iter():
+                if element.tag.split("}")[-1] != "Layer":
+                    continue
+                children = {child.tag.split("}")[-1]: (child.text or "").strip() for child in element}
+                name = children.get("Name")
+                if name:
+                    entries.append({"source": source, "kind": "aino_wms", "id": name,
+                                    "title": children.get("Title") or name, "endpoint": endpoint})
+        except Exception as exc:
+            errors.append("Aino WMS: " + str(exc).replace(api_key, "[PIILOTETTU]"))
     if source in OGC_SOURCES and (source != "Karttapaikka" or api_key):
         endpoint = OGC_SOURCES[source]
         try:
@@ -257,8 +297,23 @@ def _osm_query(entry, bbox):
     if entry["id"] != "osm_poi_points":
         return "[out:json][timeout:120];" + entry["query"].format(bbox=bbox)
     classes = _poi_table()
-    keys = sorted({row[0] for row in classes})
-    selectors = "".join(f'nwr["{key}"]({bbox});' for key in keys)
+    values = {}
+    for key, value, _, _ in classes:
+        values.setdefault(key, set()).add(value)
+    for key, extras in {"amenity": {"recycling", "vending_machine"},
+                        "office": {"diplomatic"}, "landuse": {"cemetery"},
+                        "man_made": {"tower"}}.items():
+        values.setdefault(key, set()).update(extras)
+    selectors = []
+    for key, choices in sorted(values.items()):
+        if key in {"amenity", "historic", "leisure", "shop", "tourism"}:
+            selectors.append(f'nwr["{key}"]({bbox});')
+        elif len(choices) == 1:
+            selectors.append(f'nwr["{key}"="{next(iter(choices))}"]({bbox});')
+        else:
+            pattern = "^(" + "|".join(sorted(re.escape(choice) for choice in choices)) + ")$"
+            selectors.append(f'nwr["{key}"~"{pattern}"]({bbox});')
+    selectors = "".join(selectors)
     return f"[out:json][timeout:120];({selectors});out center;"
 
 
@@ -306,6 +361,37 @@ def _poi_classes(tags):
     for key, value, code, name in classes:
         if str(tags.get(key, "")) == value and (code, name) not in result:
             result.append((code, name))
+    def add(code, name):
+        if (code, name) not in result:
+            result.append((code, name))
+    if tags.get("office") == "diplomatic":
+        if tags.get("diplomatic") == "consulate":
+            add(2017, "consulate")
+        elif tags.get("diplomatic") == "embassy":
+            add(2011, "embassy")
+    if tags.get("landuse") == "cemetery":
+        add(2015, "graveyard")
+    if tags.get("amenity") == "recycling":
+        for field, code, name in (("recycling:glass", 2031, "recycling_glass"),
+                                  ("recycling:glass_bottles", 2031, "recycling_glass"),
+                                  ("recycling:paper", 2032, "recycling_paper"),
+                                  ("recycling:clothes", 2033, "recycling_clothes"),
+                                  ("recycling:scrap_metal", 2034, "recycling_metal")):
+            if tags.get(field) == "yes":
+                add(code, name)
+                break
+        else:
+            add(2030, "recycling")
+    if tags.get("amenity") == "vending_machine":
+        add(2592, "vending_parking") if tags.get("vending") == "parking_tickets" else add(2590, "vending_machine")
+    if tags.get("man_made") == "tower":
+        tower = tags.get("tower:type")
+        if tower == "communication":
+            add(2951, "comms_tower")
+        elif tower == "observation":
+            add(2953, "observation_tower")
+        else:
+            add(2950, "tower")
     return result
 
 
