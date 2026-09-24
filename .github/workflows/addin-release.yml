@@ -93,6 +93,8 @@ jobs:
             throw "The expected AddInX package was not created: $package"
           }
           Get-Item -LiteralPath $package | Select-Object FullName, Length
+          $asset = Join-Path $env:RUNNER_TEMP 'Suomenvaylat.esriAddInX'
+          Copy-Item -LiteralPath $package -Destination $asset -Force
 
       - name: Create GitHub release
         shell: pwsh
@@ -102,8 +104,7 @@ jobs:
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
         run: |
           $ErrorActionPreference = 'Stop'
-          $package = Join-Path $env:GITHUB_WORKSPACE 'bin\Release\net8.0-windows\suomenvaylat.esriAddInX'
-          $asset = "$package#Suomenvaylat.esriAddInX"
+          $asset = Join-Path $env:RUNNER_TEMP 'Suomenvaylat.esriAddInX'
           $ghArgs = @(
             'release', 'create', $env:RELEASE_TAG, $asset,
             '--repo', $env:GITHUB_REPOSITORY,
