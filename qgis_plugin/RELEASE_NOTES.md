@@ -1,3 +1,10 @@
+## Suomenväylät QGIS 0.2.2
+
+- Järjesti aineistotyönkulun lähteisiin, aineistovalintaan sekä aluerajaukseen ja tallennukseen.
+- Näyttää vain valituille palveluille tarvittavat tunnuskentät ja jakaa MML-avaimen aineistohaun ja taustakarttojen välille.
+- Säilyttää valitut tasot, kun käyttäjä muuttaa hakusuodatusta, ja sallii valita kaikki näkyvät tulokset kerralla.
+- Piilottaa aluerajauksen ja tallennuskansion käytöltä live-karttatasojen valinnassa. Keskeytys näytetään erikseen aineistovirheistä.
+
 ## Suomenväylät QGIS 0.2.1 — esijulkaisu
 
 Uusi Windows-asennus: lataa `Suomenvaylat-QGIS-0.2.1-Windows.zip`, pura se ja suorita `install_windows.bat` QGISin ollessa suljettu. Asennin kopioi lisäosan QGIS-profiileihin ja aktivoi sen. Vaihtoehtoisesti asenna `Suomenvaylat-QGIS-0.2.1.zip` QGISin **Lisäosat → Hallitse ja asenna lisäosia → Asenna ZIP-tiedostosta** -toiminnolla. Vaatii QGIS 3.44:n.
