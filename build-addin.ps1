@@ -71,7 +71,7 @@ if ($LASTEXITCODE -ne 0 -or -not ($buildableSdks | Where-Object { $_.Major -ge 8
 $msbuild = Resolve-MSBuildPath -ExplicitPath $MSBuildPath
 Write-Output "Using MSBuild: $msbuild"
 
-& $msbuild $projectPath '/t:Rebuild' "/p:Configuration=$Configuration" "/p:TargetFramework=$TargetFramework" '/p:ArcGISFolder=' '/nologo' '/v:minimal'
+& $msbuild $projectPath '/restore' '/t:Rebuild' "/p:Configuration=$Configuration" "/p:TargetFramework=$TargetFramework" '/p:ArcGISFolder=' '/nologo' '/v:minimal'
 if ($LASTEXITCODE -ne 0) {
     throw "MSBuild failed with exit code $LASTEXITCODE. The package was not created."
 }
