@@ -9,15 +9,32 @@ ArcGIS Pro -laajennus Suomenväylät-aineistojen lataamiseen WFS-rajapinnoista.
 1. Lataa uusin [Suomenvaylat.esriAddInX](https://github.com/roopepalom44/suomenvaylat/releases/latest/download/Suomenvaylat.esriAddInX) ([kaikki julkaisut](https://github.com/roopepalom44/suomenvaylat/releases)).
 2. Sulje ArcGIS Pro ja asenna tiedosto kaksoisklikkaamalla sitä.
 
-### Julkaisun tekeminen (kehittäjille)
+### Automaattiset GitHub-julkaisut
 
-Nosta versio `Config.daml`-tiedostossa, commitoi ja pushaa, ja aja sitten:
+Jokainen `main`-haaraan tehty push käynnistää työnkulun
+`.github/workflows/addin-release.yml`. Se kääntää AddInX-paketin, luo tagin ja
+julkaisee tiedoston `Suomenvaylat.esriAddInX` GitHub-releasen liitteenä.
+Julkaisun ja AddInX:n versio muodostetaan `Config.daml`-version sekä GitHub-ajon
+numeron perusteella, joten jokaisella pushilla on oma päivitettävä pakettinsa.
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\release.ps1
-```
+Työnkulku käyttää GitHubin `windows-2025`-runneria ja `actions/setup-dotnet`
+toimintoa .NET 8 SDK:n asentamiseen. ArcGIS Pro 3.5:n käännösviitteet haetaan
+projektin lukitusta `Esri.ArcGISPro.Extensions30` NuGet-paketista, joten
+runnerille ei tarvitse asentaa ArcGIS Prota. Paketin käännös vaatii täyden
+Visual Studio 2022 MSBuildin; se sisältyy runneriin. Työnkulku tarkistaa, että
+NuGet-paketti ja `Config.daml` pitävät Pro 3.5:n yhteensopivuuden perustana.
+GitHub Actionsin pitää sallia työnkulun `GITHUB_TOKEN`-oikeus `contents: write`,
+jotta se voi luoda releasen.
 
-Skripti rakentaa Release-version, paketoi sen ja luo GitHub-releasen `v<versio>` (vaatii ArcGIS Pron ja `gh auth login`).
+AddInX käännetään virallisen Pro 3.5 API -paketin versiolla `3.5.0.57366`, ja
+sen `desktopVersion`-vähimmäisversio on 3.5. Esrin mukaan saman pääversion
+add-init ovat eteenpäin yhteensopivia minor-versioissa. Näin release on
+tarkoitettu ArcGIS Pro 3.5:stä alkaen.
+
+Paikallista julkaisua varten on edelleen `release.ps1`, joka rakentaa ja julkaisee
+version `v<Config.daml-versio>` käyttäen `gh`-kirjautumista. Se tarvitsee .NET 8
+SDK:n tai uudemman, Visual Studio 2022:n täyden MSBuildin sekä puhtaan `main`-
+haaran, joka vastaa GitHubin `main`-haaraa.
 
 ## Vaatimukset
 
@@ -46,8 +63,9 @@ Skripti käyttää vain käännöksen build-kansiossa olevaa DLL:ää eikä kosk
 automaattisesti ArcGIS Pron AssemblyCache-kopiota. Se rakentaa uuden
 `bin\Debug\net8.0-windows\suomenvaylat.esriAddInX`-paketin tyhjästä, sijoittaa
 DLL:n ja työkalut viralliseen `Install\`-hakemistoon, tarkistaa CLR-tyypit ja
-validoi paketin sisällön. Paketti käyttää versiota `1.0.16`, jotta ArcGIS Pro
-tunnistaa sen päivitykseksi.
+validoi paketin sisällön. Paketti käyttää `Config.daml`-tiedoston AddIn-
+versionumeroa. Automaattinen GitHub-julkaisu lisää siihen ajonumeron, jotta
+jokaiselle main-pushille syntyy uusi päivitettävä versio.
 
 Kapsin tarkat mittakaavatasot jaetaan tarvittaessa useaan enintään 25 laatan latauserään ja yhdistetään lopuksi yhdeksi rasteriksi.
 
@@ -68,8 +86,7 @@ powershell -ExecutionPolicy Bypass -File .\package-addin-fixed.ps1 `
 
 Skripti tarkistaa assemblyn nimen ja odotetut tyypit ennen paketointia.
 
-Skripti ei käännä C#-lähdekoodia. Tee ArcGIS Pro SDK -koneella puhdas
-uudelleenkäännös Visual Studion täydellä MSBuildilla ja paketoi heti perään:
+Tee koko AddInX:stä puhdas käännös ja paketointi näin:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\build-addin.ps1 -Configuration Debug
@@ -78,14 +95,15 @@ powershell -ExecutionPolicy Bypass -File .\build-addin.ps1 -Configuration Debug
 C#-lähdekoodin muutoksia ei saa paketoida vanhan DLL:n kanssa. Jos käännös on
 eri kansiossa, anna juuri uudelleen käännetyn DLL:n polku `-AssemblyPath`-parametrilla.
 
-`dotnet build` ei sovellu tämän ArcGIS Pro SDK -projektin kääntämiseen, koska
-Esrin nykyinen `Esri.ProApp.SDK.Desktop.targets` käyttää täyden MSBuildin
-`CodeTaskFactory`-tehtävää. Jos MSBuild löytyy epätyypillisestä paikasta, anna
-polku parametrilla `-MSBuildPath`.
+`build-addin.ps1` käyttää .NET 8 SDK:ta, täyttä MSBuildia ja
+`Esri.ArcGISPro.Extensions30` NuGet-pakettia, joka antaa Pro 3.5:n
+käännösviitteet. ArcGIS Pro -asennusta ei tarvita. `dotnet build` ei sovi tähän
+projektiin, sillä Esrin NuGet-paketin AddIn-tehtävät tarvitsevat täyttä
+MSBuildia; build-skripti kääntää DLL:n ja luo lisäksi tarkistetun AddInX-paketin.
 
 ### TypeNotFound / command unavailable
 
-Jos ArcGIS Pro näyttää virheen `TypeNotFound` tai ilmoittaa komennon olevan unavailable, paketissa on ollut vanha/väärä DLL tai väärä AddInX-rakenne. `package-addin.ps1` tarkistaa nyt assemblyn nimen, varmistaa että DLL sisältää tyypit `suomenvaylat.Module1` ja `suomenvaylat.OpenSuomenvaylatToolButton`, sekä pakottaa runtime-tiedostot `Install\`-hakemistoon. Add-in-versiona on `1.0.16`, jotta ArcGIS Pro tunnistaa tämän päivitykseksi.
+Jos ArcGIS Pro näyttää virheen `TypeNotFound` tai ilmoittaa komennon olevan unavailable, paketissa on ollut vanha/väärä DLL tai väärä AddInX-rakenne. `package-addin.ps1` tarkistaa nyt assemblyn nimen, varmistaa että DLL sisältää tyypit `suomenvaylat.Module1` ja `suomenvaylat.OpenSuomenvaylatToolButton`, sekä pakottaa runtime-tiedostot `Install\`-hakemistoon. Julkaisupipeline luo kullekin main-pushille uuden AddIn-version, jotta ArcGIS Pro tunnistaa paketin päivitykseksi.
 
 Jos tarkistus ilmoittaa väärästä DLL:stä, käännä C#-projekti ArcGIS Pro SDK:n kanssa ja anna tulos suoraan:
 
@@ -182,6 +200,17 @@ MML-polussa.
 ArcGIS Pron tasovalinta säilytetään suodatinlistan päivityksen yli, jos valittu
 taso kuuluu edelleen valittuihin lähteisiin. Tämä koskee muun muassa Kapsi- ja
 Karttapaikka-tasoja.
+
+## Traficom Oskari
+
+**Traficom Oskari** hakee palvelun tasoluettelon dynaamisesti ja näyttää
+Traficomin WFS-vektoritasot. Valitun tason kohteet haetaan Oskarin
+`GetWFSFeatures`-rajapinnasta rajauksen EPSG:3067-bboxilla, muunnetaan ArcGIS
+Prossa feature classiksi ja leikataan valittuun alueeseen. Oskarin WMS- ja
+WMTS-taustakarttoja ei käsitellä ladattavina vektoritasoina.
+
+Rajapintapolut, nykyisen tasoluettelon testaus ja ArcGIS Pro -tarkistus on
+kuvattu tiedostossa [`docs/OSKARI.md`](docs/OSKARI.md).
 
 ## OpenStreetMap POI-pisteet
 

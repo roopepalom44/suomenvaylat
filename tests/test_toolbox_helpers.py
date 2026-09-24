@@ -102,6 +102,97 @@ class ToolboxHelperTests(unittest.TestCase):
         # Muu kuin tarkka tunnettu 48 merkin kopiointimuoto säilyy ennallaan.
         self.assertEqual("3Dshort", self.tool._normalize_aino_token("3Dshort"))
 
+    def test_traficom_oskari_registry_is_available_as_a_source(self):
+        registry = MODULE.WFSSourceRegistry()
+        self.assertEqual("oskari", registry.get_type("Traficom Oskari"))
+        self.assertEqual(
+            "https://julkinen.traficom.fi/oskari/action",
+            registry.get_endpoint("Traficom Oskari"),
+        )
+        self.assertIn("Traficom Oskari", registry.get_sources_list())
+
+    def test_traficom_oskari_catalog_exposes_only_traficom_wfs_layers(self):
+        self.tool.wfs_registry = MODULE.WFSSourceRegistry()
+        self.tool._http_transport = fake_http.FakeTransport([
+            fake_http.FakeResponse({
+                "layers": [
+                    {"id": 112, "type": "wfslayer", "orgName": "Traficom",
+                     "name": "Matkustaja-alusten D-alueet", "layerName": "d_alueet",
+                     "version": "2.0.0", "attributes": {"geometry": "GEOM"}},
+                    {"id": 3, "type": "wmslayer", "orgName": "Traficom",
+                     "name": "MML Taustakarttasarja"},
+                    {"id": 99, "type": "wfslayer", "orgName": "Muu",
+                     "name": "Vieraan tarjoajan taso"},
+                ]
+            })
+        ])
+
+        layers = self.tool._get_traficom_oskari_layers()
+
+        self.assertEqual(1, len(layers))
+        self.assertEqual("112", layers[0]["id"])
+        self.assertEqual("oskari_wfs", layers[0]["kind"])
+        self.assertEqual("Matkustaja-alusten D-alueet", layers[0]["title"])
+        self.assertEqual("GEOM", layers[0]["geometry_field"])
+        request = self.tool._http_transport.requests[0]
+        self.assertEqual(
+            "GetHierarchicalMapLayerGroups", request["query"]["action_route"]
+        )
+        self.assertEqual("EPSG:3067", request["query"]["srs"])
+        self.assertEqual("fi", request["query"]["lang"])
+
+    def test_traficom_oskari_feature_query_requests_epsg3067_geojson(self):
+        self.tool._http_transport = fake_http.FakeTransport([
+            fake_http.FakeResponse({
+                "type": "FeatureCollection",
+                "crs": {"type": "name", "properties": {"name": "EPSG:3067"}},
+                "features": [{
+                    "type": "Feature",
+                    "geometry": {"type": "Point", "coordinates": [385000, 6670000]},
+                    "properties": {"ID": 1},
+                }],
+            }, content_type="application/vnd.geo+json"),
+        ])
+        converted_payloads = []
+        metrics = MODULE.PhaseMetrics()
+        metrics.set("JSONToFeatures", 0.01)
+        self.tool._pages_to_temp_fc = lambda pages: (
+            converted_payloads.extend(pages) or "oskari_fc", metrics
+        )
+        original_describe = getattr(MODULE.arcpy, "Describe", None)
+        original_management = getattr(MODULE.arcpy, "management", None)
+        MODULE.arcpy.Describe = lambda path: types.SimpleNamespace(
+            spatialReference=types.SimpleNamespace(factoryCode=3067)
+        )
+        MODULE.arcpy.management = types.SimpleNamespace(
+            GetCount=lambda path: ["1"]
+        )
+        try:
+            chunks, found, stats = self.tool._fetch_oskari_feature_chunks(
+                "https://julkinen.traficom.fi/oskari/action",
+                "112",
+                "260000,6600000,420000,6700000",
+            )
+        finally:
+            if original_describe is None:
+                del MODULE.arcpy.Describe
+            else:
+                MODULE.arcpy.Describe = original_describe
+            if original_management is None:
+                del MODULE.arcpy.management
+            else:
+                MODULE.arcpy.management = original_management
+
+        self.assertEqual(["oskari_fc"], chunks)
+        self.assertEqual(1, found)
+        self.assertEqual(1, stats["pages"])
+        self.assertEqual("EPSG:3067", converted_payloads[0]["crs"]["properties"]["name"])
+        request = self.tool._http_transport.requests[0]["query"]
+        self.assertEqual("GetWFSFeatures", request["action_route"])
+        self.assertEqual("112", request["id"])
+        self.assertEqual("EPSG:3067", request["srs"])
+        self.assertEqual("260000,6600000,420000,6700000", request["bbox"])
+
     def test_aino_layer_discovery_combines_wfs_and_wms_without_storing_token(self):
         self.tool.wfs_registry = MODULE.WFSSourceRegistry()
         self.tool._runtime_aino_token = "aino-secret"

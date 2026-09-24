@@ -141,3 +141,20 @@ Yhdistetyn JSONin tai suoran feature class -kirjoituksen toteutusta ei pidä ott
     näkyä vain valittu alitaso ja sen välttämätön yläpolku, ei kaikkia 175 Aino-
     tasoa. Samasta valinnasta ei saa jäädä erillistä kopiota sekä kartan juureen
     että **Aino WMS**- tai **Taustakartta**-ryhmään.
+
+## 11. Traficom Oskari
+
+1. Valitse lähteeksi **Traficom Oskari** ja päivitä tasolistaus. Tasovalikkoon
+   pitää tulla palvelun WFS-tasot, mukaan lukien **Matkustaja-alusten
+   D-alueet**. WMS- ja WMTS-karttatasoja ei näytetä ladattavina vektoritasoina.
+2. Valitse **Matkustaja-alusten D-alueet** ja rajaukseksi **Koko Suomi** tai
+   pieni oma polygoni. Aja työkalu.
+3. Lokissa pitää näkyä Oskari `GetWFSFeatures`, tasotunnus, EPSG:3067,
+   onnistunut Oskari-yhteenveto ja paikallinen Clip.
+4. Varmista, että lopputaso lisätään kartalle viivatasona EPSG:3067:ssä ja
+   että muunnetun GeoJSONin kohdemäärä vastaa tulostason kohdemäärää.
+5. Jos valitun rajauksen alta ei löydy kohteita, tason pitää valmistua
+   tyhjänä ilmoitettuna, ei virheellisenä tai väärässä koordinaatistossa.
+6. Oskari-tasoluettelon ja kohdehaun tarkemmat rajapintapolut sekä testitulos
+   ovat tiedostossa [`OSKARI.md`](OSKARI.md). ArcGIS Pro 3.7:n Python-ympäristön
+   toistettava smoke-testi on `tests/smoke_traficom_oskari_arcgispro.py`.

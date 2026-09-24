@@ -274,6 +274,11 @@ class WFSSourceRegistry(object):
                 "endpoints": ["https://avoinapi.vaylapilvi.fi/vaylatiedot/digiroad/ows"],
                 "description": "Digiroad-tasot"
             },
+            "Traficom Oskari": {
+                "type": "oskari",
+                "endpoints": ["https://julkinen.traficom.fi/oskari/action"],
+                "description": "Traficomin Oskari WFS -tasot"
+            },
             "Liiteri": {
                 "type": "wfs",
                 "endpoints": [
@@ -359,6 +364,7 @@ class WFSSourceRegistry(object):
         return [
             "Väylä",
             "DigiRoad",
+            "Traficom Oskari",
             "MML",
             "MML Karttakuva",
             "Kapsi",
@@ -2401,6 +2407,57 @@ class VaylaWFSDownloader(object):
             })
         return layers
 
+    def _get_traficom_oskari_layers(self):
+        """Hae Traficomin Oskari-karttatasot ja palauta sen WFS-aineistot."""
+        endpoint = self.wfs_registry.get_endpoint("Traficom Oskari")
+        if not endpoint:
+            return []
+        query = urllib.parse.urlencode({
+            "action_route": "GetHierarchicalMapLayerGroups",
+            "srs": "EPSG:3067",
+            "lang": "fi",
+        })
+        request_url = "{}?{}".format(endpoint, query)
+        data, raw_text, status, content_type = self._fetch_json(
+            request_url, timeout=60, quiet=True
+        )
+        if not isinstance(data, dict) or not isinstance(data.get("layers"), list):
+            reason = self._wfs_error_snippet(raw_text, 300) or content_type or "virheellinen JSON"
+            raise Exception(
+                "Traficomin Oskari-tasoluettelo epäonnistui (HTTP {}): {}".format(
+                    status, reason
+                )
+            )
+
+        layers = []
+        for item in data.get("layers", []):
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("type") or "").lower() != "wfslayer":
+                continue
+            if str(item.get("orgName") or "").strip().casefold() != "traficom":
+                continue
+            layer_id = str(item.get("id") or "").strip()
+            if not layer_id:
+                continue
+            title = str(item.get("name") or item.get("layerName") or layer_id).strip()
+            attributes = item.get("attributes")
+            geometry_field = (
+                attributes.get("geometry")
+                if isinstance(attributes, dict) else None
+            )
+            layers.append({
+                "id": layer_id,
+                "title": title,
+                "source": "Traficom Oskari",
+                "kind": "oskari_wfs",
+                "endpoint": endpoint,
+                "geometry_field": geometry_field,
+                "layer_name": item.get("layerName"),
+                "version": item.get("version"),
+            })
+        return layers
+
     def _get_layer_entries_for_sources(self, source_names):
         entries = []
         mapping = {}
@@ -2408,6 +2465,16 @@ class VaylaWFSDownloader(object):
             source_type = self.wfs_registry.get_type(source_name)
             if source_type == "overpass":
                 source_entries = OverpassAdapter.get_layers()
+            elif source_type == "oskari":
+                try:
+                    source_entries = self._get_traficom_oskari_layers()
+                except Exception as ex:
+                    self._warn(
+                        "[VAROITUS] Traficomin Oskari-tasoluettelo epäonnistui: {}".format(
+                            self._redact_secrets(ex)
+                        )
+                    )
+                    source_entries = []
             elif source_type == "mml_raster":
                 source_entries = []
                 try:
@@ -2494,6 +2561,8 @@ class VaylaWFSDownloader(object):
                     "geometry_field": entry.get("geometry_field"),
                     "wms_title": entry.get("wms_title"),
                     "is_background": bool(entry.get("is_background", False)),
+                    "layer_name": entry.get("layer_name"),
+                    "version": entry.get("version"),
                 }
                 entries.append(unique_label)
 
@@ -3914,6 +3983,110 @@ class VaylaWFSDownloader(object):
             )
         stats["fetch_total_s"] = time.perf_counter() - fetch_start
         return page_fcs, total_features, stats
+
+    def _fetch_oskari_feature_chunks(self, endpoint, layer_id, bbox_3067,
+                                     service_label="Traficomin Oskari"):
+        """Hae yksi rajaus Oskarin GetWFSFeatures-rajapinnasta GeoJSONina."""
+        fetch_start = time.perf_counter()
+        stats = {
+            "request_build_s": 0.0, "network_s": 0.0, "response_read_s": 0.0,
+            "decode_s": 0.0, "json_parse_s": 0.0, "json_write_s": 0.0,
+            "json_to_features_s": 0.0, "projection_s": 0.0,
+            "json_temp_delete_s": 0.0, "pages": 0, "mode": "OSKARI_WFS",
+            "fetch_total_s": 0.0, "truncated": False,
+        }
+        query = urllib.parse.urlencode({
+            "action_route": "GetWFSFeatures",
+            "id": str(layer_id),
+            "srs": "EPSG:3067",
+            "bbox": bbox_3067,
+        })
+        request_url = "{}?{}".format(endpoint, query)
+        request_timing = PhaseMetrics()
+        data, raw_text, status, content_type = self._fetch_json(
+            request_url, timeout=120, quiet=True, timings=request_timing
+        )
+        stats["pages"] = 1
+        phase_to_stat = {
+            "requestin muodostaminen": "request_build_s",
+            "verkkopyyntö": "network_s",
+            "vastauksen lukeminen": "response_read_s",
+            "vastauksen dekoodaus": "decode_s",
+            "JSON-jäsennys": "json_parse_s",
+        }
+        for phase_name, stat_name in phase_to_stat.items():
+            stats[stat_name] += request_timing.get(phase_name, 0.0) or 0.0
+
+        if not isinstance(data, dict) or not isinstance(data.get("features"), list):
+            reason = self._wfs_error_snippet(raw_text, 350) or content_type or "virheellinen GeoJSON"
+            raise Exception(
+                "{} GetWFSFeatures -pyyntö epäonnistui (HTTP {}): {}".format(
+                    service_label, status, reason
+                )
+            )
+
+        features = data.get("features") or []
+        if not features:
+            stats["fetch_total_s"] = time.perf_counter() - fetch_start
+            return [], 0, stats
+
+        # Oskari palauttaa pyydetyn EPSG:3067:n eksplisiittisesti GeoJSONin
+        # crs-jäsenessä. Lisää se tarvittaessa uudelleen ArcGISin muunnosta
+        # varten ja hylkää eri koordinaatistossa palautettu aineisto.
+        crs = data.get("crs")
+        crs_properties = crs.get("properties") if isinstance(crs, dict) else None
+        crs_name = crs_properties.get("name") if isinstance(crs_properties, dict) else None
+        if crs_name and "3067" not in str(crs_name):
+            raise Exception(
+                "{} palautti koordinaatiston '{}'; odotettiin EPSG:3067.".format(
+                    service_label, crs_name
+                )
+            )
+        if not crs_name:
+            data["crs"] = {
+                "type": "name",
+                "properties": {"name": "EPSG:3067"},
+            }
+
+        feature_class, conversion_timing = self._pages_to_temp_fc([data])
+        if not feature_class:
+            raise Exception(
+                "{} palautti {} kohdetta, mutta ArcGIS Pro ei muodostanut niistä aineistoa.".format(
+                    service_label, len(features)
+                )
+            )
+
+        # JSONToFeaturesin tulos tarkistetaan tässä, jotta mahdollinen ArcGISin
+        # GeoJSON-CRS-tulkinta ei siirrä TM35FIN-koordinaatteja väärään CRS:ään.
+        try:
+            sr = getattr(arcpy.Describe(feature_class), "spatialReference", None)
+            sr_code = int(getattr(sr, "factoryCode", 0) or 0) if sr else 0
+            if sr_code != 3067:
+                define_start = time.perf_counter()
+                arcpy.management.DefineProjection(
+                    feature_class, arcpy.SpatialReference(3067)
+                )
+                stats["projection_s"] += time.perf_counter() - define_start
+            converted_count = int(arcpy.management.GetCount(feature_class)[0])
+        except Exception:
+            self._safe_delete(feature_class)
+            raise
+        if converted_count != len(features):
+            self._safe_delete(feature_class)
+            raise Exception(
+                "ArcGIS Pro muodosti Oskari-vastauksesta {} kohdetta, vaikka GeoJSONissa oli {}.".format(
+                    converted_count, len(features)
+                )
+            )
+
+        for timing_name, stat_name in (
+            ("JSONToFeatures", "json_to_features_s"),
+            ("väliaikaisen JSON-tiedoston kirjoittaminen", "json_write_s"),
+            ("väliaikaisen JSON-tiedoston poistaminen", "json_temp_delete_s"),
+        ):
+            stats[stat_name] += conversion_timing.get(timing_name, 0.0) or 0.0
+        stats["fetch_total_s"] = time.perf_counter() - fetch_start
+        return [feature_class], len(features), stats
 
     def _fetch_bbox_feature_chunks(self, base_wfs: str, layer_clean: str, bbox_str: str,
                                    output_formats, max_features: int, max_requests: int = 200,
@@ -6214,6 +6387,14 @@ class VaylaWFSDownloader(object):
                     self._msg("  [TASO] Paikallinen välitulos: {}".format(staged_fc))
                     self._msg("  [TASO] Lopputulos: {}".format(proposed_output_path))
 
+            elif layer_kind == "oskari_wfs":
+                requested_mode = "Traficomin Oskari GetWFSFeatures (EPSG:3067) + paikallinen Clip"
+                self._msg("  [TASO] Näyttönimi: {}".format(layer_ui_name))
+                self._msg("  [TASO] Lähde: Traficom Oskari")
+                self._msg("  [TASO] Oskari API: {}".format(self._sanitize_url(base_wfs)))
+                self._msg("  [TASO] Oskari tasotunnus: {}".format(layer_clean))
+                self._msg("  [TASO] Hakutapa: {}".format(requested_mode))
+
             elif layer_kind == "aino_wms":
                 requested_mode = "Aino WMS 1.3.0 live-karttataso"
                 self._msg("  [TASO] Näyttönimi: {}".format(layer_ui_name))
@@ -6373,6 +6554,51 @@ class VaylaWFSDownloader(object):
                         "  [INFO] OGC-yhteenveto: {} sivua ladattu ({} kohdetta).".format(
                             ogc_stats.get("pages", 0), total_found
                         )
+                    )
+                except Exception as ex:
+                    for temp_fc in temp_feature_classes:
+                        self._safe_delete(temp_fc)
+                    temp_feature_classes = []
+                    _record_layer_failure(layer_ui_name, ex)
+                    continue
+            elif layer_kind == "oskari_wfs":
+                try:
+                    bbox_projection_start = time.perf_counter()
+                    extent_3067 = self._boundary_extent_3067(boundary_fc)
+                    layer_metrics.add(
+                        "projektointi",
+                        time.perf_counter() - bbox_projection_start,
+                    )
+                    bbox_3067 = "{},{},{},{}".format(
+                        extent_3067.XMin, extent_3067.YMin,
+                        extent_3067.XMax, extent_3067.YMax,
+                    )
+                    chunks, total_found, oskari_stats = self._fetch_oskari_feature_chunks(
+                        endpoint=base_wfs,
+                        layer_id=layer_clean,
+                        bbox_3067=bbox_3067,
+                    )
+                    temp_feature_classes.extend(chunks)
+                    layer_http_s += oskari_stats.get("network_s", 0.0)
+                    layer_gp_json_s += oskari_stats.get("json_to_features_s", 0.0)
+                    stat_to_phase = {
+                        "request_build_s": "requestin muodostaminen",
+                        "network_s": "verkkopyyntö",
+                        "response_read_s": "vastauksen lukeminen",
+                        "decode_s": "vastauksen dekoodaus",
+                        "json_parse_s": "JSON-jäsennys",
+                        "json_write_s": "väliaikaisen JSON-tiedoston kirjoittaminen",
+                        "json_to_features_s": "JSONToFeatures",
+                        "projection_s": "projektointi",
+                        "json_temp_delete_s": "väliaikaisen JSON-tiedoston poistaminen",
+                    }
+                    for stat_name, phase_name in stat_to_phase.items():
+                        value = oskari_stats.get(stat_name)
+                        if isinstance(value, (int, float)) and value > 0:
+                            layer_metrics.add(phase_name, value)
+                    self._msg(
+                        "  [INFO] Oskari-yhteenveto: {} kohdetta GeoJSONissa; "
+                        "EPSG:3067, paikallinen Clip.".format(total_found)
                     )
                 except Exception as ex:
                     for temp_fc in temp_feature_classes:

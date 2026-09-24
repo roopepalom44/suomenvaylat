@@ -23,7 +23,12 @@ function Resolve-MSBuildPath {
     $candidates = @()
     $vsWhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
     if (Test-Path -LiteralPath $vsWhere -PathType Leaf) {
-        $installations = @(& $vsWhere -latest -products * -requires Microsoft.Component.MSBuild -property installationPath)
+        $installations = @(& $vsWhere -all -products * -requires Microsoft.Component.MSBuild -property installationPath)
+        $installations = @($installations | Sort-Object {
+            if ($_ -match '\\2022\\') { 0 }
+            elseif ($_ -match '\\18\\') { 1 }
+            else { 2 }
+        })
         foreach ($installation in $installations) {
             if (-not [string]::IsNullOrWhiteSpace($installation)) {
                 $candidates += Join-Path $installation 'MSBuild\Current\Bin\MSBuild.exe'
@@ -37,11 +42,11 @@ function Resolve-MSBuildPath {
         (Join-Path ${env:ProgramFiles} 'Microsoft Visual Studio\2022\Professional\MSBuild\Current\Bin\MSBuild.exe'),
         (Join-Path ${env:ProgramFiles} 'Microsoft Visual Studio\2022\Enterprise\MSBuild\Current\Bin\MSBuild.exe'),
         (Join-Path ${env:ProgramFiles} 'Microsoft Visual Studio\2022\BuildTools\MSBuild\Current\Bin\MSBuild.exe'),
+        (Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\2022\BuildTools\MSBuild\Current\Bin\MSBuild.exe'),
         (Join-Path ${env:ProgramFiles} 'Microsoft Visual Studio\18\Community\MSBuild\Current\Bin\MSBuild.exe'),
         (Join-Path ${env:ProgramFiles} 'Microsoft Visual Studio\18\Professional\MSBuild\Current\Bin\MSBuild.exe'),
         (Join-Path ${env:ProgramFiles} 'Microsoft Visual Studio\18\Enterprise\MSBuild\Current\Bin\MSBuild.exe'),
         (Join-Path ${env:ProgramFiles} 'Microsoft Visual Studio\18\BuildTools\MSBuild\Current\Bin\MSBuild.exe'),
-        (Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\2022\BuildTools\MSBuild\Current\Bin\MSBuild.exe'),
         (Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\18\BuildTools\MSBuild\Current\Bin\MSBuild.exe')
     )
 
@@ -51,13 +56,22 @@ function Resolve-MSBuildPath {
         }
     }
 
-    throw 'Full-framework MSBuild.exe was not found. Install Visual Studio MSBuild or pass -MSBuildPath explicitly. Do not use dotnet build for the ArcGIS Pro SDK targets used by this project.'
+    throw 'Full-framework MSBuild.exe was not found. Install Visual Studio 2022 Build Tools or pass -MSBuildPath explicitly.'
+}
+
+$dotnet = Get-Command dotnet -ErrorAction Stop
+$installedSdks = @(& $dotnet.Source --list-sdks)
+$buildableSdks = @($installedSdks | ForEach-Object {
+    if ($_ -match '^(?<version>\d+(?:\.\d+){1,3})\s') { [version]$Matches.version }
+})
+if ($LASTEXITCODE -ne 0 -or -not ($buildableSdks | Where-Object { $_.Major -ge 8 })) {
+    throw 'Install the .NET 8 SDK or newer before building the ArcGIS Pro AddInX.'
 }
 
 $msbuild = Resolve-MSBuildPath -ExplicitPath $MSBuildPath
 Write-Output "Using MSBuild: $msbuild"
 
-& $msbuild $projectPath '/t:Rebuild' "/p:Configuration=$Configuration" "/p:TargetFramework=$TargetFramework" '/nologo' '/v:minimal'
+& $msbuild $projectPath '/t:Rebuild' "/p:Configuration=$Configuration" "/p:TargetFramework=$TargetFramework" '/p:ArcGISFolder=' '/nologo' '/v:minimal'
 if ($LASTEXITCODE -ne 0) {
     throw "MSBuild failed with exit code $LASTEXITCODE. The package was not created."
 }
