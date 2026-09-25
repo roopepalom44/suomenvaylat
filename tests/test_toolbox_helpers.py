@@ -111,7 +111,7 @@ class ToolboxHelperTests(unittest.TestCase):
         )
         self.assertIn("Traficom Oskari", registry.get_sources_list())
 
-    def test_traficom_oskari_catalog_exposes_only_traficom_wfs_layers(self):
+    def test_traficom_oskari_catalog_exposes_all_services_and_maps_open_wfs(self):
         self.tool.wfs_registry = MODULE.WFSSourceRegistry()
         self.tool._http_transport = fake_http.FakeTransport([
             fake_http.FakeResponse({
@@ -119,21 +119,42 @@ class ToolboxHelperTests(unittest.TestCase):
                     {"id": 112, "type": "wfslayer", "orgName": "Traficom",
                      "name": "Matkustaja-alusten D-alueet", "layerName": "d_alueet",
                      "version": "2.0.0", "attributes": {"geometry": "GEOM"}},
-                    {"id": 3, "type": "wmslayer", "orgName": "Traficom",
-                     "name": "MML Taustakarttasarja"},
+                    {"id": 3, "type": "wmslayer", "orgName": "Maanmittauslaitos",
+                     "name": "MML Taustakarttasarja", "layerName": "taustakartta"},
+                    {"id": 53, "type": "wmslayer", "orgName": "Traficom",
+                     "name": "Runway Area", "layerName": "TN_RUNWAYAREA",
+                     "style": "polygon"},
+                    {"id": 44, "type": "wmtslayer", "orgName": "Traficom",
+                     "name": "Yleiskartat 250k",
+                     "layerName": "Traficom:Yleiskartat 250k public"},
                     {"id": 99, "type": "wfslayer", "orgName": "Muu",
                      "name": "Vieraan tarjoajan taso"},
                 ]
             })
         ])
+        self.tool._fetch_wfs_capabilities_with_headers = lambda endpoint, headers=None: [
+            {"id": "avoin:TN_RUNWAYAREA", "title": "Runway Area", "kind": "wfs"}
+        ]
 
         layers = self.tool._get_traficom_oskari_layers()
 
-        self.assertEqual(1, len(layers))
-        self.assertEqual("112", layers[0]["id"])
-        self.assertEqual("oskari_wfs", layers[0]["kind"])
-        self.assertEqual("Matkustaja-alusten D-alueet", layers[0]["title"])
-        self.assertEqual("GEOM", layers[0]["geometry_field"])
+        self.assertEqual(5, len(layers))
+        by_title = {layer["title"]: layer for layer in layers}
+        native_wfs = by_title["Matkustaja-alusten D-alueet"]
+        self.assertEqual("112", native_wfs["id"])
+        self.assertEqual("oskari_wfs", native_wfs["kind"])
+        self.assertEqual("GEOM", native_wfs["geometry_field"])
+        open_wfs = by_title["Runway Area"]
+        self.assertEqual("avoin:TN_RUNWAYAREA", open_wfs["id"])
+        self.assertEqual("wfs", open_wfs["kind"])
+        self.assertEqual(MODULE.TRAFICOM_OPEN_WFS_ENDPOINT, open_wfs["endpoint"])
+        proxy_wms = by_title["MML Taustakarttasarja"]
+        self.assertEqual("oskari_wms", proxy_wms["kind"])
+        self.assertEqual("3", proxy_wms["catalog_id"])
+        wmts = by_title["Yleiskartat 250k"]
+        self.assertEqual("oskari_wmts", wmts["kind"])
+        self.assertEqual("Traficom:Yleiskartat 250k public", wmts["layer_name"])
+        self.assertEqual("Muu", by_title["Vieraan tarjoajan taso"]["organization"])
         request = self.tool._http_transport.requests[0]
         self.assertEqual(
             "GetHierarchicalMapLayerGroups", request["query"]["action_route"]

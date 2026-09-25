@@ -78,6 +78,9 @@ MML_WMTS_MAX_LEVEL = 13
 MML_WMTS_DEFAULT_LEVEL = 9
 MML_WMTS_MAX_TILES = 256
 
+TRAFICOM_OPEN_WFS_ENDPOINT = "https://julkinen.traficom.fi/inspirepalvelu/avoin/wfs"
+TRAFICOM_WMTS_ENDPOINT = "https://julkinen.traficom.fi/rasteripalvelu/wmts?service=WMTS&request=GetCapabilities"
+
 
 class PhaseMetrics(object):
     """Monotoniseen kelloon perustuva vaihekirjanpito.
@@ -277,7 +280,7 @@ class WFSSourceRegistry(object):
             "Traficom Oskari": {
                 "type": "oskari",
                 "endpoints": ["https://julkinen.traficom.fi/oskari/action"],
-                "description": "Traficomin Oskari WFS -tasot"
+                "description": "Oskarin WFS-, WMS- ja WMTS-karttatasot"
             },
             "Liiteri": {
                 "type": "wfs",
@@ -2408,7 +2411,7 @@ class VaylaWFSDownloader(object):
         return layers
 
     def _get_traficom_oskari_layers(self):
-        """Hae Traficomin Oskari-karttatasot ja palauta sen WFS-aineistot."""
+        """Hae Oskarin koko tasoluettelo ja valitse kullekin toimiva lataustapa."""
         endpoint = self.wfs_registry.get_endpoint("Traficom Oskari")
         if not endpoint:
             return []
@@ -2429,32 +2432,90 @@ class VaylaWFSDownloader(object):
                 )
             )
 
+        wfs_by_name = {}
+        wfs_error = None
+        wfs_features = None
+        for attempt in range(1, 4):
+            try:
+                wfs_features = self._fetch_wfs_capabilities_with_headers(
+                    TRAFICOM_OPEN_WFS_ENDPOINT
+                )
+                wfs_error = None
+                break
+            except Exception as ex:
+                wfs_error = ex
+                if attempt < 3:
+                    time.sleep(0.5 * attempt)
+        if wfs_error is None:
+            for feature_type in wfs_features or []:
+                feature_id = str(feature_type.get("id") or "").strip()
+                if feature_id:
+                    wfs_by_name[self._wms_match_key(feature_id.split(":")[-1])] = feature_id
+        else:
+            self._warn(
+                "[VAROITUS] Traficomin avoimen WFS:n tasoluetteloa ei saatu: {}. "
+                "Oskarin karttatasot jäävät silti käytettäviksi karttakuvina.".format(
+                    self._redact_secrets(wfs_error)
+                )
+            )
+
         layers = []
         for item in data.get("layers", []):
             if not isinstance(item, dict):
-                continue
-            if str(item.get("type") or "").lower() != "wfslayer":
-                continue
-            if str(item.get("orgName") or "").strip().casefold() != "traficom":
                 continue
             layer_id = str(item.get("id") or "").strip()
             if not layer_id:
                 continue
             title = str(item.get("name") or item.get("layerName") or layer_id).strip()
+            catalog_type = str(item.get("type") or "").strip().lower()
+            layer_name = str(item.get("layerName") or "").strip()
+            organization = str(item.get("orgName") or "").strip()
             attributes = item.get("attributes")
             geometry_field = (
                 attributes.get("geometry")
                 if isinstance(attributes, dict) else None
             )
+
+            if catalog_type == "wfslayer":
+                kind = "oskari_wfs"
+                request_id = layer_id
+                layer_endpoint = endpoint
+            elif catalog_type == "wmslayer":
+                direct_wfs_id = wfs_by_name.get(
+                    self._wms_match_key(layer_name.split(":")[-1])
+                )
+                if direct_wfs_id:
+                    kind = "wfs"
+                    request_id = direct_wfs_id
+                    layer_endpoint = TRAFICOM_OPEN_WFS_ENDPOINT
+                else:
+                    kind = "oskari_wms"
+                    request_id = layer_id
+                    layer_endpoint = endpoint
+            elif catalog_type == "wmtslayer":
+                kind = "oskari_wmts"
+                request_id = layer_id
+                layer_endpoint = TRAFICOM_WMTS_ENDPOINT
+            else:
+                # Säilytä tuntemattomat Oskari-katalogityypit valittavina.
+                # Niitä ei kuitenkaan nimetä WFS-, WMS- tai WMTS-tasoksi.
+                kind = "oskari_wms"
+                request_id = layer_id
+                layer_endpoint = endpoint
+
             layers.append({
-                "id": layer_id,
+                "id": request_id,
                 "title": title,
                 "source": "Traficom Oskari",
-                "kind": "oskari_wfs",
-                "endpoint": endpoint,
+                "kind": kind,
+                "endpoint": layer_endpoint,
                 "geometry_field": geometry_field,
-                "layer_name": item.get("layerName"),
+                "layer_name": layer_name,
                 "version": item.get("version"),
+                "catalog_type": catalog_type,
+                "catalog_id": layer_id,
+                "organization": organization,
+                "style": item.get("style"),
             })
         return layers
 
@@ -2563,6 +2624,10 @@ class VaylaWFSDownloader(object):
                     "is_background": bool(entry.get("is_background", False)),
                     "layer_name": entry.get("layer_name"),
                     "version": entry.get("version"),
+                    "catalog_type": entry.get("catalog_type"),
+                    "catalog_id": entry.get("catalog_id"),
+                    "organization": entry.get("organization"),
+                    "style": entry.get("style"),
                 }
                 entries.append(unique_label)
 
@@ -4745,6 +4810,413 @@ class VaylaWFSDownloader(object):
         with open(prj_path, "w", encoding="utf-8") as handle:
             handle.write(arcpy.SpatialReference(3067).exportToString())
 
+    def _download_oskari_wms_geotiff(
+        self, layer_id, layer_name, layer_title, style, boundary_fc, workspace,
+        endpoint=None,
+    ):
+        """Hae Oskarin WMS-karttataso aluerajauksen georeferoituna kuvana."""
+        endpoint = endpoint or self.wfs_registry.get_endpoint("Traficom Oskari")
+        if not endpoint:
+            raise Exception("Oskarin WMS-palveluosoite puuttuu.")
+        layer_name = (layer_name or "").strip()
+        if not layer_name:
+            raise Exception("Oskarin WMS-tason tekninen nimi puuttuu.")
+
+        ext = self._boundary_extent_3067(boundary_fc)
+        extent_w = float(ext.XMax - ext.XMin)
+        extent_h = float(ext.YMax - ext.YMin)
+        if extent_w <= 0 or extent_h <= 0:
+            raise Exception("Rajauksen laajuus ei riitä Oskari WMS -kuvan muodostamiseen.")
+        max_dimension = 2048
+        scale = max_dimension / max(extent_w, extent_h)
+        width = max(1, min(max_dimension, int(round(extent_w * scale))))
+        height = max(1, min(max_dimension, int(round(extent_h * scale))))
+
+        if isinstance(style, (list, tuple)):
+            style = ",".join(str(value) for value in style if value is not None)
+        elif isinstance(style, dict):
+            style = style.get("name") or style.get("id") or ""
+        params = {
+            "action_route": "GetLayerTile",
+            "id": str(layer_id),
+            "SERVICE": "WMS",
+            "REQUEST": "GetMap",
+            "VERSION": "1.1.1",
+            "LAYERS": layer_name,
+            "STYLES": str(style or ""),
+            "SRS": "EPSG:3067",
+            "BBOX": "{},{},{},{}".format(
+                ext.XMin, ext.YMin, ext.XMax, ext.YMax
+            ),
+            "WIDTH": str(width),
+            "HEIGHT": str(height),
+            "FORMAT": "image/png",
+            "TRANSPARENT": "TRUE",
+        }
+        parsed = urllib.parse.urlsplit(endpoint)
+        query = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
+        query.extend(params.items())
+        request_url = urllib.parse.urlunsplit((
+            parsed.scheme, parsed.netloc, parsed.path,
+            urllib.parse.urlencode(query), parsed.fragment,
+        ))
+        request = urllib.request.Request(request_url, headers={
+            "User-Agent": "ArcGISPro-Suomenvaylat-Oskari/1.0",
+            "Accept": "image/png",
+        })
+        with urllib.request.urlopen(request, timeout=180) as response:
+            raw = response.read()
+            content_type = (response.headers.get("Content-Type") or "").lower()
+        if not content_type.startswith("image/") or not raw.startswith(b"\x89PNG\r\n\x1a\n"):
+            detail = raw[:250].decode("utf-8", errors="replace")
+            raise Exception(
+                "Oskari WMS ei palauttanut PNG-kuvaa ({}): {}".format(
+                    content_type or "tuntematon sisältötyyppi", detail
+                )
+            )
+
+        os.makedirs(workspace, exist_ok=True)
+        stem = "oskari_wms_{}_{}".format(layer_id, uuid.uuid4().hex[:8])
+        png_path = os.path.join(workspace, stem + ".png")
+        tif_path = os.path.join(workspace, stem + ".tif")
+        with open(png_path, "wb") as handle:
+            handle.write(raw)
+        try:
+            self._write_world_file(png_path, ext, width, height)
+            arcpy.management.CopyRaster(png_path, tif_path)
+            try:
+                source_code = int(arcpy.Describe(tif_path).spatialReference.factoryCode or 0)
+            except Exception:
+                source_code = 0
+            if source_code != 3067:
+                arcpy.management.DefineProjection(tif_path, arcpy.SpatialReference(3067))
+        except Exception:
+            self._remove_local_output(tif_path)
+            raise
+        finally:
+            for sidecar in (os.path.splitext(png_path)[0] + ".pgw",
+                            os.path.splitext(png_path)[0] + ".prj"):
+                try:
+                    if os.path.exists(sidecar):
+                        os.remove(sidecar)
+                except Exception:
+                    pass
+            try:
+                if os.path.exists(png_path):
+                    os.remove(png_path)
+            except Exception:
+                pass
+        self._msg(
+            "[INFO] Oskari WMS -karttakuva ladattu: {} ({} × {}, EPSG:3067).".format(
+                layer_title or layer_name, width, height
+            )
+        )
+        return tif_path
+
+    def _download_oskari_wmts_tile(self, request_url, attempts=3):
+        """Lataa yksi julkinen Traficom WMTS PNG -laatta."""
+        last_error = None
+        for attempt in range(1, attempts + 1):
+            request = urllib.request.Request(request_url, headers={
+                "User-Agent": "ArcGISPro-Suomenvaylat-Oskari/1.0",
+                "Accept": "image/png",
+                "Accept-Encoding": "identity",
+            })
+            try:
+                with urllib.request.urlopen(request, timeout=90) as response:
+                    raw = response.read()
+                    content_type = (response.headers.get("Content-Type") or "").lower()
+                if not content_type.startswith("image/") or not raw.startswith(b"\x89PNG\r\n\x1a\n"):
+                    detail = raw[:250].decode("utf-8", errors="replace")
+                    raise Exception(
+                        "Traficom WMTS palautti PNG:n sijaan {}: {}".format(
+                            content_type or "tuntematon sisältötyyppi", detail
+                        )
+                    )
+                return raw
+            except (urllib.error.URLError, TimeoutError, OSError, http.client.IncompleteRead) as ex:
+                last_error = ex
+                if attempt < attempts:
+                    time.sleep(0.5 * attempt)
+                    continue
+            except Exception as ex:
+                last_error = ex
+                break
+        raise Exception(
+            "Traficom WMTS -laatan lataus epäonnistui: {}".format(last_error)
+        )
+
+    def _traficom_wmts_layer_metadata(self, layer_name):
+        """Lue valitun Oskari-tason WMTS-matriisit ja sallitut tiilirajat."""
+        endpoint = TRAFICOM_WMTS_ENDPOINT
+        request = urllib.request.Request(endpoint, headers={
+            "User-Agent": "ArcGISPro-Suomenvaylat-Oskari/1.0",
+            "Accept": "application/xml,text/xml",
+        })
+        with urllib.request.urlopen(request, timeout=60) as response:
+            root = ET.fromstring(response.read())
+
+        selected_layer = None
+        for elem in root.iter():
+            if not elem.tag.endswith("Layer"):
+                continue
+            identifier = next((
+                (child.text or "").strip() for child in list(elem)
+                if child.tag.endswith("Identifier") and child.text
+            ), "")
+            if identifier == layer_name:
+                selected_layer = elem
+                break
+        if selected_layer is None:
+            raise Exception("WMTS GetCapabilities ei sisällä tasoa '{}'.".format(layer_name))
+
+        format_name = next((
+            (child.text or "").strip() for child in list(selected_layer)
+            if child.tag.endswith("Format") and child.text
+        ), "image/png")
+        if format_name.casefold() != "image/png":
+            raise Exception("Oskari-WMTS-tasolle '{}' ei ole PNG-kuvaformaattia.".format(layer_name))
+        style_id = ""
+        for style in selected_layer.iter():
+            if not style.tag.endswith("Style"):
+                continue
+            identifier = next((
+                (child.text or "").strip() for child in list(style)
+                if child.tag.endswith("Identifier") and child.text
+            ), "")
+            if style.get("isDefault", "false").casefold() == "true":
+                style_id = identifier
+                break
+
+        matrix_set_links = {}
+        for link in selected_layer.iter():
+            if not link.tag.endswith("TileMatrixSetLink"):
+                continue
+            set_name = next((
+                (child.text or "").strip() for child in list(link)
+                if child.tag.endswith("TileMatrixSet") and child.text
+            ), "")
+            limits = {}
+            for limit in link.iter():
+                if not limit.tag.endswith("TileMatrixLimits"):
+                    continue
+                values = {}
+                for child in list(limit):
+                    if child.text:
+                        values[child.tag.split("}")[-1]] = child.text.strip()
+                matrix_id = values.get("TileMatrix")
+                if matrix_id:
+                    limits[matrix_id] = {
+                        "min_row": int(values.get("MinTileRow", 0)),
+                        "max_row": int(values.get("MaxTileRow", 0)),
+                        "min_col": int(values.get("MinTileCol", 0)),
+                        "max_col": int(values.get("MaxTileCol", 0)),
+                    }
+            if set_name:
+                matrix_set_links[set_name] = limits
+
+        matrix_sets = {}
+        for elem in root.iter():
+            if not elem.tag.endswith("TileMatrixSet"):
+                continue
+            children = list(elem)
+            set_id = next((
+                (child.text or "").strip() for child in children
+                if child.tag.endswith("Identifier") and child.text
+            ), "")
+            if not set_id or set_id not in matrix_set_links:
+                continue
+            supported_crs = next((
+                (child.text or "").strip() for child in children
+                if child.tag.endswith("SupportedCRS") and child.text
+            ), "")
+            if "3067" not in supported_crs:
+                continue
+            matrices = []
+            for matrix in children:
+                if not matrix.tag.endswith("TileMatrix"):
+                    continue
+                values = {}
+                for child in list(matrix):
+                    if child.text:
+                        values[child.tag.split("}")[-1]] = child.text.strip()
+                identifier = values.get("Identifier")
+                corner = values.get("TopLeftCorner", "").split()
+                if not identifier or len(corner) < 2:
+                    continue
+                matrices.append({
+                    "id": identifier,
+                    "scale": float(values["ScaleDenominator"]),
+                    "origin_x": float(corner[0]),
+                    "origin_y": float(corner[1]),
+                    "tile_width": int(values.get("TileWidth", 256)),
+                    "tile_height": int(values.get("TileHeight", 256)),
+                    "matrix_width": int(values["MatrixWidth"]),
+                    "matrix_height": int(values["MatrixHeight"]),
+                    "limits": matrix_set_links[set_id].get(identifier),
+                })
+            if matrices:
+                matrix_sets[set_id] = matrices
+
+        if not matrix_sets:
+            raise Exception("Traficom WMTS -tasolta puuttuu EPSG:3067-tiiliruudukko.")
+        # Palvelussa on tavallisesti yksi 3067-matriisijoukko. Jos palvelu
+        # tarjoaa useita, valitse suurimman käyttökelpoisen tarkkuuden joukko.
+        set_id, matrices = next(iter(matrix_sets.items()))
+        return {
+            "endpoint": endpoint.split("?", 1)[0],
+            "layer": layer_name,
+            "style": style_id,
+            "format": format_name,
+            "matrix_set": set_id,
+            "matrices": sorted(matrices, key=lambda item: item["scale"], reverse=True),
+        }
+
+    def _download_oskari_wmts_geotiff(self, layer_name, layer_title, boundary_fc, workspace):
+        """Lataa Oskarin WMTS-tason leikkausalue ja mosaiikoi sen GeoTIFFiksi."""
+        metadata = self._traficom_wmts_layer_metadata(layer_name)
+        ext = self._boundary_extent_3067(boundary_fc)
+        tile_size_m = 0.00028
+        max_tiles = 256
+        selected = None
+        # Matrix list is coarse-to-fine; use the finest resolution that stays
+        # within the request cap instead of immediately choosing the overview.
+        for matrix in reversed(metadata["matrices"]):
+            resolution = matrix["scale"] * tile_size_m
+            tile_w = matrix["tile_width"] * resolution
+            tile_h = matrix["tile_height"] * resolution
+            first_col = int(math.floor((ext.XMin - matrix["origin_x"]) / tile_w))
+            last_col = int(math.floor((ext.XMax - matrix["origin_x"] - 1e-8) / tile_w))
+            first_row = int(math.floor((matrix["origin_y"] - ext.YMax) / tile_h))
+            last_row = int(math.floor((matrix["origin_y"] - ext.YMin - 1e-8) / tile_h))
+            limits = matrix.get("limits") or {
+                "min_row": 0, "max_row": matrix["matrix_height"] - 1,
+                "min_col": 0, "max_col": matrix["matrix_width"] - 1,
+            }
+            first_col = max(first_col, limits["min_col"], 0)
+            last_col = min(last_col, limits["max_col"], matrix["matrix_width"] - 1)
+            first_row = max(first_row, limits["min_row"], 0)
+            last_row = min(last_row, limits["max_row"], matrix["matrix_height"] - 1)
+            if last_col < first_col or last_row < first_row:
+                continue
+            tile_count = (last_col - first_col + 1) * (last_row - first_row + 1)
+            if tile_count <= max_tiles:
+                selected = {
+                    "matrix": matrix,
+                    "resolution": resolution,
+                    "first_col": first_col,
+                    "last_col": last_col,
+                    "first_row": first_row,
+                    "last_row": last_row,
+                    "tile_count": tile_count,
+                }
+                break
+        if selected is None:
+            raise Exception(
+                "Valitulle alueelle tarvittaisiin WMTS:stä yli {} tiiltä.".format(max_tiles)
+            )
+
+        matrix = selected["matrix"]
+        tile_width = matrix["tile_width"]
+        tile_height = matrix["tile_height"]
+        tile_w = tile_width * selected["resolution"]
+        tile_h = tile_height * selected["resolution"]
+        work_dir = tempfile.mkdtemp(prefix="oskari_wmts_", dir=workspace)
+        png_paths = []
+        rgb_paths = []
+        try:
+            tile_plan = []
+            for row in range(selected["first_row"], selected["last_row"] + 1):
+                for col in range(selected["first_col"], selected["last_col"] + 1):
+                    params = {
+                        "SERVICE": "WMTS",
+                        "REQUEST": "GetTile",
+                        "VERSION": "1.0.0",
+                        "LAYER": metadata["layer"],
+                        "STYLE": metadata["style"],
+                        "FORMAT": metadata["format"],
+                        "TILEMATRIXSET": metadata["matrix_set"],
+                        "TILEMATRIX": matrix["id"],
+                        "TILEROW": str(row),
+                        "TILECOL": str(col),
+                    }
+                    tile_plan.append({
+                        "url": metadata["endpoint"] + "?" + urllib.parse.urlencode(params),
+                        "png_path": os.path.join(work_dir, "tile_{}_{}.png".format(row, col)),
+                        "row": row,
+                        "col": col,
+                    })
+            workers = min(max(1, int(getattr(self, "_tile_workers", 4) or 1)), 8, len(tile_plan))
+            if workers > 1:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+                    payloads = list(pool.map(
+                        lambda item: self._download_oskari_wmts_tile(item["url"]),
+                        tile_plan,
+                    ))
+            else:
+                payloads = [self._download_oskari_wmts_tile(item["url"]) for item in tile_plan]
+
+            for item, raw in zip(tile_plan, payloads):
+                with open(item["png_path"], "wb") as handle:
+                    handle.write(raw)
+                class _TileExtent:
+                    pass
+                tile_ext = _TileExtent()
+                tile_ext.XMin = matrix["origin_x"] + item["col"] * tile_w
+                tile_ext.XMax = tile_ext.XMin + tile_w
+                tile_ext.YMax = matrix["origin_y"] - item["row"] * tile_h
+                tile_ext.YMin = tile_ext.YMax - tile_h
+                self._write_world_file(
+                    item["png_path"], tile_ext, tile_width, tile_height
+                )
+                png_paths.append((item["png_path"], tile_ext))
+
+            for png_path, tile_ext in png_paths:
+                rgb_path = os.path.splitext(png_path)[0] + "_rgb.tif"
+                try:
+                    self._colormap_to_rgb(png_path, rgb_path)
+                except Exception:
+                    # Traficomin WMTS palvelee sekä PNG8- että RGB-PNG-laattoja.
+                    # ColormapToRGB käsittelee vain palettikuvat; tavallinen
+                    # RGB-PNG kopioidaan suoraan GeoTIFFiksi.
+                    arcpy.management.CopyRaster(
+                        png_path, rgb_path, format="TIFF"
+                    )
+                self._write_world_file(rgb_path, tile_ext, tile_width, tile_height)
+                rgb_paths.append(rgb_path)
+
+            if not rgb_paths:
+                raise Exception("Traficom WMTS ei palauttanut yhtään tiiltä.")
+            band_count = int(arcpy.Describe(rgb_paths[0]).bandCount or 3)
+            output_path = os.path.join(work_dir, "oskari_wmts_mosaic.tif")
+            arcpy.management.MosaicToNewRaster(
+                rgb_paths,
+                work_dir,
+                os.path.basename(output_path),
+                coordinate_system_for_the_raster=arcpy.SpatialReference(3067),
+                pixel_type="8_BIT_UNSIGNED",
+                number_of_bands=band_count,
+                cellsize=selected["resolution"],
+                mosaic_method="FIRST",
+                mosaic_colormap_mode="REJECT",
+            )
+            final_path = os.path.join(
+                workspace, "oskari_wmts_{}_{}.tif".format(
+                    self._sanitize_table_name(layer_name.split(":")[-1]),
+                    uuid.uuid4().hex[:8],
+                )
+            )
+            arcpy.management.CopyRaster(output_path, final_path)
+            self._msg(
+                "[INFO] Oskari WMTS -mosaiikki valmis: {} ({}/{} laattaa, "
+                "matriisi {}).".format(
+                    layer_title or layer_name, len(rgb_paths), selected["tile_count"], matrix["id"]
+                )
+            )
+            return final_path
+        finally:
+            shutil.rmtree(work_dir, ignore_errors=True)
+
     def _download_kapsi_image_bytes(self, request_url, attempts=3):
         """Lataa kokonainen JPEG ja yritä katkennutta chunked-vastausta uudelleen."""
         last_error = None
@@ -6404,6 +6876,21 @@ class VaylaWFSDownloader(object):
                 ))
                 self._msg("  [TASO] WMS-alitaso: {}".format(layer_clean))
                 self._msg("  [TASO] Hakutapa: {}".format(requested_mode))
+            elif layer_kind in ("oskari_wms", "oskari_wmts"):
+                if layer_kind == "oskari_wms":
+                    requested_mode = "Oskari GetLayerTile WMS + georeferoitu rasterikuva"
+                    service_label = "WMS"
+                else:
+                    requested_mode = "Traficom WMTS GetTile + paikallinen GeoTIFF-mosaiikki"
+                    service_label = "WMTS"
+                self._msg("  [TASO] Näyttönimi: {}".format(layer_ui_name))
+                self._msg("  [TASO] Lähde: Traficom Oskari ({})".format(
+                    layer_info.get("organization") or "Oskari-karttapalvelu"
+                ))
+                self._msg("  [TASO] {}-tason nimi: {}".format(
+                    service_label, layer_info.get("layer_name") or layer_clean
+                ))
+                self._msg("  [TASO] Hakutapa: {}".format(requested_mode))
 
             if layer_kind == "aino_wms":
                 try:
@@ -6436,6 +6923,51 @@ class VaylaWFSDownloader(object):
                 except Exception as ex:
                     _record_layer_failure(layer_ui_name, ex)
                     continue
+            elif layer_kind == "oskari_wms":
+                download_start = time.perf_counter()
+                try:
+                    out_tif = self._download_oskari_wms_geotiff(
+                        layer_id=layer_info.get("catalog_id") or layer_clean,
+                        layer_name=layer_info.get("layer_name"),
+                        layer_title=layer_info.get("title") or layer_ui_name,
+                        style=layer_info.get("style"),
+                        boundary_fc=boundary_fc,
+                        workspace=self._scratch_folder(),
+                        endpoint=layer_info.get("endpoint") or base_wfs,
+                    )
+                except Exception as ex:
+                    _record_layer_failure(layer_ui_name, ex)
+                    continue
+                staged_outputs.append({
+                    "path": out_tif,
+                    "output_name": os.path.splitext(os.path.basename(out_tif))[0],
+                    "output_type": "raster",
+                    "label": layer_ui_name,
+                    "layer_start": layer_start,
+                    "download_s": time.perf_counter() - download_start,
+                })
+                continue
+            elif layer_kind == "oskari_wmts":
+                download_start = time.perf_counter()
+                try:
+                    out_tif = self._download_oskari_wmts_geotiff(
+                        layer_name=layer_info.get("layer_name"),
+                        layer_title=layer_info.get("title") or layer_ui_name,
+                        boundary_fc=boundary_fc,
+                        workspace=self._scratch_folder(),
+                    )
+                except Exception as ex:
+                    _record_layer_failure(layer_ui_name, ex)
+                    continue
+                staged_outputs.append({
+                    "path": out_tif,
+                    "output_name": os.path.splitext(os.path.basename(out_tif))[0],
+                    "output_type": "raster",
+                    "label": layer_ui_name,
+                    "layer_start": layer_start,
+                    "download_s": time.perf_counter() - download_start,
+                })
+                continue
             elif layer_kind == "mml_raster":
                 if not mml_api_key.strip():
                     _record_layer_failure(layer_ui_name, "MML-rasteritaso vaatii API-avaimen")
