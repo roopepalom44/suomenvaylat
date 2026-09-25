@@ -1060,7 +1060,7 @@ class VaylaWFSDownloader(object):
         self._layer_cache_ttl_s = 86400
         self._layer_refresh_consumed = False
         # Rinnakkaiset rasterilaattojen lataukset (Kapsi/WMTS).
-        self._tile_workers = 5
+        self._tile_workers = 8
         self._traficom_wmts_capabilities_root = None
         self._traficom_wmts_capabilities_at = 0.0
         self._resources_dir_cache = "__unset__"
@@ -1287,8 +1287,14 @@ class VaylaWFSDownloader(object):
     def _add_to_map(self, dataset_path: str):
         try:
             if not self._runtime_map_loaded:
-                self._runtime_project = arcpy.mp.ArcGISProject("CURRENT")
-                self._runtime_map = self._runtime_project.activeMap
+                try:
+                    self._runtime_project = arcpy.mp.ArcGISProject("CURRENT")
+                    self._runtime_map = self._runtime_project.activeMap
+                except Exception:
+                    self._runtime_project = None
+                    self._runtime_map = None
+                    self._runtime_map_loaded = True
+                    return False, "CURRENT"
                 self._runtime_map_loaded = True
             m = self._runtime_map
             if m:
@@ -1296,6 +1302,8 @@ class VaylaWFSDownloader(object):
                 return True, None
             return False, "aktiivista karttaa ei ole"
         except Exception as ex:
+            if "CURRENT" in str(ex):
+                return False, "CURRENT"
             return False, str(ex)
 
     def _active_map_for_background(self):
@@ -2716,38 +2724,87 @@ class VaylaWFSDownloader(object):
             temp_json_path = os.path.join(self._scratch_folder(), "osm_{}.geojson".format(uuid.uuid4().hex))
             with open(temp_json_path, "w", encoding="utf-8") as handle:
                 json.dump(geojson, handle, ensure_ascii=False)
-            temp_fc = os.path.join(self._scratch_gdb(), "osm_fc_{}".format(uuid.uuid4().hex[:10]))
-            try:
-                # Esrin JSON To Features vaatii GeoJSONille geometriatyypin.
-                # POI-adapteri tuottaa aina pisteitä; ilman POINT-parametria
-                # ArcGIS voi luoda tyhjän feature classin täysin kelvollisesta
-                # GeoJSONista (havaittu Oulun kuntahaussa).
-                if layer_id == GeofabrikPOIAdapter.LAYER_ID:
-                    arcpy.conversion.JSONToFeatures(temp_json_path, temp_fc, "POINT")
-                else:
-                    arcpy.conversion.JSONToFeatures(temp_json_path, temp_fc)
-            finally:
+            if layer_id == GeofabrikPOIAdapter.LAYER_ID:
+                temp_fc = os.path.join(self._scratch_gdb(), "osm_fc_{}".format(uuid.uuid4().hex[:10]))
                 try:
-                    os.remove(temp_json_path)
-                except Exception:
-                    pass
+                    arcpy.conversion.JSONToFeatures(temp_json_path, temp_fc, "POINT")
+                finally:
+                    try:
+                        os.remove(temp_json_path)
+                    except Exception:
+                        pass
 
-            converted_count = int(arcpy.management.GetCount(temp_fc)[0])
-            if converted_count == 0:
+                converted_count = int(arcpy.management.GetCount(temp_fc)[0])
+                if converted_count == 0:
+                    self._safe_delete(temp_fc)
+                    raise Exception(
+                        "ArcGIS ei muuntanut Overpass-vastauksen {} kohdetta paikkatietokohteiksi."
+                        .format(len(geojson.get("features", [])))
+                    )
+                self._define_osm_source_projection(temp_fc)
+                projected_fc = os.path.join(self._scratch_gdb(), "osm_prj_{}".format(uuid.uuid4().hex[:10]))
+                arcpy.management.Project(temp_fc, projected_fc, boundary_sr)
                 self._safe_delete(temp_fc)
+                return [projected_fc], len(geojson.get("features", []))
+
+            # Yleiset OSM-tasot: Esrin JSON To Features vaatii GeoJSONille aina
+            # eksplisiittisen geometriatyypin (POINT, POLYLINE tai POLYGON),
+            # muuten se palauttaa 0 kohdetta. Erotellaan geometriatyypit omiin eriin,
+            # jotta mikään kohde ei huku (esim. pisteet + viivat samassa vastauksessa).
+            type_map = {
+                "Point": "POINT", "MultiPoint": "POINT",
+                "LineString": "POLYLINE", "MultiLineString": "POLYLINE",
+                "Polygon": "POLYGON", "MultiPolygon": "POLYGON"
+            }
+            buckets = {}
+            for feat in geojson.get("features", []):
+                gtype = (feat.get("geometry") or {}).get("type")
+                arc_type = type_map.get(gtype)
+                if arc_type:
+                    buckets.setdefault(arc_type, []).append(feat)
+
+            try:
+                os.remove(temp_json_path)
+            except Exception:
+                pass
+
+            if not buckets:
+                return [], 0
+
+            projected_fcs = []
+            total_converted = 0
+            for arc_type, sub_features in buckets.items():
+                sub_json = {"type": "FeatureCollection", "features": sub_features}
+                sub_path = os.path.join(self._scratch_folder(), "osm_{}_{}.geojson".format(arc_type, uuid.uuid4().hex))
+                with open(sub_path, "w", encoding="utf-8") as handle:
+                    json.dump(sub_json, handle, ensure_ascii=False)
+                sub_fc = os.path.join(self._scratch_gdb(), "osm_fc_{}_{}".format(arc_type, uuid.uuid4().hex[:8]))
+                try:
+                    arcpy.conversion.JSONToFeatures(sub_path, sub_fc, arc_type)
+                finally:
+                    try:
+                        os.remove(sub_path)
+                    except Exception:
+                        pass
+
+                cnt = int(arcpy.management.GetCount(sub_fc)[0])
+                if cnt == 0:
+                    self._safe_delete(sub_fc)
+                    continue
+
+                total_converted += cnt
+                self._define_osm_source_projection(sub_fc)
+                projected_fc = os.path.join(self._scratch_gdb(), "osm_prj_{}_{}".format(arc_type, uuid.uuid4().hex[:8]))
+                arcpy.management.Project(sub_fc, projected_fc, boundary_sr)
+                self._safe_delete(sub_fc)
+                projected_fcs.append(projected_fc)
+
+            if not projected_fcs:
                 raise Exception(
                     "ArcGIS ei muuntanut Overpass-vastauksen {} kohdetta paikkatietokohteiksi."
                     .format(len(geojson.get("features", [])))
                 )
-            # Overpass palauttaa koordinaatit aina WGS84-longitude/latitude-
-            # muodossa, mutta GeoJSON-väliaineistoon ei välttämättä tallennu
-            # CRS-metadataa. Määritä lähde-CRS ennen Projectia, muuten ArcGIS
-            # antaa virheen 000517 (koordinaattijärjestelmää ei ole määritetty).
-            self._define_osm_source_projection(temp_fc)
-            projected_fc = os.path.join(self._scratch_gdb(), "osm_prj_{}".format(uuid.uuid4().hex[:10]))
-            arcpy.management.Project(temp_fc, projected_fc, boundary_sr)
-            self._safe_delete(temp_fc)
-            return [projected_fc], len(geojson.get("features", []))
+            return projected_fcs, total_converted
 
         # POI-haku voi olla tavallista OSM-tasoa tiheämpi, joten sille on
         # yksi lisääntynyt ruudutustaso ennen lopullista virhettä.
@@ -5153,7 +5210,7 @@ class VaylaWFSDownloader(object):
                         "row": row,
                         "col": col,
                     })
-            workers = min(max(1, int(getattr(self, "_tile_workers", 4) or 1)), 8, len(tile_plan))
+            workers = min(max(1, int(getattr(self, "_tile_workers", 8) or 1)), 16, len(tile_plan))
             if workers > 1:
                 with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
                     payloads = list(pool.map(
@@ -5163,6 +5220,66 @@ class VaylaWFSDownloader(object):
             else:
                 payloads = [self._download_oskari_wmts_tile(item["url"]) for item in tile_plan]
 
+            if not payloads:
+                raise Exception("Traficom WMTS ei palauttanut yhtään tiiltä.")
+
+            use_pil = False
+            try:
+                import io
+                from PIL import Image
+                use_pil = True
+            except ImportError:
+                use_pil = False
+
+            if use_pil:
+                cols = selected["last_col"] - selected["first_col"] + 1
+                rows = selected["last_row"] - selected["first_row"] + 1
+                total_w = cols * tile_width
+                total_h = rows * tile_height
+                mosaic_img = Image.new("RGBA", (total_w, total_h))
+                for item, raw in zip(tile_plan, payloads):
+                    tile_img = Image.open(io.BytesIO(raw))
+                    if tile_img.mode != "RGBA":
+                        tile_img = tile_img.convert("RGBA")
+                    c_off = (item["col"] - selected["first_col"]) * tile_width
+                    r_off = (item["row"] - selected["first_row"]) * tile_height
+                    mosaic_img.paste(tile_img, (c_off, r_off))
+
+                stitched_png = os.path.join(work_dir, "stitched.png")
+                mosaic_img.save(stitched_png, format="PNG")
+
+                class _TileExtent:
+                    pass
+                tile_ext = _TileExtent()
+                tile_ext.XMin = matrix["origin_x"] + selected["first_col"] * tile_w
+                tile_ext.XMax = matrix["origin_x"] + (selected["last_col"] + 1) * tile_w
+                tile_ext.YMax = matrix["origin_y"] - selected["first_row"] * tile_h
+                tile_ext.YMin = matrix["origin_y"] - (selected["last_row"] + 1) * tile_h
+                self._write_world_file(stitched_png, tile_ext, total_w, total_h)
+
+                final_path = os.path.join(
+                    workspace, "oskari_wmts_{}_{}.tif".format(
+                        self._sanitize_table_name(layer_name.split(":")[-1]),
+                        uuid.uuid4().hex[:8],
+                    )
+                )
+                arcpy.management.CopyRaster(stitched_png, final_path)
+                try:
+                    sr_code = int(arcpy.Describe(final_path).spatialReference.factoryCode or 0)
+                except Exception:
+                    sr_code = 0
+                if sr_code != 3067:
+                    arcpy.management.DefineProjection(final_path, arcpy.SpatialReference(3067))
+
+                self._msg(
+                    "[INFO] Oskari WMTS -mosaiikki valmis: {} ({}/{} laattaa, "
+                    "matriisi {}).".format(
+                        layer_title or layer_name, len(payloads), selected["tile_count"], matrix["id"]
+                    )
+                )
+                return final_path
+
+            # Fallback ilman PIL:iä
             for item, raw in zip(tile_plan, payloads):
                 with open(item["png_path"], "wb") as handle:
                     handle.write(raw)
@@ -5181,12 +5298,8 @@ class VaylaWFSDownloader(object):
             for png_path, tile_ext, color_type in png_paths:
                 rgb_path = os.path.splitext(png_path)[0] + "_rgb.tif"
                 if color_type == 3:
-                    # PNG:n IHDR-värityyppi 3 on paletti-indeksoitu.
                     self._colormap_to_rgb(png_path, rgb_path)
                 elif color_type in (0, 2, 4, 6):
-                    # RGB- ja RGBA-PNG:t menivät aiemmin tämän saman
-                    # CopyRaster-varareitin kautta epäonnistuneen
-                    # ColormapToRGB-kutsun jälkeen.
                     arcpy.management.CopyRaster(
                         png_path, rgb_path, format="TIFF"
                     )
@@ -5239,7 +5352,6 @@ class VaylaWFSDownloader(object):
                 "User-Agent": "ArcGISPro-KapsiBasemapTool/1.0",
                 "Accept": "image/jpeg",
                 "Accept-Encoding": "identity",
-                "Connection": "close",
             })
             try:
                 with urllib.request.urlopen(req, timeout=180) as resp:
@@ -5441,7 +5553,7 @@ class VaylaWFSDownloader(object):
                         "bounds": (t_xmin, t_ymin, t_xmax, t_ymax),
                     })
 
-            workers = max(1, int(getattr(self, "_tile_workers", 1) or 1))
+            workers = max(1, int(getattr(self, "_tile_workers", 8) or 8))
             workers = min(workers, len(batch_plan)) or 1
             if workers > 1:
                 with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
@@ -5939,7 +6051,7 @@ class VaylaWFSDownloader(object):
                         "column": column,
                     })
 
-            workers = max(1, int(getattr(self, "_tile_workers", 1) or 1))
+            workers = max(1, int(getattr(self, "_tile_workers", 8) or 8))
             workers = min(workers, len(tile_plan)) or 1
             if workers > 1:
                 with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
@@ -5953,6 +6065,75 @@ class VaylaWFSDownloader(object):
                     for item in tile_plan
                 ]
 
+            if not payloads:
+                raise Exception("MML WMTS ei palauttanut yhtään tiiltä.")
+
+            use_pil = False
+            try:
+                import io
+                from PIL import Image
+                use_pil = True
+            except ImportError:
+                use_pil = False
+
+            output_workspace = output_gdb or raster_dir
+            is_gdb = str(output_workspace).lower().endswith(".gdb")
+            output_stem = "MML_{}_RGB".format(layer_id)
+            if is_gdb:
+                output_base = self._unique_output_name(output_stem, output_workspace)
+            else:
+                output_base = self._validated_name(output_stem, output_workspace)
+                suffix = 1
+                while os.path.exists(os.path.join(output_workspace, output_base + ".tif")):
+                    output_base = "{}_{}".format(
+                        self._validated_name(output_stem, output_workspace), suffix
+                    )
+                    suffix += 1
+            output_name = output_base if is_gdb else output_base + ".tif"
+            final_path = os.path.join(output_workspace, output_name)
+
+            if use_pil:
+                cols = last_col - first_col + 1
+                rows = last_row - first_row + 1
+                total_w = cols * MML_WMTS_TILE_SIZE
+                total_h = rows * MML_WMTS_TILE_SIZE
+                mosaic_img = Image.new("RGB", (total_w, total_h))
+                for item, raw in zip(tile_plan, payloads):
+                    tile_img = Image.open(io.BytesIO(raw))
+                    if tile_img.mode != "RGB":
+                        tile_img = tile_img.convert("RGB")
+                    c_off = (item["column"] - first_col) * MML_WMTS_TILE_SIZE
+                    r_off = (item["row"] - first_row) * MML_WMTS_TILE_SIZE
+                    mosaic_img.paste(tile_img, (c_off, r_off))
+
+                stitched_png = os.path.join(temporary_dir, "stitched.png")
+                mosaic_img.save(stitched_png, format="PNG")
+
+                class _TileExtent:
+                    pass
+
+                tile_ext = _TileExtent()
+                tile_ext.XMin = MML_WMTS_ORIGIN_X + first_col * tile_span
+                tile_ext.XMax = MML_WMTS_ORIGIN_X + (last_col + 1) * tile_span
+                tile_ext.YMax = MML_WMTS_ORIGIN_Y - first_row * tile_span
+                tile_ext.YMin = MML_WMTS_ORIGIN_Y - (last_row + 1) * tile_span
+                self._write_world_file(
+                    stitched_png, tile_ext, total_w, total_h
+                )
+
+                arcpy.management.CopyRaster(stitched_png, final_path)
+                try:
+                    sr_code = int(arcpy.Describe(final_path).spatialReference.factoryCode or 0)
+                except Exception:
+                    sr_code = 0
+                if sr_code != MML_WMTS_EPSG:
+                    arcpy.management.DefineProjection(final_path, arcpy.SpatialReference(MML_WMTS_EPSG))
+                self._msg("[INFO] RGB-mosaiikki valmis: {}".format(final_path))
+                if is_gdb:
+                    self._msg("[INFO] Rasteri tallennettu geodatabaseen: {}".format(final_path))
+                return final_path
+
+            # Fallback ilman PIL:iä
             downloaded = 0
             for item, raw in zip(tile_plan, payloads):
                 png_path = item["png_path"]
@@ -5972,20 +6153,10 @@ class VaylaWFSDownloader(object):
                 )
                 png_paths.append((png_path, tile_ext))
                 downloaded += 1
-            self._msg(
-                "[EDISTYMINEN] Ladatut tiilet {}/{}".format(downloaded, tile_count)
-            )
 
-            self._msg(
-                "[INFO] Kaikkien tiilien lataus valmis: {}/{}".format(
-                    downloaded, tile_count
-                )
-            )
-            self._msg("[INFO] RGB-muunnos alkaa: {} PNG8-tiiltä.".format(len(png_paths)))
             for png_path, tile_ext in png_paths:
                 rgb_path = os.path.splitext(png_path)[0] + "_RGB.tif"
                 self._colormap_to_rgb(png_path, rgb_path)
-                # Varmista world/prj myös ColormapToRGB:n versiosta riippumatta.
                 self._write_world_file(
                     rgb_path, tile_ext, MML_WMTS_TILE_SIZE, MML_WMTS_TILE_SIZE
                 )
@@ -5994,25 +6165,6 @@ class VaylaWFSDownloader(object):
             if not rgb_paths:
                 raise Exception("MML WMTS ei palauttanut yhtään tiiltä.")
 
-            output_workspace = output_gdb or raster_dir
-            is_gdb = str(output_workspace).lower().endswith(".gdb")
-            output_stem = "MML_{}_RGB".format(layer_id)
-            if is_gdb:
-                output_base = self._unique_output_name(output_stem, output_workspace)
-            else:
-                output_base = self._validated_name(output_stem, output_workspace)
-                suffix = 1
-                while os.path.exists(os.path.join(output_workspace, output_base + ".tif")):
-                    output_base = "{}_{}".format(
-                        self._validated_name(output_stem, output_workspace), suffix
-                    )
-                    suffix += 1
-            output_name = output_base if is_gdb else output_base + ".tif"
-            final_path = os.path.join(output_workspace, output_name)
-            self._msg("[INFO] RGB-mosaiikki alkaa: {} RGB-TIFFiä.".format(len(rgb_paths)))
-
-            # Tärkeää: MosaicToNewRaster saa vain RGB-TIFFit. PNG8-kuvia ei
-            # koskaan yhdistetä suoraan, koska niiden väripaletit voivat erota.
             arcpy.management.MosaicToNewRaster(
                 rgb_paths,
                 output_workspace,
@@ -7670,11 +7822,16 @@ class VaylaWFSDownloader(object):
                     output["map_s"] = time.perf_counter() - map_start
                 else:
                     output["map_s"] = None
-                    self._warn(
-                        "[VAROITUS] Aineistoa '{}' ei lisätty kartalle: {}".format(
-                            p, add_error or "tuntematon syy"
+                    if add_error == "CURRENT" or (add_error and "CURRENT" in add_error):
+                        self._msg(
+                            "[INFO] Aineistoa ei lisätty kartalle (ei aktiivista ArcGIS Pro -karttanäyttöä)."
                         )
-                    )
+                    else:
+                        self._warn(
+                            "[VAROITUS] Aineistoa '{}' ei lisätty kartalle: {}".format(
+                                p, add_error or "tuntematon syy"
+                            )
+                        )
             else:
                 output["map_s"] = None
             if output.get("metrics"):
