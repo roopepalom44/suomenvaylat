@@ -47,6 +47,11 @@ class SuomenvaylatDialog(QDialog):
         layout.addWidget(buttons)
 
     @staticmethod
+    def _project_directory():
+        project_file = QgsProject.instance().fileName()
+        return str(Path(project_file).parent) if project_file else ""
+
+    @staticmethod
     def _scroll_page(content, layout):
         content.setLayout(layout)
         scroll = QScrollArea()
@@ -166,6 +171,7 @@ class SuomenvaylatDialog(QDialog):
         output_layout = QHBoxLayout(self.output_group)
         self.output = QLineEdit()
         self.output.setPlaceholderText("Kohdekansio ladattaville tiedostoille")
+        self.output.setText(self._project_directory())
         output_layout.addWidget(self.output)
         browse = QPushButton("Valitse…")
         browse.clicked.connect(self._choose_output)
@@ -247,7 +253,7 @@ class SuomenvaylatDialog(QDialog):
         self.background_key_label.setVisible(visible)
 
     def _choose_output(self):
-        path = QFileDialog.getExistingDirectory(self, "Valitse kohdekansio")
+        path = QFileDialog.getExistingDirectory(self, "Valitse kohdekansio", self.output.text().strip())
         if path:
             self.output.setText(path)
 

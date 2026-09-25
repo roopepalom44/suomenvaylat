@@ -17,3 +17,6 @@ Tässä versiossa toimivat WFS- ja OGC API Features -aineistojen haku aluerajauk
 - Julkaistaan samassa GitHub-releasessa ArcGIS Pro AddInX:n kanssa sekä QGISin omana asennus-ZIPinä että Windows-asennus-ZIPinä.
 - Traficom Oskari -lähde näyttää kaikki 76 tasoa. Suorat WFS-vastineet (57), Oskarin omat WFS-tasot (4), WMS-kuvatasot (10) ja WMTS-karttasarjat (5) tallentuvat alueen mukaan.
 - Oskarin WFS-, WMS- ja WMTS-lataus tarkistettu oikealla Traficomin palvelulla QGIS 3.44:ssä.
+## Suomenväylät QGIS 0.2.4
+
+- Tallennetun QGIS-projektin kansio täyttyy oletuksena ladattavien aineistojen tallennuskansioksi.

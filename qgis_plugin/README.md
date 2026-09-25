@@ -1,12 +1,12 @@
-# Suomenväylät QGIS (esijulkaisu 0.2.3)
+# Suomenväylät QGIS (esijulkaisu 0.2.4)
 
 QGIS 3.44:lle tehty erillinen, natiivi Python-lisäosa. ArcGIS Pro -laajennus pysyy samassa projektissa.
 
 ## Asennus
 
-**Windows, suoraviivainen asennus:** Lataa uusimmasta [yhteisestä julkaisusta](https://github.com/roopepalom44/suomenvaylat/releases/latest) `Suomenvaylat-QGIS-0.2.3-Windows.zip`, pura ZIP ja kaksoisnapsauta `install_windows.bat`. Sulje QGIS ennen asennusta. Asennin kopioi lisäosan käyttäjän kaikkiin olemassa oleviin QGIS 3 -profiileihin (tai luo `default`-profiilin) ja ottaa lisäosan käyttöön. Käynnistä QGIS asennuksen jälkeen.
+**Windows, suoraviivainen asennus:** Lataa uusimmasta [yhteisestä julkaisusta](https://github.com/roopepalom44/suomenvaylat/releases/latest) `Suomenvaylat-QGIS-0.2.4-Windows.zip`, pura ZIP ja kaksoisnapsauta `install_windows.bat`. Sulje QGIS ennen asennusta. Asennin kopioi lisäosan käyttäjän kaikkiin olemassa oleviin QGIS 3 -profiileihin (tai luo `default`-profiilin) ja ottaa lisäosan käyttöön. Käynnistä QGIS asennuksen jälkeen.
 
-**QGISin oma asennus:** Lataa samasta julkaisusta `Suomenvaylat-QGIS-0.2.3.zip` ja valitse QGISissä **Lisäosat → Hallitse ja asenna lisäosia → Asenna ZIP-tiedostosta**.
+**QGISin oma asennus:** Lataa samasta julkaisusta `Suomenvaylat-QGIS-0.2.4.zip` ja valitse QGISissä **Lisäosat → Hallitse ja asenna lisäosia → Asenna ZIP-tiedostosta**.
 
 ## Toimii tässä versiossa
 
@@ -18,6 +18,7 @@ QGIS 3.44:lle tehty erillinen, natiivi Python-lisäosa. ArcGIS Pro -laajennus py
 - OpenStreetMapin 27 tasoa Overpass-palvelun kautta. OSM-tägit säilytetään `tags`-JSON-kentässä.
 - Kapsin kolme WMS-taustakarttaa live-tasoina sekä MML:n kolme vektoritiilitaustakarttaa QGISin tunnistautumisasetuksella. Aino WMS ja MML Karttakuva voidaan lisätä live-tasoina; tunnukset säilytetään QGISin tunnistautumistietokannassa.
 - Traficomin Oskarin 76 tason dynaaminen luettelo: 61 vektoritasoa attribuutteineen sekä 10 WMS- ja viisi WMTS-karttatasoa GeoTIFF-kuvina.
+- Tallennetun QGIS-projektin kansio ehdotetaan aineistojen tallennuskansioksi. Tallentamaton projekti ei vielä anna oletuskansiota.
 
 ## Erot ArcGIS Pro -versioon
 
