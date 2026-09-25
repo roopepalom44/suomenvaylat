@@ -1061,6 +1061,8 @@ class VaylaWFSDownloader(object):
         self._layer_refresh_consumed = False
         # Rinnakkaiset rasterilaattojen lataukset (Kapsi/WMTS).
         self._tile_workers = 5
+        self._traficom_wmts_capabilities_root = None
+        self._traficom_wmts_capabilities_at = 0.0
         self._resources_dir_cache = "__unset__"
         self._admin_gpkg_cache = "__unset__"
         self._workspace_kind_cache = {}
@@ -4926,7 +4928,7 @@ class VaylaWFSDownloader(object):
                 with urllib.request.urlopen(request, timeout=90) as response:
                     raw = response.read()
                     content_type = (response.headers.get("Content-Type") or "").lower()
-                if not content_type.startswith("image/") or not raw.startswith(b"\x89PNG\r\n\x1a\n"):
+                if not content_type.startswith("image/") or len(raw) < 26 or not raw.startswith(b"\x89PNG\r\n\x1a\n"):
                     detail = raw[:250].decode("utf-8", errors="replace")
                     raise Exception(
                         "Traficom WMTS palautti PNG:n sijaan {}: {}".format(
@@ -4949,12 +4951,17 @@ class VaylaWFSDownloader(object):
     def _traficom_wmts_layer_metadata(self, layer_name):
         """Lue valitun Oskari-tason WMTS-matriisit ja sallitut tiilirajat."""
         endpoint = TRAFICOM_WMTS_ENDPOINT
-        request = urllib.request.Request(endpoint, headers={
-            "User-Agent": "ArcGISPro-Suomenvaylat-Oskari/1.0",
-            "Accept": "application/xml,text/xml",
-        })
-        with urllib.request.urlopen(request, timeout=60) as response:
-            root = ET.fromstring(response.read())
+        root = getattr(self, "_traficom_wmts_capabilities_root", None)
+        cached_at = float(getattr(self, "_traficom_wmts_capabilities_at", 0.0) or 0.0)
+        if root is None or time.time() - cached_at > 3600:
+            request = urllib.request.Request(endpoint, headers={
+                "User-Agent": "ArcGISPro-Suomenvaylat-Oskari/1.0",
+                "Accept": "application/xml,text/xml",
+            })
+            with urllib.request.urlopen(request, timeout=60) as response:
+                root = ET.fromstring(response.read())
+            self._traficom_wmts_capabilities_root = root
+            self._traficom_wmts_capabilities_at = time.time()
 
         selected_layer = None
         for elem in root.iter():
@@ -5169,18 +5176,25 @@ class VaylaWFSDownloader(object):
                 self._write_world_file(
                     item["png_path"], tile_ext, tile_width, tile_height
                 )
-                png_paths.append((item["png_path"], tile_ext))
+                png_paths.append((item["png_path"], tile_ext, raw[25]))
 
-            for png_path, tile_ext in png_paths:
+            for png_path, tile_ext, color_type in png_paths:
                 rgb_path = os.path.splitext(png_path)[0] + "_rgb.tif"
-                try:
+                if color_type == 3:
+                    # PNG:n IHDR-värityyppi 3 on paletti-indeksoitu.
                     self._colormap_to_rgb(png_path, rgb_path)
-                except Exception:
-                    # Traficomin WMTS palvelee sekä PNG8- että RGB-PNG-laattoja.
-                    # ColormapToRGB käsittelee vain palettikuvat; tavallinen
-                    # RGB-PNG kopioidaan suoraan GeoTIFFiksi.
+                elif color_type in (0, 2, 4, 6):
+                    # RGB- ja RGBA-PNG:t menivät aiemmin tämän saman
+                    # CopyRaster-varareitin kautta epäonnistuneen
+                    # ColormapToRGB-kutsun jälkeen.
                     arcpy.management.CopyRaster(
                         png_path, rgb_path, format="TIFF"
+                    )
+                else:
+                    raise Exception(
+                        "Traficom WMTS palautti tuntemattoman PNG-värityypin: {}".format(
+                            color_type
+                        )
                     )
                 self._write_world_file(rgb_path, tile_ext, tile_width, tile_height)
                 rgb_paths.append(rgb_path)

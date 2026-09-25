@@ -11,6 +11,7 @@ import os
 import pathlib
 import shutil
 import tempfile
+import time
 from collections import Counter
 
 import arcpy
@@ -141,6 +142,7 @@ def main():
                 )
             )
 
+        wms_started = time.perf_counter()
         wms_output = tool._download_oskari_wms_geotiff(
             layer_id="53",
             layer_name="TN_RUNWAYAREA",
@@ -149,12 +151,15 @@ def main():
             boundary_fc=boundary,
             workspace=temporary_directory,
         )
+        wms_seconds = time.perf_counter() - wms_started
+        wmts_started = time.perf_counter()
         wmts_output = tool._download_oskari_wmts_geotiff(
             layer_name="Traficom:Yleiskartat 250k public",
             layer_title="Yleiskartat 250k",
             boundary_fc=boundary,
             workspace=temporary_directory,
         )
+        wmts_seconds = time.perf_counter() - wmts_started
         raster_results = {}
         for service, raster_path in (("WMS", wms_output), ("WMTS", wmts_output)):
             if not arcpy.Exists(raster_path):
@@ -187,6 +192,7 @@ def main():
             "geometry_type": shape_type,
             "spatial_reference": spatial_code,
             "raster_results": raster_results,
+            "raster_seconds": {"WMS": round(wms_seconds, 3), "WMTS": round(wmts_seconds, 3)},
             "result": "passed",
         }, ensure_ascii=False))
     finally:
