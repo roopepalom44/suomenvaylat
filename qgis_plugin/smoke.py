@@ -15,6 +15,8 @@ geometry, crs = selection_geometry('Maakunta', names[:1])
 assert not geometry.isEmpty() and crs.authid() == 'EPSG:3067'
 print('areas passed', len(names), flush=True)
 dialog = SuomenvaylatDialog()
+assert any(dialog.sources.item(index).text() == 'Traficom Oskari'
+           for index in range(dialog.sources.count()))
 from qgis.PyQt.QtCore import Qt
 for index in range(dialog.sources.count()):
     if dialog.sources.item(index).text() == 'DigiRoad':

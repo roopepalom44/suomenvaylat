@@ -73,7 +73,7 @@ class SuomenvaylatDialog(QDialog):
         self.sources = QListWidget()
         self.sources.setMaximumHeight(130)
         source_names = list(dict.fromkeys(list(WFS_SOURCES) + list(OGC_SOURCES) +
-                                          ["Kapsi", "OpenStreetMap", "MML Karttakuva"]))
+                                          ["Kapsi", "OpenStreetMap", "MML Karttakuva", "Traficom Oskari"]))
         for source_name in source_names:
             item = QListWidgetItem(source_name)
             item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
@@ -421,7 +421,7 @@ class SuomenvaylatDialog(QDialog):
                 path = None
                 if entry["kind"] not in live_kinds:
                     base = "".join(ch if ch.isalnum() or ch in "_-" else "_" for ch in entry["id"].split(":")[-1])[:60]
-                    extension = ".tif" if entry["kind"] == "kapsi_wms" else ".gpkg"
+                    extension = ".tif" if entry["kind"] in {"kapsi_wms", "oskari_wms", "oskari_wmts"} else ".gpkg"
                     path = Path(folder) / f"{base}{extension}"
                     suffix = 2
                     while path.exists():
@@ -442,7 +442,7 @@ class SuomenvaylatDialog(QDialog):
                                 raise DownloadCanceled()
                         count = download(entry, mask, crs, path,
                                          self._key_for_source(entry["source"]), update_count)
-                        successes.append(f"{entry['title']}: {count} {'rasteri' if entry['kind'] == 'kapsi_wms' else 'kohdetta'}")
+                        successes.append(f"{entry['title']}: {count} {'rasteri' if entry['kind'] in {'kapsi_wms', 'oskari_wms', 'oskari_wmts'} else 'kohdetta'}")
                 except DownloadCanceled:
                     if path is not None:
                         path.unlink(missing_ok=True)

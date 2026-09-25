@@ -7,6 +7,8 @@ import math
 import re
 import tempfile
 import time
+import unicodedata
+import uuid
 from functools import lru_cache
 import urllib.parse
 import urllib.request
@@ -54,6 +56,13 @@ OVERPASS_ENDPOINTS = [
     "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
     "https://overpass-api.de/api/interpreter",
 ]
+OSKARI_ENDPOINT = "https://julkinen.traficom.fi/oskari/action"
+OSKARI_WMTS_ENDPOINT = "https://julkinen.traficom.fi/rasteripalvelu/wmts"
+TRAFICOM_WFS_ENDPOINTS = (
+    "https://julkinen.traficom.fi/inspirepalvelu/avoin/wfs",
+    "https://julkinen.traficom.fi/inspirepalvelu/rajoitettu/wfs",
+    "https://julkinen.traficom.fi/inspirepalvelu/ilmaliikenne/wfs",
+)
 ADMIN_LAYERS = {
     "Koko Suomi": "Valtakunta", "Elinvoimakeskus": "Elinvoimakeskus",
     "Hyvinvointialue": "Hyvinvointialue", "Maakunta": "Maakunta",
@@ -73,6 +82,8 @@ def _request_json(url, key=""):
 def catalog(source, api_key="", password=""):
     """Fetch live WFS/OGC API catalog. Entries contain source, id and endpoint."""
     entries, errors = [], []
+    if source == "Traficom Oskari":
+        return _oskari_catalog()
     if source == "MML Karttakuva":
         if not api_key or not password:
             raise ValueError("MML Karttakuva vaatii käyttäjätunnuksen ja salasanan")
@@ -179,6 +190,54 @@ def catalog(source, api_key="", password=""):
     return entries, errors
 
 
+def _oskari_catalog():
+    query = urllib.parse.urlencode({"action_route": "GetHierarchicalMapLayerGroups",
+                                     "srs": "EPSG:3067", "lang": "fi"})
+    data = _request_json(OSKARI_ENDPOINT + "?" + query)
+    if not isinstance(data, dict) or not isinstance(data.get("layers"), list):
+        raise RuntimeError("Traficomin Oskari ei palauttanut tasoluetteloa")
+    wfs_by_name = {}
+    errors = []
+    for endpoint in TRAFICOM_WFS_ENDPOINTS:
+        try:
+            url = endpoint + "?SERVICE=WFS&REQUEST=GetCapabilities"
+            with urllib.request.urlopen(url, timeout=60) as response:
+                root = ET.fromstring(response.read())
+            for feature_type in root.iter():
+                if feature_type.tag.split("}")[-1] != "FeatureType":
+                    continue
+                name = next(((child.text or "").strip() for child in feature_type
+                             if child.tag.split("}")[-1] == "Name"), "")
+                if name:
+                    key = unicodedata.normalize("NFKC", name.split(":")[-1]).strip().casefold()
+                    wfs_by_name.setdefault(key, (name, endpoint))
+        except Exception as exc:
+            errors.append(f"{endpoint}: {exc}")
+    entries = []
+    for item in data["layers"]:
+        if not isinstance(item, dict) or not item.get("id"):
+            continue
+        layer_id = str(item["id"])
+        layer_name = str(item.get("layerName") or "").strip()
+        catalog_type = str(item.get("type") or "").strip().lower()
+        title = str(item.get("name") or layer_name or layer_id).strip()
+        if catalog_type == "wfslayer":
+            kind, request_id, endpoint = "oskari_wfs", layer_id, OSKARI_ENDPOINT
+        elif catalog_type == "wmslayer":
+            key = unicodedata.normalize("NFKC", layer_name.split(":")[-1]).strip().casefold()
+            match = wfs_by_name.get(key)
+            kind, request_id, endpoint = ("wfs", *match) if match else ("oskari_wms", layer_id, OSKARI_ENDPOINT)
+        elif catalog_type == "wmtslayer":
+            kind, request_id, endpoint = "oskari_wmts", layer_id, OSKARI_WMTS_ENDPOINT
+        else:
+            kind, request_id, endpoint = "oskari_wms", layer_id, OSKARI_ENDPOINT
+        entries.append({"source": "Traficom Oskari", "kind": kind, "id": request_id,
+                        "title": title, "endpoint": endpoint, "layer_name": layer_name,
+                        "catalog_id": layer_id, "catalog_type": catalog_type,
+                        "style": item.get("style")})
+    return entries, errors
+
+
 def admin_path():
     return Path(__file__).parent / "resources" / "hallinnolliset_aluejaot.gpkg"
 
@@ -244,7 +303,55 @@ def download(entry, mask, mask_crs, destination, key="", progress=None):
         return _download_osm(entry, mask, mask_crs, destination, progress)
     if entry["kind"] == "ogc":
         return _download_ogc(entry, mask, mask_crs, destination, key, progress)
+    if entry["kind"] == "oskari_wms":
+        return _download_oskari_wms(entry, mask, mask_crs, destination)
+    if entry["kind"] == "oskari_wmts":
+        return _download_oskari_wmts(entry, mask, mask_crs, destination)
+    if entry["kind"] == "oskari_wfs":
+        project = QgsProject.instance()
+        target = QgsCoordinateReferenceSystem("EPSG:3067")
+        selected = QgsGeometry(mask)
+        selected.transform(QgsCoordinateTransform(mask_crs, target, project))
+        bounds = selected.boundingBox()
+        bbox = ",".join(str(value) for value in (bounds.xMinimum(), bounds.yMinimum(),
+                                                 bounds.xMaximum(), bounds.yMaximum()))
+        url = entry["endpoint"] + "?" + urllib.parse.urlencode({
+            "action_route": "GetWFSFeatures", "id": entry["id"],
+            "srs": "EPSG:3067", "bbox": bbox})
+        data = _request_json(url)
+        if not isinstance(data, dict) or not isinstance(data.get("features"), list):
+            raise RuntimeError("Oskari ei palauttanut GeoJSON-kohteita")
+        crs = data.get("crs") or {}
+        crs_name = (crs.get("properties") or {}).get("name") if isinstance(crs, dict) else None
+        if crs_name and "3067" not in str(crs_name):
+            raise RuntimeError(f"Oskari palautti väärän koordinaatiston: {crs_name}")
+        if not data["features"]:
+            raise RuntimeError("Rajauksesta ei löytynyt kohteita")
+        from osgeo import gdal
+        path = "/vsimem/suomenvaylat_oskari_" + uuid.uuid4().hex + ".geojson"
+        # GDAL exposes a top-level feature id as an ID field. Oskari also
+        # has an ID property, so retain the property and avoid collision.
+        for feature in data["features"]:
+            feature.pop("id", None)
+        data["crs"] = {"type": "name", "properties": {"name": "EPSG:3067"}}
+        gdal.FileFromMemBuffer(path, json.dumps(data, ensure_ascii=False).encode("utf-8"))
+        layer = None
+        try:
+            layer = QgsVectorLayer(path, entry["title"], "ogr")
+            if not layer.isValid() or layer.featureCount() != len(data["features"]):
+                raise RuntimeError("QGIS ei avannut kaikkia Oskarin vektorikohteita")
+            layer.setCrs(target)
+            return _download_vector_layer(entry, layer, mask, mask_crs, destination, progress)
+        finally:
+            if layer is not None:
+                from qgis.PyQt import sip
+                sip.delete(layer)
+            gdal.Unlink(path)
     layer = _open_remote_layer(entry)
+    return _download_vector_layer(entry, layer, mask, mask_crs, destination, progress)
+
+
+def _download_vector_layer(entry, layer, mask, mask_crs, destination, progress=None):
     project = QgsProject.instance()
     to_source = QgsCoordinateTransform(mask_crs, layer.crs(), project)
     source_mask = QgsGeometry(mask)
@@ -291,6 +398,104 @@ def download(entry, mask, mask_crs, destination, key="", progress=None):
         raise RuntimeError("Tallennettu taso ei avaudu")
     project.addMapLayer(output)
     return count
+
+
+def _download_oskari_wms(entry, mask, mask_crs, destination):
+    """Save an Oskari map image as a georeferenced GeoTIFF."""
+    from osgeo import gdal
+    target = QgsCoordinateReferenceSystem("EPSG:3067")
+    selected = QgsGeometry(mask)
+    selected.transform(QgsCoordinateTransform(mask_crs, target, QgsProject.instance()))
+    ext = selected.boundingBox()
+    if ext.width() <= 0 or ext.height() <= 0:
+        raise ValueError("Rajauksen laajuus ei riitä Oskari-karttakuvan lataukseen")
+    layer_name = entry.get("layer_name") or ""
+    if not layer_name:
+        raise ValueError("Oskarin WMS-tasolta puuttuu tekninen nimi")
+    style = entry.get("style") or ""
+    if isinstance(style, (list, tuple)):
+        style = ",".join(map(str, style))
+    elif isinstance(style, dict):
+        style = style.get("name") or style.get("id") or ""
+    scale = 2048 / max(ext.width(), ext.height())
+    width = max(1, min(2048, round(ext.width() * scale)))
+    height = max(1, min(2048, round(ext.height() * scale)))
+    params = {"action_route": "GetLayerTile", "id": entry["catalog_id"],
+              "SERVICE": "WMS", "REQUEST": "GetMap", "VERSION": "1.1.1",
+              "LAYERS": layer_name, "STYLES": style, "SRS": "EPSG:3067",
+              "BBOX": ",".join(map(str, (ext.xMinimum(), ext.yMinimum(),
+                                     ext.xMaximum(), ext.yMaximum()))),
+              "WIDTH": width, "HEIGHT": height, "FORMAT": "image/png",
+              "TRANSPARENT": "TRUE"}
+    request = urllib.request.Request(entry["endpoint"] + "?" + urllib.parse.urlencode(params),
+                                     headers={"Accept": "image/png"})
+    with urllib.request.urlopen(request, timeout=180) as response:
+        raw = response.read()
+        content_type = response.headers.get("Content-Type", "").lower()
+    if not content_type.startswith("image/") or not raw.startswith(b"\x89PNG\r\n\x1a\n"):
+        raise RuntimeError("Oskari WMS ei palauttanut PNG-kuvaa")
+    destination = Path(destination).with_suffix(".tif")
+    with tempfile.TemporaryDirectory(prefix="suomenvaylat_oskari_wms_") as temp:
+        png = Path(temp) / "image.png"
+        png.write_bytes(raw)
+        result = gdal.Translate(str(destination), str(png), outputSRS="EPSG:3067",
+                                outputBounds=[ext.xMinimum(), ext.yMaximum(),
+                                              ext.xMaximum(), ext.yMinimum()],
+                                creationOptions=["TILED=YES", "COMPRESS=DEFLATE"])
+        if result is None:
+            raise RuntimeError("Oskari-karttakuvan GeoTIFF-tallennus epäonnistui")
+        result = None
+    layer = QgsRasterLayer(str(destination), entry["title"])
+    if not layer.isValid():
+        destination.unlink(missing_ok=True)
+        raise RuntimeError("Tallennettu Oskari-karttakuva ei avaudu")
+    QgsProject.instance().addMapLayer(layer)
+    return 1
+
+
+def _download_oskari_wmts(entry, mask, mask_crs, destination):
+    """Read the service's EPSG:3067 tile matrix through GDAL and save a GeoTIFF."""
+    from osgeo import gdal
+    target = QgsCoordinateReferenceSystem("EPSG:3067")
+    selected = QgsGeometry(mask)
+    selected.transform(QgsCoordinateTransform(mask_crs, target, QgsProject.instance()))
+    ext = selected.boundingBox()
+    if ext.width() <= 0 or ext.height() <= 0:
+        raise ValueError("Rajauksen laajuus ei riitä Oskari-WMTS:n lataukseen")
+    capabilities = entry["endpoint"] + "?service=WMTS&request=GetCapabilities"
+    container = gdal.Open("WMTS:" + capabilities)
+    if container is None:
+        raise RuntimeError("Traficomin WMTS-palvelua ei voitu avata")
+    layer_name = entry.get("layer_name") or ""
+    source_name = next((name for name, _description in container.GetSubDatasets()
+                        if f'layer="{layer_name}"' in name and
+                        "tilematrixset=ETRS89_TM35-FIN" in name), None)
+    if not source_name:
+        raise RuntimeError(f"WMTS-palvelusta puuttuu EPSG:3067-taso: {layer_name}")
+    source = gdal.Open(source_name)
+    if source is None:
+        raise RuntimeError(f"WMTS-tasoa ei voitu avata: {layer_name}")
+    native_res = abs(source.GetGeoTransform()[1])
+    # Limit a single request to roughly 256 256-pixel tiles, as in ArcGIS Pro.
+    resolution = native_res
+    while math.ceil(ext.width() / (256 * resolution)) * math.ceil(ext.height() / (256 * resolution)) > 256:
+        resolution *= 2
+    destination = Path(destination).with_suffix(".tif")
+    result = gdal.Translate(str(destination), source,
+                            projWin=[ext.xMinimum(), ext.yMaximum(),
+                                     ext.xMaximum(), ext.yMinimum()],
+                            xRes=resolution, yRes=resolution,
+                            creationOptions=["TILED=YES", "COMPRESS=DEFLATE"])
+    if result is None:
+        destination.unlink(missing_ok=True)
+        raise RuntimeError("Oskari-WMTS:n GeoTIFF-tallennus epäonnistui")
+    result = None
+    layer = QgsRasterLayer(str(destination), entry["title"])
+    if not layer.isValid():
+        destination.unlink(missing_ok=True)
+        raise RuntimeError("Tallennettu Oskari-WMTS ei avaudu")
+    QgsProject.instance().addMapLayer(layer)
+    return 1
 
 
 def _osm_query(entry, bbox):
