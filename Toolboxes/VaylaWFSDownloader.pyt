@@ -79,6 +79,8 @@ MML_WMTS_DEFAULT_LEVEL = 9
 MML_WMTS_MAX_TILES = 256
 
 TRAFICOM_OPEN_WFS_ENDPOINT = "https://julkinen.traficom.fi/inspirepalvelu/avoin/wfs"
+TRAFICOM_RAJOITETTU_WFS_ENDPOINT = "https://julkinen.traficom.fi/inspirepalvelu/rajoitettu/wfs"
+TRAFICOM_ILMALIIKENNE_WFS_ENDPOINT = "https://julkinen.traficom.fi/inspirepalvelu/ilmaliikenne/wfs"
 TRAFICOM_WMTS_ENDPOINT = "https://julkinen.traficom.fi/rasteripalvelu/wmts?service=WMTS&request=GetCapabilities"
 
 
@@ -2443,31 +2445,25 @@ class VaylaWFSDownloader(object):
             )
 
         wfs_by_name = {}
-        wfs_error = None
-        wfs_features = None
-        for attempt in range(1, 4):
-            try:
-                wfs_features = self._fetch_wfs_capabilities_with_headers(
-                    TRAFICOM_OPEN_WFS_ENDPOINT
-                )
-                wfs_error = None
-                break
-            except Exception as ex:
-                wfs_error = ex
-                if attempt < 3:
-                    time.sleep(0.5 * attempt)
-        if wfs_error is None:
+        for ep in (
+            TRAFICOM_OPEN_WFS_ENDPOINT,
+            TRAFICOM_RAJOITETTU_WFS_ENDPOINT,
+            TRAFICOM_ILMALIIKENNE_WFS_ENDPOINT,
+        ):
+            wfs_features = None
+            for attempt in range(1, 4):
+                try:
+                    wfs_features = self._fetch_wfs_capabilities_with_headers(ep)
+                    break
+                except Exception:
+                    if attempt < 3:
+                        time.sleep(0.3 * attempt)
             for feature_type in wfs_features or []:
                 feature_id = str(feature_type.get("id") or "").strip()
                 if feature_id:
-                    wfs_by_name[self._wms_match_key(feature_id.split(":")[-1])] = feature_id
-        else:
-            self._warn(
-                "[VAROITUS] Traficomin avoimen WFS:n tasoluetteloa ei saatu: {}. "
-                "Oskarin karttatasot jäävät silti käytettäviksi karttakuvina.".format(
-                    self._redact_secrets(wfs_error)
-                )
-            )
+                    key = self._wms_match_key(feature_id.split(":")[-1])
+                    if key not in wfs_by_name:
+                        wfs_by_name[key] = (feature_id, ep)
 
         layers = []
         for item in data.get("layers", []):
@@ -2491,13 +2487,12 @@ class VaylaWFSDownloader(object):
                 request_id = layer_id
                 layer_endpoint = endpoint
             elif catalog_type == "wmslayer":
-                direct_wfs_id = wfs_by_name.get(
+                direct_wfs_match = wfs_by_name.get(
                     self._wms_match_key(layer_name.split(":")[-1])
                 )
-                if direct_wfs_id:
+                if direct_wfs_match:
                     kind = "wfs"
-                    request_id = direct_wfs_id
-                    layer_endpoint = TRAFICOM_OPEN_WFS_ENDPOINT
+                    request_id, layer_endpoint = direct_wfs_match
                 else:
                     kind = "oskari_wms"
                     request_id = layer_id

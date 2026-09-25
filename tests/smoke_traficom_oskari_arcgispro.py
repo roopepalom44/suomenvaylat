@@ -80,9 +80,9 @@ def main():
             )
         download_methods = Counter(layer.get("kind") for layer in catalog)
         expected_method_minimums = {
-            "wfs": 31,
+            "wfs": 55,
             "oskari_wfs": 4,
-            "oskari_wms": 35,
+            "oskari_wms": 10,
             "oskari_wmts": 5,
         }
         if any(download_methods.get(kind, 0) < count for kind, count in expected_method_minimums.items()):

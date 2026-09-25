@@ -18,16 +18,19 @@ Oskarin kaikki luettelotasot näytetään **Traficom Oskari** -valikossa,
 mukaan lukien palveluun liitettyjen muiden organisaatioiden tasot. Aineiston
 palvelutyyppi määrää, miten se ladataan:
 
-- Oskarin `wfslayer`-tasot haetaan `GetWFSFeatures`-toiminnolla.
-- WMS-tasot, joiden tekniselle nimelle löytyy avoimen WFS:n FeatureType,
-  ladataan vektorina osoitteesta `inspirepalvelu/avoin/wfs`.
-- Muut WMS-tasot haetaan Oskarin `GetLayerTile`-välityspalvelun kautta
+- Oskarin `wfslayer`-tasot (4 kpl) haetaan `GetWFSFeatures`-toiminnolla suoraan Oskarin API:sta.
+- WMS-tasot, joiden tekniselle nimelle löytyy Traficomin WFS:n FeatureType,
+  ladataan aitoina WFS-vektoreina suoraan kolmesta Traficomin palvelusta (yhteensä 57 tasoa):
+  - `inspirepalvelu/avoin/wfs` (32 tasoa: laiturit, ponttonit, rantarakenteet, väylät, aluemeret, talousvyöhyke, sulut, karttatuotteet)
+  - `inspirepalvelu/rajoitettu/wfs` (12 tasoa: syvyyskäyrät, syvyysalueet, syvyyspisteet, DW-reitit, varoalueet, ruoppausalueet, TSS)
+  - `inspirepalvelu/ilmaliikenne/wfs` (13 tasoa: kiitotiealueet, ilmatilat, CTR, lentoväylät, lähestymiset, navaidit)
+- Muut WMS-tasot (10 kpl) haetaan Oskarin `GetLayerTile`-välityspalvelun kautta
   aluerajauksen georeferoituna PNG-kuvana ja tallennetaan GeoTIFFiksi.
-- WMTS-tasot ladataan `rasteripalvelu/wmts`-palvelun tiilistä ja yhdistetään
+- WMTS-tasot (5 kpl virallisia merikarttasarjoja) ladataan `rasteripalvelu/wmts`-palvelun tiilistä ja yhdistetään
   GeoTIFF-mosaiikiksi.
 
-WMS/WMTS-karttakuvat ovat katselutasojen kuvallisia esityksiä. Niistä ei synny
-vektorikohteita tai attribuuttitauluja.
+Yhteensä 61 tasoa 76:sta (80 %) ladataan täysinä vektorikohteina attribuutteineen. WMS/WMTS-karttakuvat
+ovat katselutasojen kuvallisia esityksiä (esim. viralliset painetut merikartat).
 
 ## Vektorikohteiden haku
 
@@ -80,8 +83,8 @@ Täysi geoprocessing-ajo testattiin ArcGIS Pro 3.7:n Python-ympäristössä:
   'tests\smoke_traficom_oskari_arcgispro.py'
 ```
 
-Smoke-testi varmisti, että kaikki 76 tasoa näkyvät valikossa (32 WFS-vastinetta,
-neljä Oskarin omaa WFS-tasoa, 35 WMS-kuvatasoa ja viisi WMTS-tasoa). Se latasi
+Smoke-testi varmisti, että kaikki 76 tasoa näkyvät valikossa (57 suoraa WFS-vastinetta,
+neljä Oskarin omaa WFS-tasoa, 10 WMS-kuvatasoa ja viisi WMTS-tasoa). Se latasi
 natiivin WFS-tason, WMS-rasterin ja WMTS-mosaiikin oikeilla ArcPy-toiminnoilla.
 Tuloksena oli yksi Polyline-kohde EPSG:3067:ssä, WMS GeoTIFF (2048 × 1280) ja
 WMTS GeoTIFF (2816 × 1792, 77 tiiltä); kaikkien tulosten koordinaatisto oli
@@ -95,6 +98,7 @@ jälkeen:
 tests/smoke_traficom_oskari_arcgispro.py
 ```
 
-Käsin ArcGIS Prossa voit valita Traficom Oskari -lähteestä joko
-**Matkustaja-alusten D-alueet** tai WFS-vastineen kuten **Runway Area**
-vektoritulokseksi. Muut WMS- ja WMTS-tasot tuottavat georeferoidun rasterin.
+Käsin ArcGIS Prossa valitsemalla Traficom Oskari -lähteestä minkä tahansa 61:stä
+vektoritasosta (kuten **Syvyyskäyrät**, **Syvyysalueet**, **Kiitotiet / Runway Area**
+tai **Matkustaja-alusten D-alueet**) saadaan aito vektorikohdeluokka. Ainoastaan
+merikarttojen rasterisarjat (WMTS) ja ulkoiset katselutasot tuottavat georeferoidun rasterin.
