@@ -267,7 +267,8 @@ class SuomenvaylatDialog(QDialog):
             source_names = [self.sources.item(i).text() for i in range(self.sources.count())
                             if self.sources.item(i).checkState() == Qt.Checked]
             if not source_names:
-                raise ValueError("Valitse vähintään yksi rajapinta")
+                self._filter_catalog()
+                return
             loaded_entries = []
             for source_name in source_names:
                 try:
@@ -281,7 +282,8 @@ class SuomenvaylatDialog(QDialog):
             self.entries = loaded_entries
             available = {self._entry_key(entry): entry for entry in self.entries}
             self._selected_entries = {
-                key: available[key] for key in self._selected_entries if key in available
+                key: available.get(key, entry)
+                for key, entry in self._selected_entries.items()
             }
             self._filter_catalog()
             if not self.entries:

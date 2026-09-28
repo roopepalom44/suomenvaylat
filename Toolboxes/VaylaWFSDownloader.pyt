@@ -1821,6 +1821,34 @@ class VaylaWFSDownloader(object):
                     pass
         return source_values
 
+    def _sources_for_layers(self, labels):
+        """Palauta valittujen tasojen lähteet myös piilotetuista valinnoista."""
+        registry = getattr(self, "wfs_registry", None) or WFSSourceRegistry()
+        sources = registry.get_sources_list()
+        result = []
+        for label in labels:
+            info = self._layer_mapping.get(label) or {}
+            source = info.get("source")
+            if not source:
+                clean_label = str(label).strip().strip("'").strip('"')
+                source = next((name for name in sources if
+                               clean_label.endswith(" - " + name) or
+                               " - " + name + " (" in clean_label), None)
+            if source and source not in result:
+                result.append(source)
+        return result
+
+    def _layer_catalog_cache_key(self, source_values):
+        """Sama lähde- ja tunnusavain katalogin näytölle sekä lataukselle."""
+        return "catalog-v2|{}|mml:{}|kartta:{}|kk:{}:{}|aino:{}".format(
+            "|".join(source_values),
+            self._secret_cache_key(self._runtime_mml_api_key),
+            self._secret_cache_key(self._runtime_karttapaikka_api_key),
+            self._secret_cache_key(self._runtime_karttakuva_user),
+            self._secret_cache_key(self._runtime_karttakuva_pass),
+            self._secret_cache_key(self._runtime_aino_token),
+        )
+
     @staticmethod
     def _is_layer_placeholder(value):
         """Tunnista UI:n tyhjän hakutuloksen viesti, ei oikea tasovalinta."""
@@ -6400,13 +6428,7 @@ class VaylaWFSDownloader(object):
 
             # Versioi avain, jotta vanhan 113 WFS -tason Aino-välimuisti ei
             # peitä uuden version 175 WMS -valintaa päivityksen jälkeen.
-            source_key = "catalog-v2|{}|mml:{}|kartta:{}|kk:{}:{}|aino:{}".format(
-                "|".join(source_values), self._secret_cache_key(mml_api_key),
-                self._secret_cache_key(karttapaikka_api_key),
-                self._secret_cache_key(karttakuva_user),
-                self._secret_cache_key(karttakuva_pass),
-                self._secret_cache_key(aino_token)
-            )
+            source_key = self._layer_catalog_cache_key(source_values)
             self._last_layer_source_key = source_key
             refresh_requested = bool(
                 parameters[11].value if len(parameters) > 11 else False
@@ -6452,22 +6474,43 @@ class VaylaWFSDownloader(object):
                 q = self._norm(layer_search)
                 filtered_layers = [x for x in filtered_layers if q in self._norm(x)]
 
-            # Tyhjää tulosta ei saa lisätä oikeana GPString-valintana. Aiempi
-            # placeholder päätyi muuten execute-vaiheessa ladattavaksi
-            # tasoksi ja aiheutti turhan määritystä ei löytynyt -virheen.
-            valid_layers = {self._norm(value) for value in filtered_layers}
+            # ValueList on myös ArcGIS Pron monivalinnan validointilista.
+            # Pidä jo valitut tasot listalla, vaikka ne eivät enää vastaisi
+            # hakua tai niiden lähde olisi poistettu rajapintavalinnasta.
+            # Muuten Pro pudottaa ne parametrista ennen execute-vaihetta.
             valid_selection = [
                 value for value in selected_before
                 if not self._is_layer_placeholder(value)
-                and self._norm(value) in valid_layers
             ]
+            displayed_layers = list(valid_selection)
+            displayed_keys = {self._norm(value) for value in displayed_layers}
+            for value in filtered_layers:
+                key = self._norm(value)
+                if key not in displayed_keys:
+                    displayed_layers.append(value)
+                    displayed_keys.add(key)
+            # Säilytä aiempien lähteiden valittujen tasojen määritykset myös
+            # tunnusten tarkistusta varten. Nykyisen haun määritys on etusijalla.
+            current_mapping = dict(self._layer_mapping)
+            for mapping in self._layer_mapping_cache.values():
+                for value in valid_selection:
+                    if value in mapping and value not in current_mapping:
+                        current_mapping[value] = mapping[value]
+            self._layer_mapping = current_mapping
+            selected_sources = self._sources_for_layers(valid_selection)
+            parameters[7].enabled = uses_mml or "MML" in selected_sources
+            parameters[8].enabled = uses_karttapaikka or "Karttapaikka" in selected_sources
+            parameters[9].enabled = uses_karttakuva or "MML Karttakuva" in selected_sources
+            parameters[10].enabled = parameters[9].enabled
+            if len(parameters) > 12:
+                parameters[12].enabled = uses_aino or "Aino" in selected_sources
             try:
                 current_filter = list(parameters[2].filter.list or [])
             except Exception:
                 current_filter = None
-            filter_changed = current_filter != filtered_layers
+            filter_changed = current_filter != displayed_layers
             if filter_changed:
-                parameters[2].filter.list = filtered_layers
+                parameters[2].filter.list = displayed_layers
 
             if selected_before:
                 if valid_selection:
@@ -6703,6 +6746,9 @@ class VaylaWFSDownloader(object):
             value for value in self._parse_multivalue_param(parameters[2])
             if not self._is_layer_placeholder(value)
         ]
+        needed_sources = list(dict.fromkeys(
+            source_names + self._sources_for_layers(layers)
+        ))
         extent_type = parameters[3].valueAsText
         extent_value_text = parameters[4].valueAsText
         custom_layer = parameters[5].valueAsText
@@ -6730,7 +6776,7 @@ class VaylaWFSDownloader(object):
             self._error("[VIRHE] Valitsit 'Oma aineisto', mutta rajausaineisto puuttuu.")
             raise arcpy.ExecuteError
 
-        if "Aino" in source_names and not aino_token:
+        if "Aino" in needed_sources and not aino_token:
             self._error("[VIRHE] Aino-rajapinta vaatii tokenin.")
             raise arcpy.ExecuteError
 
@@ -6866,18 +6912,12 @@ class VaylaWFSDownloader(object):
                 )
             )
 
-        # Always rebuild mapping from cache so it matches the current source selection
+        # Valittujen tasojen lähteet voivat olla poissa nykyisestä rajapintalistasta.
+        # Hae määritykset niitä vastaavalla välimuistiavaimella.
         definitions_start = time.perf_counter()
-        all_available_sources = self.wfs_registry.get_sources_list()
-        needed_sources = set(source_names or [])
-        for layer_str in layers:
-            l_clean = layer_str.strip().strip("'").strip('"')
-            for src in all_available_sources:
-                if l_clean.endswith(" - " + src) or (" - " + src) in l_clean:
-                    needed_sources.add(src)
         self._fetch_layer_list(
-            list(needed_sources),
-            cache_key=getattr(self, "_last_layer_source_key", None),
+            needed_sources,
+            cache_key=self._layer_catalog_cache_key(needed_sources),
         )
         self._tool_metrics.set(
             "tasomääritysten muodostaminen", time.perf_counter() - definitions_start

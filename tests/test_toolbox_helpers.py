@@ -765,6 +765,81 @@ class ToolboxHelperTests(unittest.TestCase):
         self.assertEqual([layer], parameters[2].values)
         self.assertEqual([layer], parameters[2].filter.list)
 
+    def test_selected_layers_survive_search_and_source_changes(self):
+        class Filter:
+            def __init__(self, owner=None):
+                self.owner = owner
+                self._list = []
+
+            @property
+            def list(self):
+                return self._list
+
+            @list.setter
+            def list(self, value):
+                self._list = list(value)
+                if self.owner is not None:
+                    self.owner.values = []
+                    self.owner.value = None
+
+        class Param:
+            def __init__(self, value=None, values=None, datatype=None, clears=False):
+                self.value = value
+                self.values = values
+                self.datatype = datatype
+                self.filter = Filter(self if clears else None)
+                self.enabled = True
+
+            @property
+            def valueAsText(self):
+                if self.values:
+                    return ";".join(str(v[0] if isinstance(v, (list, tuple)) else v)
+                                    for v in self.values)
+                return self.value
+
+        first = "Tieverkko - Väylä"
+        second = "Kiinteistöjaotus - MML"
+        third = "Kolmas kartta - Kapsi"
+        entries = {"Väylä": first, "MML": second, "Kapsi": third}
+        self.tool = MODULE.VaylaWFSDownloader()
+        self.tool._get_extent_choices = lambda extent_type: []
+        self.tool._warn = lambda message: None
+
+        def fake_fetch(sources, cache_key=None, allow_disk_cache=True):
+            self.tool._layer_mapping = {
+                entries[source]: {"source": source, "kind": "mml_raster" if source == "MML" else "wfs"}
+                for source in sources
+            }
+            return [entries[source] for source in sources]
+
+        self.tool._fetch_layer_list = fake_fetch
+        parameters = [
+            Param(values=[["Väylä"], ["MML"]], datatype="GPValueTable"),
+            Param(""), Param(values=[first, second], clears=True),
+            Param("Koko Suomi"), Param(None), Param(None), Param("C:\\output.gdb"),
+            Param("api-key"), Param(""), Param(""), Param(""),
+        ]
+        self.tool.updateParameters(parameters)
+        self.assertEqual([first, second], parameters[2].values)
+
+        parameters[0].values = [["Kapsi"]]
+        parameters[1].value = "kolmas"
+        self.tool.updateParameters(parameters)
+        self.assertEqual([first, second], parameters[2].values)
+        self.assertEqual([first, second, third], parameters[2].filter.list)
+        self.assertTrue(parameters[7].enabled)
+        self.assertEqual("MML", self.tool._layer_mapping[second]["source"])
+
+        parameters[2].values = [first, second, third]
+        self.tool.updateParameters(parameters)
+        self.assertEqual([first, second, third], parameters[2].values)
+        self.assertEqual(["Väylä", "MML", "Kapsi"], self.tool._sources_for_layers(parameters[2].values))
+
+        parameters[2].values = [second, third]
+        self.tool.updateParameters(parameters)
+        self.assertEqual([second, third], parameters[2].values)
+        self.assertEqual([second, third], parameters[2].filter.list)
+
     def test_wmts_matrix_parser_and_selection_use_epsg3067(self):
         xml = b'''<?xml version="1.0"?>
         <Capabilities xmlns="http://www.opengis.net/wmts/1.0"
