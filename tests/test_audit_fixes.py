@@ -259,6 +259,47 @@ class PaginationCompletenessTests(unittest.TestCase):
         self.assertFalse(stats["truncated"])
 
 
+class PageSizeTests(unittest.TestCase):
+    def _batch_sizes(self, grid_levels, fail_until):
+        sizes = []
+
+        def fetch(bbox, batch_size):
+            sizes.append(batch_size)
+            if len(sizes) <= fail_until:
+                raise RuntimeError("liian iso pyyntö")
+            return [], 0
+
+        strategy = MODULE.ResilienceStrategy(max_batch_size=5000, grid_levels=grid_levels)
+        strategy.execute_with_fallback(fetch, "0,0,10,10")
+        return sizes
+
+    def test_whole_area_uses_full_page_size(self):
+        self.assertEqual([5000], self._batch_sizes([1, 2, 4], fail_until=0))
+
+    def test_finer_grids_still_shrink_page_size(self):
+        # Ruudukko 2x2 = 4 ruutua, 5000 / (2 * 2) = 1250.
+        self.assertEqual([5000, 1250, 1250, 1250, 1250], self._batch_sizes([1, 2], fail_until=1))
+
+
+class Tm35finLabelTests(unittest.TestCase):
+    @staticmethod
+    def _sr(factory_code, central_meridian=27.0, sr_type="Projected"):
+        return types.SimpleNamespace(
+            type=sr_type, factoryCode=factory_code, centralMeridian=central_meridian,
+            falseEasting=500000.0, falseNorthing=0.0, scaleFactor=0.9996, metersPerUnit=1.0,
+        )
+
+    def test_gdal_etrs89_tm35fin_is_relabelled(self):
+        self.assertTrue(MODULE.VaylaWFSDownloader._is_unlabelled_tm35fin(self._sr(0)))
+
+    def test_epsg3067_and_other_projections_are_left_alone(self):
+        check = MODULE.VaylaWFSDownloader._is_unlabelled_tm35fin
+        self.assertFalse(check(self._sr(3067)))
+        self.assertFalse(check(self._sr(0, central_meridian=21.0)))
+        self.assertFalse(check(self._sr(0, sr_type="Geographic")))
+        self.assertFalse(check(None))
+
+
 class ServerErrorBodyTests(unittest.TestCase):
     """HTTP-virheen JSON-runko ei saa näyttää tyhjältä kohdejoukolta."""
 
@@ -304,6 +345,36 @@ class ServerErrorBodyTests(unittest.TestCase):
         for request in transport.requests:
             self.assertGreaterEqual(request["timeout"], MODULE.WFS_PAGE_TIMEOUT_S)
             self.assertGreaterEqual(request["timeout"], 180)
+
+    def test_format_independent_errors_are_not_repeated_per_output_format(self):
+        formats = ["application/json", "application/geo+json", "json"]
+        for status in (414, 500, 403):
+            transport = fake_http.FakeTransport(
+                handler=lambda url, method, headers, body, status=status: fake_http.FakeResponse(
+                    self.GEOSERVER_500, status=status
+                )
+            )
+            self.tool._http_transport = transport
+            data, _, got_status, _ = self.tool._fetch_wfs_page(
+                "https://example.test/wfs", "other:test", None, 100, 0, formats,
+                cql_filter="INTERSECTS(geom, POINT(1 2))",
+            )
+            self.assertIsNone(data)
+            self.assertEqual(status, got_status)
+            self.assertEqual(1, transport.call_count, status)
+
+    def test_bad_request_still_tries_other_output_formats(self):
+        transport = fake_http.FakeTransport([
+            fake_http.FakeResponse("<ExceptionReport/>", status=400, content_type="text/xml"),
+            fake_http.FakeResponse(fake_http.feature_page(1)),
+        ])
+        self.tool._http_transport = transport
+        data, _, _, _ = self.tool._fetch_wfs_page(
+            "https://example.test/wfs", "other:test", None, 100, 0,
+            ["application/json", "json"], cql_filter="INTERSECTS(geom, POINT(1 2))",
+        )
+        self.assertEqual(1, len(data["features"]))
+        self.assertEqual(2, transport.call_count)
 
     def test_wfs_server_error_fails_layer_instead_of_empty_result(self):
         self.tool._http_transport = fake_http.FakeTransport(

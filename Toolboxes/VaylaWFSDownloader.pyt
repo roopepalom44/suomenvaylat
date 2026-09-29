@@ -99,6 +99,7 @@ class CQLRequestRejected(Exception):
 # CQL_FILTER), joiden varareitit hoidetaan ylempänä.
 RETRYABLE_HTTP_STATUS = frozenset([408, 425, 429, 500, 502, 503, 504])
 WFS_PAGE_TIMEOUT_S = 300
+FORMAT_INDEPENDENT_HTTP_STATUS = frozenset([401, 403, 414])
 RETRYABLE_NETWORK_ERRORS = (
     http.client.IncompleteRead,
     http.client.RemoteDisconnected,
@@ -1116,7 +1117,11 @@ class ResilienceStrategy(object):
     def execute_with_fallback(self, fetch_func, initial_bbox):
         last_grid = self.grid_levels[-1]
         for grid_size in self.grid_levels:
-            batch_size = max(100, int(self.max_batch_size / max(1, grid_size * 2)))
+            # Ensimmäinen yritys käyttää täyttä sivukokoa. Aiemmin jakaja
+            # grid_size * 2 puolitti sivun myös koko alueen haussa, mikä
+            # tuplasi raskaiden palvelujen (DigiRoad ~60-90 s/sivu) pyynnöt.
+            divisor = 1 if grid_size <= 1 else grid_size * 2
+            batch_size = max(100, int(self.max_batch_size / divisor))
             bboxes = [initial_bbox] if grid_size == 1 else list(self._split_bbox(initial_bbox, grid_size))
             total_tiles = len(bboxes)
             current_chunks = []
@@ -4074,6 +4079,7 @@ class VaylaWFSDownloader(object):
 
         for fmt in formats_to_try:
             attempts = [True] if prefer_post else ([False] if cql_filter else [False, True])
+            format_independent_failure = False
             for use_post in attempts:
                 json_data, raw_text, status, ctype = _try_request(fmt, use_post)
                 if json_data is None and self._wfs_needs_explicit_sort(raw_text):
@@ -4084,6 +4090,16 @@ class VaylaWFSDownloader(object):
                         self._wfs_output_format_cache[base_wfs] = fmt
                     self._remember_wfs_geometry_field(layer_clean, json_data)
                     return json_data, raw_text, status, ctype
+                # Liian pitkä URL, hylätty tunniste tai palvelinvirhe ei riipu
+                # outputFormatista: muiden muotojen kokeilu vain monistaisi
+                # pyynnöt (ja 5xx:n uudelleenyritykset). 414:n jälkeen POST
+                # voi vielä onnistua, joten se kokeillaan samalla muodolla.
+                if status in FORMAT_INDEPENDENT_HTTP_STATUS or (status or 0) >= 500:
+                    format_independent_failure = True
+                    if status != 414:
+                        break
+            if format_independent_failure:
+                break
         return None, raw_text, status, ctype
 
 
@@ -4836,7 +4852,7 @@ class VaylaWFSDownloader(object):
             return None
         out_fc = os.path.join(self._scratch_gdb(), f"kunnat_all_fc_{uuid.uuid4().hex}")
         arcpy.management.CopyFeatures(source_fc, out_fc)
-        return out_fc
+        return self._label_as_epsg3067(out_fc)
 
     def _select_kunnat_center_in(self, kunnat_fc: str, boundary_fc: str):
         scratch_gdb = self._scratch_gdb()
@@ -7682,6 +7698,44 @@ class VaylaWFSDownloader(object):
                 self._safe_delete(dissolved_fc)
         return out_fc
 
+    @staticmethod
+    def _is_unlabelled_tm35fin(spatial_reference):
+        """Onko koordinaatisto TM35FIN ilman ArcGISin EPSG:3067-tunnistetta.
+
+        GDAL kirjoittaa GeoPackageen EPSG:n WKT:n (ETRS89, 4258). ArcGIS Pron
+        EPSG:3067 perustuu EUREF-FIN-datumiin, joten se tulkitsee saman
+        projektion mukautetuksi (factoryCode 0). Koordinaatit ovat identtiset.
+        """
+        try:
+            if spatial_reference is None or spatial_reference.type != "Projected":
+                return False
+            if int(spatial_reference.factoryCode or 0) == EPSG_TM35FIN:
+                return False
+            return (
+                abs(float(spatial_reference.centralMeridian) - 27.0) < 1e-9
+                and abs(float(spatial_reference.falseEasting) - 500000.0) < 1e-6
+                and abs(float(spatial_reference.falseNorthing)) < 1e-6
+                and abs(float(spatial_reference.scaleFactor) - 0.9996) < 1e-12
+                and abs(float(spatial_reference.metersPerUnit) - 1.0) < 1e-12
+            )
+        except Exception:
+            return False
+
+    def _label_as_epsg3067(self, feature_class):
+        """Merkitse paikallisesta GeoPackagesta kopioitu aineisto EPSG:3067:ksi.
+
+        Muuten rajaustaso ja siihen projisoidut OSM-tulokset saavat mukautetun
+        koordinaatiston, ja ArcGIS varoittaa eri datumeista EPSG:3067-kartalla.
+        """
+        try:
+            if self._is_unlabelled_tm35fin(arcpy.Describe(feature_class).spatialReference):
+                arcpy.management.DefineProjection(
+                    feature_class, arcpy.SpatialReference(EPSG_TM35FIN)
+                )
+        except Exception as ex:
+            self._warn("[VAROITUS] Rajauksen koordinaatistoa ei voitu merkitä EPSG:3067:ksi: {}".format(ex))
+        return feature_class
+
     def _process_administrative_boundary(self, extent_type, extent_values, workspace, metrics=None):
         metrics = metrics if metrics is not None else PhaseMetrics()
         metrics.skip("rajauksen projektointi", "ei tarpeen (paikallinen aineisto on EPSG:3067)")
@@ -7695,6 +7749,7 @@ class VaylaWFSDownloader(object):
             try:
                 copy_start = time.perf_counter()
                 out_fc = self._feature_class_to_workspace(source_fc, workspace, out_name)
+                self._label_as_epsg3067(out_fc)
                 metrics.add("rajauksen kopiointi", time.perf_counter() - copy_start)
                 self._assert_has_selection(out_fc, None, "Tulosaineisto jäi tyhjäksi.")
             except Exception as direct_ex:
@@ -7741,6 +7796,7 @@ class VaylaWFSDownloader(object):
             out_fc = self._feature_class_to_workspace(
                 source_fc, workspace, out_name, where_clause
             )
+            self._label_as_epsg3067(out_fc)
             metrics.add("rajauksen kopiointi", time.perf_counter() - copy_start)
             self._assert_has_selection(out_fc, None, empty_msg)
             return out_fc
