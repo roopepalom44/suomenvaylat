@@ -78,8 +78,9 @@ VAIHEET
       ei annettu ...", ei tuloksia %TEMP%\suomenvaylat_*-kansioon.
    C. OSM sekageometria: tasot "Osoitteet", "Tiet", "Kaupat" (OpenStreetMap).
       -> ajo ei kaadu; Osoitteet/Kaupat tuottavat _pisteet ja _alueet -tulokset
-      (jos alueella molempia); Tiet-tuloksessa ei ole polygoneja
-      (arcpy.Describe(...).shapeType == "Polyline").
+      (jos alueella molempia); Tiet_viivat on Polyline ja suljetut tiet
+      (esim. kiertoliittymät) ovat siinä. Tiet_alueet saa sisältää vain
+      area=yes-kohteita (esim. highway=pedestrian-aukiot).
    D. OSM-relaatiot: "Hallinnolliset alueet" ja "Metsat" Helsingin rajauksella.
       -> Hallinnolliset alueet ei ole tyhjä ja sisältää Polygon-tuloksen;
       tarkista osm_type-kentästä, että mukana on "relation"-rivejä.

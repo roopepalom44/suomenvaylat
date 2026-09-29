@@ -98,6 +98,7 @@ class CQLRequestRejected(Exception):
 # esimerkiksi 400 ja 414 ovat kutsujalle merkitseviä signaaleja (liian pitkä
 # CQL_FILTER), joiden varareitit hoidetaan ylempänä.
 RETRYABLE_HTTP_STATUS = frozenset([408, 425, 429, 500, 502, 503, 504])
+WFS_PAGE_TIMEOUT_S = 300
 RETRYABLE_NETWORK_ERRORS = (
     http.client.IncompleteRead,
     http.client.RemoteDisconnected,
@@ -1250,6 +1251,9 @@ class VaylaWFSDownloader(object):
         self._http_max_attempts = 3
         # Rinnakkaisten sivuhakujen määrä. 1 = vanha sarjallinen toiminta.
         self._page_workers = 4
+        # WFS-sivun aikakatkaisu. DigiRoadin 5000 kohteen CQL-sivu alkaa
+        # palautua vasta 50-90 s kuluttua, joten 60/90 s katkaisi syvät sivut.
+        self._wfs_page_timeout = WFS_PAGE_TIMEOUT_S
         # Montako sivua kootaan yhteen JSONToFeatures-kutsuun.
         self._json_batch_pages = 8
         # Tasolistauksen levyvälimuistin elinikä sekunteina (0 = pois).
@@ -3842,6 +3846,12 @@ class VaylaWFSDownloader(object):
         if not raw_text:
             return None, raw_text, status, ctype
 
+        # Virhevastauksen runko voi olla kelvollista JSONia (GeoServer:
+        # {"code": "NoApplicableCode", ...}). Sitä ei saa tulkita tyhjäksi
+        # kohdejoukoksi, muuten palvelinvirhe tallentuisi "ei kohteita" -tasona.
+        if status is not None and status >= 400:
+            return None, raw_text, status, ctype
+
         if raw_text.lstrip()[:1] == "<":
             return None, raw_text, status, ctype
 
@@ -3851,6 +3861,8 @@ class VaylaWFSDownloader(object):
             timings.add("JSON-jäsennys", time.perf_counter() - parse_start)
             if isinstance(data, dict):
                 if "exceptions" in data or data.get("type") == "ExceptionReport" or "error" in data:
+                    return None, raw_text, status, ctype
+                if "code" in data and "description" in data and "features" not in data:
                     return None, raw_text, status, ctype
             return data, raw_text, status, ctype
         except Exception:
@@ -4028,6 +4040,8 @@ class VaylaWFSDownloader(object):
         status = None
         ctype = ""
 
+        page_timeout = getattr(self, "_wfs_page_timeout", WFS_PAGE_TIMEOUT_S)
+
         def _try_request(fmt, use_post):
             compose_start = time.perf_counter()
             if use_post:
@@ -4039,7 +4053,8 @@ class VaylaWFSDownloader(object):
                 )
                 timings.add("requestin muodostaminen", time.perf_counter() - compose_start)
                 return self._fetch_json(
-                    base_wfs, post_data=form, extra_headers=extra_headers, timings=timings
+                    base_wfs, timeout=page_timeout, post_data=form,
+                    extra_headers=extra_headers, timings=timings,
                 )
             request_url = self._build_wfs_getfeature_url(
                 base_wfs=base_wfs,
@@ -4053,7 +4068,7 @@ class VaylaWFSDownloader(object):
             )
             timings.add("requestin muodostaminen", time.perf_counter() - compose_start)
             return self._fetch_json(
-                request_url, timeout=90, quiet=True, extra_headers=extra_headers,
+                request_url, timeout=page_timeout, quiet=True, extra_headers=extra_headers,
                 timings=timings,
             )
 

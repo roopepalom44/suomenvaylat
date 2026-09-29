@@ -42,3 +42,7 @@ Tässä versiossa toimivat WFS- ja OGC API Features -aineistojen haku aluerajauk
 - Tunnistautumisasetukset päivitetään nimellä eikä uutta kopiota luoda jokaisella tason lisäyksellä.
 - Tunnisteotsaketta ei lähetetä uudelleenohjauksessa toiselle palvelimelle, eikä HTTPS-yhteyttä alenneta HTTP:ksi.
 - Windows-asennin poistaa edellisen version tiedostot ennen asennusta.
+
+## Suomenväylät QGIS 0.2.8
+
+- Rajaukseen leikatusta aineistosta säilytetään vain lähdetason geometriatyyppi. Rajaa sivuavat alueet eivät enää muutu alue- ja viivaosien kokoelmiksi, joiden koordinaatistoa QGIS ei tunnistanut (esim. Liiterin taajamat eivät latautuneet 0.2.7:ssä).

@@ -13,8 +13,14 @@ from pathlib import Path
 
 from qgis.core import (
     QgsApplication, QgsCoordinateReferenceSystem, QgsFeature, QgsGeometry, QgsProject,
-    QgsVectorLayer,
+    QgsVectorLayer, QgsWkbTypes,
 )
+
+# Testi asettaa pääsalasanan ja tallentaa tunnistautumisasetuksia, joten
+# käytä aina erillistä profiilia eikä käyttäjän oikeaa qgis-auth.db:tä.
+_profile_dir = tempfile.mkdtemp(prefix="suomenvaylat_qgis_smoke_")
+os.environ["QGIS_CUSTOM_CONFIG_PATH"] = _profile_dir
+os.environ["QGIS_AUTH_DB_DIR_PATH"] = _profile_dir
 
 QgsApplication.setPrefixPath(os.environ.get("QGIS_PREFIX_PATH", "/usr"), True)
 app = QgsApplication([], False)
@@ -69,7 +75,8 @@ print("custom line boundary passed", flush=True)
 square_mask = QgsGeometry.fromWkt("POLYGON((385000 6670000, 386000 6670000, 386000 6671000, 385000 6671000, 385000 6670000))")
 wgs = QgsCoordinateReferenceSystem("EPSG:4326")
 
-with tempfile.TemporaryDirectory() as folder:
+# Windows lukitsee avoimet GPKG-tiedostot, joten siivousvirhe ei saa kaataa testiä.
+with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as folder:
     # 2. OGC-kentät kaikilta sivuilta.
     center = QgsGeometry.fromWkt("POINT(385500 6670500)")
     from qgis.core import QgsCoordinateTransform
@@ -142,6 +149,23 @@ with tempfile.TemporaryDirectory() as folder:
     assert abs(lengths["Väylä"] - 3000) < 1e-6 and abs(lengths["Liiteri"] - 1000) < 1e-6, lengths
     print("WFS clip policy passed", lengths, flush=True)
 
+    # 4b. Leikkaus, josta GEOS palauttaa alue + viiva -kokoelman (toinen osa
+    # sivuaa rajausta), tallentuu aluetasona kelvollisessa koordinaatistossa.
+    touching = memory_layer("MultiPolygon", [
+        "MULTIPOLYGON(((385500 6670500, 386500 6670500, 386500 6670600, 385500 6670600, 385500 6670500)),"
+        "((386000 6670800, 387000 6670800, 387000 6670900, 386000 6670900, 386000 6670800)))",
+    ], "touching")
+    raw = QgsGeometry(next(touching.getFeatures()).geometry()).intersection(square_mask)
+    assert QgsWkbTypes.flatType(raw.wkbType()) == QgsWkbTypes.GeometryCollection, raw.asWkt()
+    added = []
+    services._download_vector_layer(
+        {"id": "test:touching", "title": "Touching", "source": "Liiteri"}, touching, square_mask, tm35,
+        Path(folder) / "touching.gpkg", add_layer=added.append, clip=True)
+    assert added[0].crs().authid() == "EPSG:3067", added[0].crs().authid()
+    assert services._geometry_type_value(added[0].geometryType()) == 2, added[0].wkbType()
+    assert abs(next(added[0].getFeatures()).geometry().area() - 50000) < 1e-6
+    print("clip geometry collection passed", flush=True)
+
 # 5. Uudelleenohjaus ei vuoda tunnisteita.
 handler = services._SafeRedirectHandler()
 request = services.urllib.request.Request("https://a.example/x", headers={"Authorization": "Basic k"})
@@ -191,7 +215,7 @@ def wait_for(condition, seconds=20):
 dialog._load_catalog()
 wait_for(lambda: dialog.refresh_button.isEnabled() and dialog.entries)
 dialog.layers.item(0).setCheckState(plugin_module.Qt.Checked)
-with tempfile.TemporaryDirectory() as folder:
+with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as folder:
     dialog.output.setText(folder)
     dialog._run_download()
     wait_for(lambda: dialog._download_task is None)

@@ -1,4 +1,4 @@
-# Suomenväylät QGIS (esijulkaisu 0.2.7)
+# Suomenväylät QGIS (esijulkaisu 0.2.8)
 
 QGIS 3.44:lle tehty erillinen, natiivi Python-lisäosa. ArcGIS Pro -laajennus pysyy samassa projektissa.
 

@@ -1,8 +1,10 @@
 """Regressiotestit katselmoinnin P0/P1-korjauksille (ei vaadi arcpyä)."""
 
 import pathlib
+import shutil
 import ssl
 import sys
+import tempfile
 import threading
 import types
 import unittest
@@ -255,6 +257,65 @@ class PaginationCompletenessTests(unittest.TestCase):
         )
         self.assertEqual(1, found)
         self.assertFalse(stats["truncated"])
+
+
+class ServerErrorBodyTests(unittest.TestCase):
+    """HTTP-virheen JSON-runko ei saa näyttää tyhjältä kohdejoukolta."""
+
+    GEOSERVER_500 = {"code": "NoApplicableCode", "description": "Internal server error"}
+
+    def setUp(self):
+        self.tool = _new_tool()
+        self.tool._http_max_attempts = 1
+        self.tool._page_workers = 1
+        self.tool._msg = lambda text: None
+        self.tool._warn = lambda text: None
+        self.scratch = tempfile.mkdtemp()
+        self.tool._run_scratch_folder = self.scratch
+        self.addCleanup(shutil.rmtree, self.scratch, True)
+
+    def test_json_error_body_with_http_500_is_not_data(self):
+        self.tool._http_transport = fake_http.FakeTransport([
+            fake_http.FakeResponse(self.GEOSERVER_500, status=500),
+        ])
+        data, raw_text, status, _ = self.tool._fetch_json("https://example.test/wfs")
+        self.assertIsNone(data)
+        self.assertEqual(500, status)
+        self.assertIn("NoApplicableCode", raw_text)
+
+    def test_ogc_style_error_body_with_http_200_is_not_data(self):
+        self.tool._http_transport = fake_http.FakeTransport([
+            fake_http.FakeResponse(self.GEOSERVER_500, status=200),
+        ])
+        data, _, _, _ = self.tool._fetch_json("https://example.test/wfs")
+        self.assertIsNone(data)
+
+    def test_wfs_page_requests_allow_slow_cql_pages(self):
+        # DigiRoadin raskas CQL-sivu palautuu vasta ~50-90 s kuluttua.
+        transport = fake_http.FakeTransport()
+        self.tool._http_transport = transport
+        for prefer_post in (False, True):
+            self.tool._fetch_wfs_page(
+                "https://example.test/wfs", "other:test", None, 100, 0,
+                ["application/json"], cql_filter="INTERSECTS(geom, POINT(1 2))",
+                prefer_post=prefer_post,
+            )
+        self.assertEqual(["GET", "POST"], [r["method"] for r in transport.requests])
+        for request in transport.requests:
+            self.assertGreaterEqual(request["timeout"], MODULE.WFS_PAGE_TIMEOUT_S)
+            self.assertGreaterEqual(request["timeout"], 180)
+
+    def test_wfs_server_error_fails_layer_instead_of_empty_result(self):
+        self.tool._http_transport = fake_http.FakeTransport(
+            handler=lambda url, method, headers, body: fake_http.FakeResponse(
+                self.GEOSERVER_500, status=500
+            )
+        )
+        with self.assertRaisesRegex(Exception, "HTTP 500"):
+            self.tool._fetch_bbox_feature_chunks(
+                "https://example.test/wfs", "other:test", "1,2,3,4",
+                ["application/json"], 100, max_requests=5, source_name="Liiteri",
+            )
 
 
 class RedirectSecurityTests(unittest.TestCase):

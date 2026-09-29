@@ -367,6 +367,26 @@ def _geometry_type_value(value):
     return int(getattr(value, "value", value))
 
 
+def _clip_geometry(geometry, mask):
+    """Leikkaa geometria rajaukseen säilyttäen sen geometriatyypin.
+
+    GEOS palauttaa rajaa sivuavista osista GeometryCollectionin (esim. alue
+    + viiva). QGIS ei tunnista sellaisesta GPKG-tasosta koordinaatistoa,
+    joten leikkauksesta säilytetään vain lähdegeometrian tyyppiset osat.
+    """
+    family = _geometry_type_value(geometry.type())
+    clipped = geometry.intersection(mask)
+    if clipped.isEmpty() or family not in (0, 1, 2):
+        # Lähde on jo itse sekakokoelma: säilytä leikkaus sellaisenaan.
+        return clipped
+    is_collection = QgsWkbTypes.flatType(clipped.wkbType()) == QgsWkbTypes.GeometryCollection
+    if not is_collection and _geometry_type_value(clipped.type()) == family:
+        return clipped
+    parts = [part for part in clipped.asGeometryCollection()
+             if _geometry_type_value(part.type()) == family]
+    return QgsGeometry.collectGeometry(parts) if parts else QgsGeometry()
+
+
 def _open_remote_layer(entry):
     if entry["kind"] == "wfs":
         uri = QgsDataSourceUri()
@@ -476,7 +496,7 @@ def _download_vector_layer(entry, layer, mask, mask_crs, destination, progress=N
             if not geometry.intersects(target_mask):
                 continue
             if clip:
-                geometry = geometry.intersection(target_mask)
+                geometry = _clip_geometry(geometry, target_mask)
                 if geometry.isEmpty():
                     continue
             output = QgsFeature(layer.fields())
@@ -771,7 +791,7 @@ def _download_osm(entry, mask, mask_crs, destination, progress=None, add_layer=N
                 geometry.transform(to_target)
                 if not geometry.intersects(target_mask):
                     continue
-                geometry = geometry.intersection(target_mask)
+                geometry = _clip_geometry(geometry, target_mask)
                 if geometry.isEmpty():
                     continue
                 family = _geometry_type_value(geometry.type())
@@ -974,7 +994,7 @@ def _download_ogc(entry, mask, mask_crs, destination, key="", progress=None, add
                     geometry.transform(to_target)
                     if not geometry.intersects(target_mask):
                         continue
-                    geometry = geometry.intersection(target_mask)
+                    geometry = _clip_geometry(geometry, target_mask)
                     if geometry.isEmpty():
                         continue
                     properties = raw.get("properties") or {}
