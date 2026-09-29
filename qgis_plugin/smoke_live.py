@@ -22,11 +22,14 @@ try:
     print('download passed', count, flush=True)
     kapsi = next(entry for entry in catalog('Kapsi')[0]
                  if entry['id'] == 'taustakartta' and entry['endpoint'].endswith('/taustakartta'))
-    from qgis.core import QgsGeometry, QgsRectangle
+    from qgis.core import QgsGeometry, QgsRectangle, QgsRasterLayer
     small = QgsGeometry.fromRect(QgsRectangle(385000, 6670000, 386000, 6671000))
     raster_path = Path(__file__).parent / 'smoke_kapsi.tif'
     raster_path.unlink(missing_ok=True)
     assert download(kapsi, small, crs, raster_path) == 1
+    raster = QgsRasterLayer(str(raster_path), 'Kapsi')
+    assert raster.isValid() and raster.crs().authid() == 'EPSG:3067'
+    assert raster.extent().intersects(small.boundingBox())
     print('Kapsi raster passed', flush=True)
     osm = next(entry for entry in catalog('OpenStreetMap')[0] if entry['id'] == 'osm_bus_stops')
     osm_path = Path(__file__).parent / 'smoke_osm.gpkg'

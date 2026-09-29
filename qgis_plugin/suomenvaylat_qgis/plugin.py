@@ -18,9 +18,10 @@ from qgis.core import (QgsApplication, QgsAuthMethodConfig, QgsDataSourceUri,
 from .services import WFS_SOURCES, OGC_SOURCES, KAPSI_SERVICES, _request_json, area_choices, catalog, download, selection_geometry
 
 MML_TILEJSON = {
-    "Taustakartta": "https://avoin-karttakuva.maanmittauslaitos.fi/vectortiles/tilejson/taustakartta/1.0.0/taustakartta/default/v21/ETRS-TM35FIN/tilejson.json",
-    "Maastokartta": "https://avoin-karttakuva.maanmittauslaitos.fi/vectortiles/tilejson/taustakartta/1.0.0/taustakartta/default/v21/ETRS-TM35FIN/tilejson.json",
-    "Kiinteistöjaotus": "https://avoin-karttakuva.maanmittauslaitos.fi/kiinteisto-avoin/v3/kiinteistojaotus/ETRS-TM35FIN/tilejson.json",
+    # QGIS's XYZ vector tile provider uses the Web Mercator tile matrix.
+    "Taustakartta": "https://avoin-karttakuva.maanmittauslaitos.fi/vectortiles/tilejson/taustakartta/1.0.0/taustakartta/default/v21/WGS84_Pseudo-Mercator/tilejson.json",
+    "Maastokartta": "https://avoin-karttakuva.maanmittauslaitos.fi/vectortiles/tilejson/taustakartta/1.0.0/taustakartta/default/v21/WGS84_Pseudo-Mercator/tilejson.json",
+    "Kiinteistöjaotus": "https://avoin-karttakuva.maanmittauslaitos.fi/kiinteisto-avoin/v3/kiinteistojaotus/WGS84_Pseudo-Mercator/tilejson.json",
 }
 
 

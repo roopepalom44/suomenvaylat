@@ -8,7 +8,7 @@ import suomenvaylat_qgis.plugin as plugin_module
 from suomenvaylat_qgis import classFactory
 import suomenvaylat_qgis.services as services
 from pathlib import Path
-from qgis.core import QgsProject
+from qgis.core import QgsCoordinateReferenceSystem, QgsCoordinateTransform, QgsProject, QgsVectorLayer
 names = area_choices('Maakunta')
 assert len(names) >= 18
 geometry, crs = selection_geometry('Maakunta', names[:1])
@@ -65,6 +65,11 @@ out.unlink(missing_ok=True)
 try:
     entry = {'kind': 'ogc', 'id': 'demo', 'title': 'demo', 'endpoint': 'https://example.test/'}
     assert services.download(entry, mask, crs, out) == 2
+    saved = QgsVectorLayer(str(out), 'demo', 'ogr')
+    assert saved.isValid() and saved.crs().authid() == 'EPSG:3067'
+    center = QgsCoordinateTransform(saved.crs(), QgsCoordinateReferenceSystem('EPSG:4326'),
+                                    QgsProject.instance()).transform(saved.extent().center())
+    assert 18 <= center.x() <= 33 and 59 <= center.y() <= 72
     assert len(calls) == 2
     print('OGC pagination passed', flush=True)
 finally:

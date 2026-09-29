@@ -20,3 +20,8 @@ Tässä versiossa toimivat WFS- ja OGC API Features -aineistojen haku aluerajauk
 ## Suomenväylät QGIS 0.2.4
 
 - Tallennetun QGIS-projektin kansio täyttyy oletuksena ladattavien aineistojen tallennuskansioksi.
+
+## Suomenväylät QGIS 0.2.5
+
+- Kapsista ladattu GeoTIFF tallentaa EPSG:3067-koordinaattijärjestelmän, jolloin rasteri sijoittuu QGISissä Suomeen.
+- MML:n XYZ-vektoritiilet pyydetään Web Mercator -tiilistössä, jota QGIS käyttää näillä tasoilla.

@@ -762,6 +762,7 @@ def _download_kapsi(entry, mask, mask_crs, destination, progress=None):
         output_path = Path(destination).with_suffix(".tif")
         output_path.parent.mkdir(parents=True, exist_ok=True)
         result = gdal.Translate(str(output_path), str(Path(temp) / "mosaic.vrt"),
+                                outputSRS="EPSG:3067",
                                 creationOptions=["TILED=YES", "COMPRESS=JPEG", "PHOTOMETRIC=YCBCR"])
         if result is None:
             raise RuntimeError("Kapsi-GeoTIFFin kirjoitus epäonnistui")
@@ -769,6 +770,8 @@ def _download_kapsi(entry, mask, mask_crs, destination, progress=None):
     layer = QgsRasterLayer(str(output_path), entry["title"])
     if not layer.isValid():
         raise RuntimeError("Kapsi-rasteria ei voitu avata")
+    if layer.crs().authid() != "EPSG:3067":
+        raise RuntimeError("Kapsi-rasterin koordinaatisto ei tallentunut oikein")
     QgsProject.instance().addMapLayer(layer)
     return 1
 

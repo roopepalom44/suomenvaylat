@@ -1,12 +1,12 @@
-# Suomenväylät QGIS (esijulkaisu 0.2.4)
+# Suomenväylät QGIS (esijulkaisu 0.2.5)
 
 QGIS 3.44:lle tehty erillinen, natiivi Python-lisäosa. ArcGIS Pro -laajennus pysyy samassa projektissa.
 
 ## Asennus
 
-**Windows, suoraviivainen asennus:** Lataa uusimmasta [yhteisestä julkaisusta](https://github.com/roopepalom44/suomenvaylat/releases/latest) `Suomenvaylat-QGIS-0.2.4-Windows.zip`, pura ZIP ja kaksoisnapsauta `install_windows.bat`. Sulje QGIS ennen asennusta. Asennin kopioi lisäosan käyttäjän kaikkiin olemassa oleviin QGIS 3 -profiileihin (tai luo `default`-profiilin) ja ottaa lisäosan käyttöön. Käynnistä QGIS asennuksen jälkeen.
+**Windows, suoraviivainen asennus:** Koosta `Suomenvaylat-QGIS-0.2.5-Windows.zip` komennolla `python qgis_plugin/package.py`, pura ZIP ja kaksoisnapsauta `install_windows.bat`. Sulje QGIS ennen asennusta. Asennin kopioi lisäosan käyttäjän kaikkiin olemassa oleviin QGIS 3 -profiileihin (tai luo `default`-profiilin) ja ottaa lisäosan käyttöön. Käynnistä QGIS asennuksen jälkeen.
 
-**QGISin oma asennus:** Lataa samasta julkaisusta `Suomenvaylat-QGIS-0.2.4.zip` ja valitse QGISissä **Lisäosat → Hallitse ja asenna lisäosia → Asenna ZIP-tiedostosta**.
+**QGISin oma asennus:** Koosta `Suomenvaylat-QGIS-0.2.5.zip` samalla komennolla ja valitse QGISissä **Lisäosat → Hallitse ja asenna lisäosia → Asenna ZIP-tiedostosta**.
 
 ## Toimii tässä versiossa
 
@@ -31,4 +31,4 @@ Lisäosa on merkitty esijulkaisuksi, koska käyttöliittymä ja osa palvelu- sek
 
 ## Kehitys ja testaus
 
-Paketointi: `python qgis_plugin/package.py`. QGIS 3.44:n Python-ympäristössä tehty testit: `qgis_plugin/smoke.py` ja `qgis_plugin/smoke_live.py`.
+Paketointi: `python qgis_plugin/package.py`. QGIS 3.44:n Python-ympäristön testit: `qgis_plugin/smoke.py`, `qgis_plugin/smoke_live.py`, `qgis_plugin/smoke_spatial_live.py` (13 julkisen palvelun sijaintitarkistusta) ja `qgis_plugin/smoke_custom_crs.py` (EPSG:3857-projekti ja rajaus). Tunnuksia vaativien palvelujen vastaukset on testattu simuloituina; oikea palvelulataus tarvitsee kyseisen palvelun tunnukset.
