@@ -2,22 +2,24 @@
 .SYNOPSIS
   Rakentaa add-inin ja julkaisee sen GitHub-releasena (.esriAddInX liitteenä).
 .DESCRIPTION
-  Versio luetaan Config.daml:sta. Release-tagi on v<versio>. Liitteen nimi on
-  aina Suomenvaylat.esriAddInX, joten vakaa latauslinkki on
+  Versio luetaan Config.daml:n AddInInfo-elementistä. Release-tagi on v<versio>.
+  Liitteet ovat Suomenvaylat.esriAddInX sekä QGIS-lisäosan ZIP-paketit. Release
+  merkitään uusimmaksi, joten vakaa latauslinkki on
   https://github.com/roopepalom44/suomenvaylat/releases/latest/download/Suomenvaylat.esriAddInX
-  Vaatii .NET 8 SDK:n, täyden MSBuildin, Pro 3.5 Extensions NuGet -paketin sekä gh-kirjautumisen.
+  Vaatii .NET 8 SDK:n, täyden MSBuildin, Pro 3.5 Extensions NuGet -paketin, Pythonin
+  sekä gh-kirjautumisen.
 #>
 [CmdletBinding()]
 param(
     [string]$Notes = '',
     [switch]$Draft,
-    [switch]$SkipBuild
+    [switch]$SkipBuild,
+    [string]$Remote = ''
 )
 
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path -LiteralPath $PSScriptRoot).Path
 $repo = 'roopepalom44/suomenvaylat'
-$remote = 'github'
 $branch = 'main'
 $configuration = 'Release'
 $framework = 'net8.0-windows'
@@ -29,12 +31,17 @@ function Invoke-Native {
     if ($LASTEXITCODE -ne 0) { throw "$Message (exit $LASTEXITCODE)" }
 }
 
-$daml = Get-Content -LiteralPath (Join-Path $root 'Config.daml') -Raw
-if ($daml -notmatch '(?<=\s)version="(\d+(\.\d+){1,3})"') { throw 'Versiota ei löytynyt Config.daml:sta.' }
-$version = $Matches[1]
+# Lue versio XML:nä: pelkkä regex osuisi XML-julistuksen version="1.0"-arvoon.
+[xml]$config = Get-Content -LiteralPath (Join-Path $root 'Config.daml') -Raw
+$namespaces = [Xml.XmlNamespaceManager]::new($config.NameTable)
+$namespaces.AddNamespace('daml', 'http://schemas.esri.com/DADF/Registry')
+$addInInfo = $config.SelectSingleNode('/daml:ArcGIS/daml:AddInInfo', $namespaces)
+if ($null -eq $addInInfo) { throw 'AddInInfo-elementtiä ei löytynyt Config.daml:sta.' }
+$version = $addInInfo.GetAttribute('version')
+if ($version -notmatch '^\d+(\.\d+){1,3}$') { throw "Config.daml:n versio on virheellinen: '$version'." }
 $tag = "v$version"
 
-if ($daml -notmatch 'desktopVersion="3\.5(?:\.|")') {
+if ($addInInfo.GetAttribute('desktopVersion') -notmatch '^3\.5(?:\.|$)') {
     throw 'Config.daml:n ArcGIS Pro -vähimmäisversion pitää olla 3.5.'
 }
 $project = [xml](Get-Content -LiteralPath (Join-Path $root 'suomenvaylat.csproj') -Raw)
@@ -43,9 +50,17 @@ if ($null -eq $apiPackage -or $apiPackage.GetAttribute('Version') -ne '3.5.0.573
     throw 'Julkaisu pitää kääntää Esri.ArcGISPro.Extensions30 3.5.0.57366 -paketilla.'
 }
 
+if ([string]::IsNullOrWhiteSpace($Remote)) {
+    # Käytä sitä remotea, joka osoittaa tähän GitHub-repoon (nimi voi olla esim. origin tai github).
+    $Remote = @(git remote -v | Where-Object { $_ -match [regex]::Escape($repo) } |
+        ForEach-Object { ($_ -split '\s+')[0] } | Select-Object -Unique -First 1)
+    if (-not $Remote) { throw "Remotea, joka osoittaa repoon $repo, ei löytynyt. Anna se parametrilla -Remote." }
+}
+$remote = $Remote
+
 Invoke-Native { gh auth status } 'gh ei ole kirjautunut (aja: gh auth login)'
 if (git status --porcelain) { throw 'Työhakemistossa on commitoimattomia muutoksia. Commitoi ne ensin.' }
-if ((git rev-parse --abbrev-ref HEAD) -ne $branch) { throw "Julkaise -haarasta." }
+if ((git rev-parse --abbrev-ref HEAD) -ne $branch) { throw "Julkaise $branch-haarasta." }
 Invoke-Native { git fetch $remote } 'git fetch epäonnistui'
 if ((git rev-parse HEAD) -ne (git rev-parse "$remote/$branch")) {
     throw "HEAD ei vastaa $remote/$branch. Pushaa (tai pullaa) ensin, jotta tagi osoittaa julkaistuun committiin."
@@ -66,7 +81,18 @@ if (-not (Test-Path -LiteralPath $package -PathType Leaf)) { throw "Pakettia ei 
 $asset = Join-Path ([IO.Path]::GetTempPath()) 'Suomenvaylat.esriAddInX'
 Copy-Item -LiteralPath $package -Destination $asset -Force
 
-$ghArgs = @('release', 'create', $tag, $asset, '-R', $repo, '--target', (git rev-parse HEAD), '--title', "Suomenvaylat $version")
+Invoke-Native { python (Join-Path $root 'qgis_plugin\package.py') } 'QGIS-lisäosan paketointi epäonnistui'
+$qgisVersion = ((Get-Content -LiteralPath (Join-Path $root 'qgis_plugin\suomenvaylat_qgis\metadata.txt') |
+    Where-Object { $_ -match '^version=' }) -replace '^version=', '').Trim()
+$qgisAssets = @(
+    (Join-Path $root "qgis_plugin\dist\Suomenvaylat-QGIS-$qgisVersion.zip"),
+    (Join-Path $root "qgis_plugin\dist\Suomenvaylat-QGIS-$qgisVersion-Windows.zip")
+)
+foreach ($qgisAsset in $qgisAssets) {
+    if (-not (Test-Path -LiteralPath $qgisAsset -PathType Leaf)) { throw "QGIS-pakettia ei löytynyt: $qgisAsset" }
+}
+
+$ghArgs = @('release', 'create', $tag, $asset) + $qgisAssets + @('-R', $repo, '--target', (git rev-parse HEAD), '--title', "Suomenvaylat $version", '--latest')
 if ($Notes) { $ghArgs += @('--notes', $Notes) } else { $ghArgs += '--generate-notes' }
 if ($Draft) { $ghArgs += '--draft' }
 & gh @ghArgs

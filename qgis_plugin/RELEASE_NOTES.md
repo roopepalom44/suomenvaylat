@@ -30,3 +30,15 @@ Tässä versiossa toimivat WFS- ja OGC API Features -aineistojen haku aluerajauk
 
 - Jos QGIS-projektilta puuttuu koordinaattijärjestelmä, lisäosa asettaa sen ensimmäisen ladatun tason mukaan ennen tason lisäämistä. Näin QGIS voi sovittaa EPSG:3067-aineistot ja eri CRS:ssä olevan karttapohjan yhteen.
 - Latauksen valmistumisviesti kertoo, kun projektin CRS asetettiin automaattisesti.
+
+## Suomenväylät QGIS 0.2.7
+
+- OSM-relaatiot kootaan alueiksi (aiemmin ne pudotettiin, joten esim. *Hallinnolliset alueet* jäi tyhjäksi). Suljetut tiet, aidat ja muut viivakohteet pysyvät viivoina.
+- Jos OSM-tasossa on useita geometriatyyppejä, pisteet, viivat ja alueet tallentuvat omiksi tasoikseen.
+- OGC API Features -latauksen kentät päätellään kaikkien sivujen kohteista, joten myöhemmillä sivuilla esiintyvät ominaisuudet eivät katoa.
+- Muut kuin Väylän ja DigiRoadin vektoriaineistot (myös Traficom Oskari) leikataan rajaukseen kuten ArcGIS Prossa.
+- Oma viivarajaus muutetaan kohteiden konveksiksi peitteeksi kuten ArcGIS Prossa; tason valinta rajaa käytettävät kohteet.
+- Tasoluettelo ja lataukset ajetaan taustatehtävinä; latauksen voi keskeyttää.
+- Tunnistautumisasetukset päivitetään nimellä eikä uutta kopiota luoda jokaisella tason lisäyksellä.
+- Tunnisteotsaketta ei lähetetä uudelleenohjauksessa toiselle palvelimelle, eikä HTTPS-yhteyttä alenneta HTTP:ksi.
+- Windows-asennin poistaa edellisen version tiedostot ennen asennusta.

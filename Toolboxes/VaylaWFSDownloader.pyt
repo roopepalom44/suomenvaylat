@@ -17,6 +17,7 @@ import math
 import shutil
 import tempfile
 import socket
+import ssl
 import threading
 import concurrent.futures
 import ctypes
@@ -25,8 +26,7 @@ from ctypes import wintypes
 
 # MML:n nykyiset avoimet rajapinnat. Kiinteistöaineistot haetaan OGC API
 # Features -palvelusta ja karttatasot lisätään ArcGIS Prohon TileJSON-vektori-
-# tiilinä. Vanha WMTS-polku on säilytetty alempana vain yhteensopivuus-/
-# varareittejä varten; sitä ei käytetä MML:n normaalissa tasolistauksessa.
+# tiilinä.
 MML_PROPERTY_OGC_API_ENDPOINT = (
     "https://avoin-paikkatieto.maanmittauslaitos.fi/"
     "kiinteisto-avoin/simple-features/v3/"
@@ -54,29 +54,8 @@ MML_VECTOR_TILE_LAYER_IDS = {
     "Kiinteistojaotus": MML_PROPERTY_VECTOR_TILE_TILEJSON,
 }
 
-# Vanha WMTS-osoite ja julkiset WMS-osoitteet pidetään erillään. Näitä
-# käytetään vain vanhoissa/varareiteissä, ei nykyisessä MML-vector tile -
-# toteutuksessa. Kapsin live-WMS ei saa koskaan periä MML:n API-avainta.
-MML_WMTS_SERVICE_URL = (
-    "https://avoin-karttakuva.maanmittauslaitos.fi/avoin/wmts/1.0.0"
-)
-MML_WMTS_LAYER_IDS = {
-    "Taustakartta": "taustakartta",
-    "Maastokartta": "maastokartta",
-}
-MML_WMS_SERVICE_URLS = {
-    "taustakartta": "https://tiles.kartat.kapsi.fi/taustakartta?",
-    "maastokartta": "https://tiles.kartat.kapsi.fi/peruskartta?",
-}
-MML_WMTS_MATRIX_SET = "ETRS-TM35FIN"
-MML_WMTS_EPSG = 3067
-MML_WMTS_TILE_SIZE = 256
-MML_WMTS_ORIGIN_X = -548576.0
-MML_WMTS_ORIGIN_Y = 8388608.0
-MML_WMTS_MIN_LEVEL = 0
-MML_WMTS_MAX_LEVEL = 13
-MML_WMTS_DEFAULT_LEVEL = 9
-MML_WMTS_MAX_TILES = 256
+# ETRS-TM35FIN, johon kaikki paikalliset rajaukset ja tulokset projisoidaan.
+EPSG_TM35FIN = 3067
 
 TRAFICOM_OPEN_WFS_ENDPOINT = "https://julkinen.traficom.fi/inspirepalvelu/avoin/wfs"
 TRAFICOM_RAJOITETTU_WFS_ENDPOINT = "https://julkinen.traficom.fi/inspirepalvelu/rajoitettu/wfs"
@@ -110,14 +89,6 @@ class PhaseMetrics(object):
 
     def get(self, name, default=None):
         return self.seconds.get(name, default)
-
-    def measured_sum(self, excluded=None):
-        excluded = set(excluded or [])
-        return sum(
-            value for name, value in self.seconds.items()
-            if name not in excluded and isinstance(value, (int, float))
-        )
-
 
 class CQLRequestRejected(Exception):
     """CQL GET ja POST epäonnistuivat; kutsuja voi kokeilla pienempiä CQL-osia."""
@@ -197,12 +168,15 @@ class HttpTransport(object):
         vaihekohtainen loki säilyy yhtä tarkkana kuin urllib-toteutuksessa.
         """
         current_url = url
+        headers = dict(headers or {})
         for _ in range(self.MAX_REDIRECTS + 1):
             status, resp_headers, payload, location, read_s = self._single_request(
                 current_url, method, headers, body, timeout
             )
             if status in (301, 302, 303, 307, 308) and location:
-                current_url = urllib.parse.urljoin(current_url, location)
+                next_url = urllib.parse.urljoin(current_url, location)
+                headers = _redirect_headers(current_url, next_url, headers)
+                current_url = next_url
                 if status in (301, 302, 303) and method == "POST":
                     # 303 (ja käytännössä 301/302) muuttaa POSTin GETiksi.
                     method = "GET"
@@ -244,13 +218,82 @@ class HttpTransport(object):
             except RETRYABLE_NETWORK_ERRORS as ex:
                 last_error = ex
                 self._drop(key)
-                if attempt == 0:
+                if attempt == 0 and _is_retryable_error(ex):
                     continue
                 raise
             except Exception:
                 self._drop(key)
                 raise
         raise last_error if last_error else urllib.error.URLError("tuntematon verkkovirhe")
+
+
+SENSITIVE_HEADERS = frozenset(["authorization", "proxy-authorization", "cookie"])
+
+
+def _url_origin(url):
+    parsed = urllib.parse.urlsplit(str(url or ""))
+    scheme = (parsed.scheme or "").lower()
+    port = parsed.port or {"http": 80, "https": 443}.get(scheme)
+    return scheme, (parsed.hostname or "").lower(), port
+
+
+def _redirect_headers(old_url, new_url, headers):
+    """Palauta uudelleenohjauksessa lähetettävät headerit.
+
+    Tunnisteet eivät saa vuotaa toiselle palvelimelle, eikä HTTPS-yhteyttä
+    saa alentaa salaamattomaksi.
+    """
+    old_origin = _url_origin(old_url)
+    new_origin = _url_origin(new_url)
+    if old_origin[0] == "https" and new_origin[0] != "https":
+        raise urllib.error.URLError(
+            "uudelleenohjaus HTTPS:stä salaamattomaan osoitteeseen estettiin"
+        )
+    if old_origin == new_origin:
+        return dict(headers or {})
+    return {
+        key: value for key, value in (headers or {}).items()
+        if str(key).lower() not in SENSITIVE_HEADERS
+    }
+
+
+class _SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """urllibin uudelleenohjaus ilman tunnisteiden vuotoa toiselle hostille."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        new_request = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if new_request is None:
+            return None
+        safe = _redirect_headers(req.full_url, newurl, dict(new_request.header_items()))
+        new_request.headers = {}
+        new_request.unredirected_hdrs = {}
+        for key, value in safe.items():
+            new_request.add_header(key, value)
+        return new_request
+
+
+_SAFE_URL_OPENER = urllib.request.build_opener(_SafeRedirectHandler())
+
+
+def _urlopen(request, timeout=60):
+    """``urllib.request.urlopen`` turvallisella uudelleenohjauksella."""
+    return _SAFE_URL_OPENER.open(request, timeout=timeout)
+
+
+def _is_retryable_error(ex):
+    """Uudelleenyritä vain ohimeneviä verkkovirheitä.
+
+    Varmennevirhe tai HTTP 4xx ei korjaannu uudella yrityksellä.
+    """
+    if isinstance(ex, urllib.error.HTTPError):
+        return ex.code in RETRYABLE_HTTP_STATUS
+    if isinstance(ex, ssl.SSLCertVerificationError):
+        return False
+    if isinstance(ex, urllib.error.URLError) and isinstance(
+        getattr(ex, "reason", None), ssl.SSLCertVerificationError
+    ):
+        return False
+    return isinstance(ex, RETRYABLE_NETWORK_ERRORS)
 
 
 def _header_says_close(headers):
@@ -428,13 +471,10 @@ class WFSSourceRegistry(object):
     def _parse_capabilities(self, url):
         layers = []
         req = urllib.request.Request(url)
-        with urllib.request.urlopen(req, timeout=60) as response:
+        with _urlopen(req, timeout=60) as response:
             xml_bytes = response.read()
         root = ET.fromstring(xml_bytes)
 
-        ns = {'wfs': 'http://www.wfs.opengis.net/wfs/2.0',
-              'wfs11': 'http://www.opengis.net/wfs',
-              'wfs20': 'http://www.opengis.net/wfs/2.0'}
         feature_types = [e for e in root.iter() if e.tag.endswith('FeatureType')]
         for elem in feature_types:
             name_text = None
@@ -452,6 +492,186 @@ class WFSSourceRegistry(object):
                     "kind": "wfs"
                 })
         return layers
+
+
+# =================================
+# OSM-GEOMETRIAT
+# =================================
+# Sama logiikka on QGIS-lisäosassa (qgis_plugin/suomenvaylat_qgis/osm_geometry.py).
+# Muutokset pitää tehdä molempiin; tests/test_osm_geometry.py ajaa samat
+# tapaukset kummallekin toteutukselle.
+
+# Suljettu way tulkitaan alueeksi, jos sillä on jokin näistä avaimista eikä
+# viiva-avainta. Luettelo noudattaa OSM-wikin "Area"-käytäntöä pääpiirteittäin.
+OSM_AREA_KEYS = frozenset([
+    "aeroway", "amenity", "boundary", "building", "building:part", "craft",
+    "historic", "landcover", "landuse", "leisure", "man_made", "military",
+    "natural", "office", "place", "power", "public_transport", "shop", "sport",
+    "tourism", "water", "waterway", "wetland",
+])
+# Näillä avaimilla suljettu way on viiva, ellei siinä ole area=yes.
+OSM_LINEAR_KEYS = frozenset(["highway", "barrier", "railway", "aerialway", "route"])
+# Avaimet, joiden osa arvoista on viivoja ja osa alueita.
+OSM_LINEAR_TAG_VALUES = {
+    "waterway": None,  # kaikki paitsi OSM_AREA_WATERWAYS
+    "power": frozenset(["line", "minor_line", "cable"]),
+    "natural": frozenset(["coastline", "tree_row", "cliff", "ridge", "arete"]),
+    "man_made": frozenset([
+        "embankment", "breakwater", "pipeline", "cutline", "groyne", "dyke",
+    ]),
+    "leisure": frozenset(["track", "slipway"]),
+    "aeroway": frozenset(["runway", "taxiway"]),
+}
+OSM_AREA_WATERWAYS = frozenset(["riverbank", "dock", "boatyard"])
+
+
+def osm_is_area_way(tags):
+    """Palauta True, jos suljettu way kuvaa aluetta eikä viivaa."""
+    tags = tags or {}
+    area = str(tags.get("area", "")).lower()
+    if area == "no":
+        return False
+    if area == "yes":
+        return True
+    if any(key in tags for key in OSM_LINEAR_KEYS):
+        return False
+    for key, values in OSM_LINEAR_TAG_VALUES.items():
+        if key not in tags:
+            continue
+        value = str(tags.get(key))
+        if key == "waterway":
+            if value not in OSM_AREA_WATERWAYS:
+                return False
+        elif value in values:
+            return False
+    return any(key in tags for key in OSM_AREA_KEYS)
+
+
+def _osm_coords(points):
+    out = []
+    for point in points or []:
+        if isinstance(point, dict) and point.get("lon") is not None and point.get("lat") is not None:
+            out.append((point["lon"], point["lat"]))
+    return out
+
+
+def osm_assemble_rings(segments):
+    """Liitä relaation wayt päistään yhteen. Palauta (suljetut renkaat, avoimet osat)."""
+    pending = [list(segment) for segment in segments if len(segment) >= 2]
+    rings = []
+    open_parts = []
+    while pending:
+        ring = pending.pop(0)
+        changed = True
+        while ring[0] != ring[-1] and changed:
+            changed = False
+            for index, segment in enumerate(pending):
+                if segment[0] == ring[-1]:
+                    ring.extend(segment[1:])
+                elif segment[-1] == ring[-1]:
+                    ring.extend(reversed(segment[:-1]))
+                elif segment[-1] == ring[0]:
+                    ring[:0] = segment[:-1]
+                elif segment[0] == ring[0]:
+                    ring[:0] = list(reversed(segment[1:]))
+                else:
+                    continue
+                pending.pop(index)
+                changed = True
+                break
+        if ring[0] == ring[-1] and len(ring) >= 4:
+            rings.append(ring)
+        else:
+            open_parts.append(ring)
+    return rings, open_parts
+
+
+def _osm_signed_area(ring):
+    total = 0.0
+    for (x1, y1), (x2, y2) in zip(ring, ring[1:]):
+        total += x1 * y2 - x2 * y1
+    return total / 2.0
+
+
+def _osm_point_in_ring(point, ring):
+    x, y = point
+    inside = False
+    for (x1, y1), (x2, y2) in zip(ring, ring[1:]):
+        if (y1 > y) != (y2 > y):
+            cross_x = x1 + (y - y1) * (x2 - x1) / float(y2 - y1)
+            if x < cross_x:
+                inside = not inside
+    return inside
+
+
+def _osm_oriented(ring, counter_clockwise):
+    ring = list(ring)
+    if (_osm_signed_area(ring) > 0) != counter_clockwise:
+        ring.reverse()
+    return [list(point) for point in ring]
+
+
+def osm_relation_geometry(element):
+    """Muodosta multipolygon-/boundary-relaatiosta GeoJSON-geometria.
+
+    Overpassin ``out geom`` antaa relaatiolle jäsenten geometriat, ei
+    ylätason geometriaa. Ulko- ja sisärenkaat kootaan jäsenwayden päistä.
+    Jos suljettuja ulkorenkaita ei synny, jäsenet palautetaan viivoina, jotta
+    aineisto ei katoa hiljaa.
+    """
+    outer_segments = []
+    inner_segments = []
+    for member in element.get("members") or []:
+        if not isinstance(member, dict) or member.get("type") != "way":
+            continue
+        coords = _osm_coords(member.get("geometry"))
+        if len(coords) < 2:
+            continue
+        if str(member.get("role") or "outer").lower() == "inner":
+            inner_segments.append(coords)
+        else:
+            outer_segments.append(coords)
+    outer_rings, outer_open = osm_assemble_rings(outer_segments)
+    inner_rings, _ = osm_assemble_rings(inner_segments)
+    if outer_rings:
+        polygons = [[_osm_oriented(ring, True)] for ring in outer_rings]
+        for inner in inner_rings:
+            probe = inner[0]
+            for polygon, outer in zip(polygons, outer_rings):
+                if _osm_point_in_ring(probe, outer):
+                    polygon.append(_osm_oriented(inner, False))
+                    break
+        if len(polygons) == 1:
+            return {"type": "Polygon", "coordinates": polygons[0]}
+        return {"type": "MultiPolygon", "coordinates": polygons}
+    lines = [[list(point) for point in part] for part in outer_open + inner_segments if len(part) >= 2]
+    if not lines:
+        return None
+    if len(lines) == 1:
+        return {"type": "LineString", "coordinates": lines[0]}
+    return {"type": "MultiLineString", "coordinates": lines}
+
+
+def osm_element_geometry(element, poi=False):
+    """Palauta Overpass-elementin GeoJSON-geometria tai None."""
+    if poi:
+        point = element if element.get("type") == "node" else element.get("center") or {}
+        if point.get("lon") is not None and point.get("lat") is not None:
+            return {"type": "Point", "coordinates": [point["lon"], point["lat"]]}
+        return None
+    element_type = element.get("type")
+    if element_type == "node":
+        if element.get("lon") is None or element.get("lat") is None:
+            return None
+        return {"type": "Point", "coordinates": [element["lon"], element["lat"]]}
+    if element_type == "relation":
+        return osm_relation_geometry(element)
+    coords = _osm_coords(element.get("geometry"))
+    if len(coords) < 2:
+        return None
+    if len(coords) >= 4 and coords[0] == coords[-1] and osm_is_area_way(element.get("tags")):
+        return {"type": "Polygon", "coordinates": [_osm_oriented(coords, True)]}
+    return {"type": "LineString", "coordinates": [list(point) for point in coords]}
 
 
 class OverpassAdapter(object):
@@ -525,25 +745,7 @@ class OverpassAdapter(object):
 
     @staticmethod
     def _element_geometry(element):
-        etype = element.get("type")
-        if etype == "node":
-            lon = element.get("lon")
-            lat = element.get("lat")
-            if lon is None or lat is None:
-                return None
-            return {"type": "Point", "coordinates": [lon, lat]}
-
-        geometry = element.get("geometry") or []
-        if not geometry:
-            return None
-        coords = [[pt.get("lon"), pt.get("lat")] for pt in geometry if "lon" in pt and "lat" in pt]
-        if len(coords) < 2:
-            return None
-
-        is_closed = coords[0] == coords[-1]
-        if is_closed and len(coords) >= 4:
-            return {"type": "Polygon", "coordinates": [coords]}
-        return {"type": "LineString", "coordinates": coords}
+        return osm_element_geometry(element)
 
 
 class GeofabrikPOIAdapter(object):
@@ -1008,9 +1210,7 @@ class VaylaWFSDownloader(object):
         self.heavy_chunk_sources = ["Väylä", "DigiRoad"]
 
         # MML:n OGC API Features- ja vector tile -palvelut
-        self._all_mml_layers_cache = {}
         self._mml_layer_mapping = {}
-        self._mml_layer_mapping_cache = {}
         self._runtime_mml_api_key = ""
         self._runtime_karttapaikka_api_key = ""
         self._runtime_aino_token = ""
@@ -1027,12 +1227,6 @@ class VaylaWFSDownloader(object):
         self._runtime_project = None
         self._runtime_map = None
         self._runtime_map_loaded = False
-        # Vanha WMTS-polku jätetään luokkaan yhteensopivuutta varten. MML:n
-        # normaali tasolistaus käyttää nykyistä kiinteistöjen OGC API Features
-        # -palvelua ja taustakarttatyökalu käyttää TileJSON-vektoritiiliä.
-        self.mml_wmts_capabilities = MML_WMTS_SERVICE_URL + "/WMTSCapabilities.xml"
-        self.mml_wmts_base = MML_WMTS_SERVICE_URL
-        self.mml_wms_services = dict(MML_WMS_SERVICE_URLS)
         self.mml_karttakuva_wmts = "https://karttakuva.maanmittauslaitos.fi/maasto/wmts/1.0.0/WMTSCapabilities.xml"
         self._all_mml_karttakuva_layers_cache = {}
         self._mml_karttakuva_layer_mapping = {}
@@ -1073,13 +1267,52 @@ class VaylaWFSDownloader(object):
     # LOGGING
     # ---------------------------
     def _msg(self, s: str):
-        arcpy.AddMessage(self._redact_secrets(s))
+        self._emit(arcpy.AddMessage, s)
 
     def _warn(self, s: str):
-        arcpy.AddWarning(self._redact_secrets(s))
+        self._emit(arcpy.AddWarning, s)
 
     def _error(self, s: str):
-        arcpy.AddError(self._redact_secrets(s))
+        self._emit(arcpy.AddError, s)
+
+    def _emit(self, writer, text):
+        """Kirjoita viesti arcpyyn vain ajon omistavasta säikeestä.
+
+        Rinnakkaiset verkkohaut voivat lokittaa uudelleenyrityksiä. Niiden
+        viestit puskuroidaan ja kirjoitetaan, kun pääsäie seuraavan kerran
+        lokittaa tai kutsuu ``_flush_deferred_messages``-metodia.
+        """
+        text = self._redact_secrets(text)
+        owner = getattr(self, "_message_owner_thread", None)
+        if owner is not None and threading.get_ident() != owner:
+            lock = getattr(self, "_deferred_messages_lock", None)
+            if lock is None:
+                return
+            with lock:
+                self._deferred_messages.append((writer, text))
+            return
+        self._flush_deferred_messages()
+        writer(text)
+
+    def _flush_deferred_messages(self):
+        owner = getattr(self, "_message_owner_thread", None)
+        lock = getattr(self, "_deferred_messages_lock", None)
+        if owner is None or lock is None or threading.get_ident() != owner:
+            return
+        with lock:
+            pending = list(self._deferred_messages)
+            self._deferred_messages = []
+        for writer, text in pending:
+            writer(text)
+
+    def _begin_message_owner(self):
+        self._message_owner_thread = threading.get_ident()
+        self._deferred_messages_lock = threading.Lock()
+        self._deferred_messages = []
+
+    def _end_message_owner(self):
+        self._flush_deferred_messages()
+        self._message_owner_thread = None
 
     def _scratch_folder(self):
         return self._run_scratch_folder or arcpy.env.scratchFolder
@@ -1256,9 +1489,12 @@ class VaylaWFSDownloader(object):
         return n
 
     def _is_remote_workspace(self, workspace: str) -> bool:
-        path = os.path.abspath(str(workspace or ""))
-        if path.startswith("\\\\"):
+        raw_path = str(workspace or "")
+        # UNC-polku tunnistetaan ennen abspathia: muualla kuin Windowsissa
+        # abspath liittäisi sen nykyiseen hakemistoon.
+        if raw_path.startswith("\\\\") or raw_path.startswith("//"):
             return True
+        path = os.path.abspath(raw_path)
         drive, _ = os.path.splitdrive(path)
         if not drive or os.name != "nt":
             return False
@@ -1270,21 +1506,61 @@ class VaylaWFSDownloader(object):
 
     def _unique_output_name(self, raw_name: str, workspace: str, max_len: int = 60) -> str:
         """Validoi nimi ja varmista ettei se törmää jo olemassa olevaan
-        tulokseen samassa workspacessa (estää hiljaisen ylikirjoituksen)."""
+        tulokseen samassa workspacessa (estää hiljaisen ylikirjoituksen).
+
+        Nimi varataan ajon ajaksi: tulokset kopioidaan kohteeseen vasta kaikkien
+        tasojen jälkeen, joten pelkkä Exists ei estäisi kahta saman ajon tasoa
+        saamasta samaa nimeä.
+        """
         base = self._validated_name(raw_name, workspace)[:max_len]
+        reserved = getattr(self, "_reserved_output_names", None)
+        if reserved is None:
+            reserved = set()
+            self._reserved_output_names = reserved
+
+        def _is_taken(name, check_exists):
+            key = self._output_name_key(workspace, name)
+            if key in reserved:
+                return True
+            return bool(check_exists and arcpy.Exists(
+                self._dataset_output_path(workspace, name)
+            ))
+
         if self._is_remote_workspace(workspace):
             # Verkko-GDB:n jokainen Exists-kutsu voi kestää useita sekunteja.
             # Ajokohtainen tunniste antaa käytännössä yksilöllisen nimen ilman
-            # yhtäkään verkkokyselyä.
-            suffix = "_{}".format(self._run_id or uuid.uuid4().hex[:8])
-            return base[:max_len - len(suffix)] + suffix
-        candidate = base
-        i = 1
-        while arcpy.Exists(self._dataset_output_path(workspace, candidate)):
-            suffix = "_{}".format(i)
-            candidate = base[:max_len - len(suffix)] + suffix
-            i += 1
+            # yhtäkään verkkokyselyä; saman ajon törmäykset ratkaistaan
+            # varauslistasta.
+            run_suffix = "_{}".format(self._run_id or uuid.uuid4().hex[:8])
+            candidate = base[:max_len - len(run_suffix)] + run_suffix
+            i = 2
+            while _is_taken(candidate, check_exists=False):
+                suffix = "_{}{}".format(i, run_suffix)
+                candidate = base[:max_len - len(suffix)] + suffix
+                i += 1
+        else:
+            candidate = base
+            i = 1
+            while _is_taken(candidate, check_exists=True):
+                suffix = "_{}".format(i)
+                candidate = base[:max_len - len(suffix)] + suffix
+                i += 1
+        reserved.add(self._output_name_key(workspace, candidate))
         return candidate
+
+    def _release_output_name(self, name, workspace):
+        """Vapauta varattu nimi, jota ei lopulta käytetty."""
+        reserved = getattr(self, "_reserved_output_names", None)
+        if reserved:
+            reserved.discard(self._output_name_key(workspace, name))
+
+    @staticmethod
+    def _output_name_key(workspace, name):
+        # File GDB:n ja shapefilen nimet ovat kirjainkoosta riippumattomia.
+        return (
+            os.path.normcase(os.path.normpath(str(workspace or ""))).casefold(),
+            str(name or "").casefold(),
+        )
 
     def _add_to_map(self, dataset_path: str):
         try:
@@ -1372,7 +1648,7 @@ class VaylaWFSDownloader(object):
         if callable(group_add):
             group_add(layer)
             return
-            raise Exception("Taustakartta-ryhmään ei voitu lisätä tasoa.")
+        raise Exception("Karttaryhmään ei voitu lisätä tasoa.")
 
     def _configure_group_layers(self, active_map, group_layer, layers, layer_name,
                                 visible=True):
@@ -1391,79 +1667,6 @@ class VaylaWFSDownloader(object):
         except Exception:
             pass
         return top_layer
-
-    def _add_path_to_group(self, active_map, group_layer, path, layer_name, visible=True,
-                           data_type=None):
-        if data_type:
-            added = active_map.addDataFromPath(path, data_type)
-        else:
-            added = active_map.addDataFromPath(path)
-        if not self._as_layer_list(added):
-            raise Exception("ArcGIS Pro ei palauttanut lisättyä tasoa polusta '{}'.".format(path))
-        # addDataFromPath voi palauttaa palvelutasolle useamman alitason.
-        # Kaikki palautetut tasot siirretään samaan ryhmään; päällimmäisenä
-        # näkyvä taso saa käyttäjälle selkeän nimen.
-        return self._configure_group_layers(
-            active_map, group_layer, added, layer_name, visible
-        )
-
-    def _add_mml_background_layers(self, local_raster_path, layer_id, display_name):
-        """Lisää RGB-varatason ja julkisen WMS:n Taustakartta-ryhmään."""
-        active_map = self._active_map_for_background()
-        group_layer = self._find_or_create_group_layer(active_map, "Taustakartta")
-        if group_layer is not None:
-            try:
-                group_layer.visible = True
-            except Exception:
-                pass
-        local_layer = None
-        try:
-            local_layer = self._add_path_to_group(
-                active_map,
-                group_layer,
-                local_raster_path,
-                "MML RGB – {}".format(display_name),
-                visible=False,
-            )
-        except Exception as ex:
-            self._warn("[VAROITUS] Paikallista MML RGB-rasteria ei lisätty kartalle: {}".format(ex))
-
-        service_url = self.mml_wms_services.get((layer_id or "").strip())
-        if not service_url:
-            if local_layer is not None:
-                local_layer.visible = True
-            raise Exception("MML WMS -palveluosoitetta ei ole tasolle '{}'.".format(layer_id))
-
-        self._msg("[INFO] live-WMS:n lisäys alkaa: {}".format(display_name))
-        try:
-            # Mahdolliset layoutit ja legendat käsitellään ennen tätä kohtaa.
-            # Tässä lisäosassa ei ole erillistä PAGX-tuontia, joten WMS lisätään
-            # vasta kun paikallinen RGB-rasteri on valmis ja ryhmä luotu.
-            layers = active_map.addDataFromPath(service_url, "WMS")
-            wms_layer = self._configure_group_layers(
-                active_map,
-                group_layer,
-                layers,
-                "MML WMS – {}".format(display_name),
-                visible=True,
-            )
-            if local_layer is not None:
-                local_layer.visible = False
-            self._msg("[INFO] live-WMS lisätty: {}".format(display_name))
-            return {"local": local_layer, "wms": wms_layer, "wms_added": True}
-        except Exception as ex:
-            if local_layer is not None:
-                try:
-                    local_layer.visible = True
-                except Exception:
-                    pass
-                self._warn(
-                    "[VAROITUS] live-WMS:n lisäys epäonnistui; paikallinen RGB-rasteri "
-                    "otettiin käyttöön varatasona: {}".format(ex)
-                )
-                self._msg("[INFO] Paikallinen rasteri otettu käyttöön varatasona.")
-                return {"local": local_layer, "wms": None, "wms_added": False}
-            raise
 
     def _add_mml_vector_tile_layer(self, tilejson_url, display_name, api_key):
         """Lisää MML:n nykyisen TileJSON-vektoritiilipalvelun kartalle.
@@ -1747,6 +1950,7 @@ class VaylaWFSDownloader(object):
             # alkuperäinen, jotta karttaan ei jää kuvan kaltaisia tuplatasoja.
             for root in roots:
                 self._put_layer_in_group(active_map, group_layer, root)
+            group_copy_found = False
             list_group_layers = getattr(group_layer, "listLayers", None)
             if callable(list_group_layers):
                 try:
@@ -1756,10 +1960,13 @@ class VaylaWFSDownloader(object):
                     ]
                     if candidates:
                         top_layer = candidates[0]
+                        group_copy_found = True
                 except Exception:
                     pass
             remove_layer = getattr(active_map, "removeLayer", None)
-            if callable(remove_layer):
+            # Alkuperäinen poistetaan vain, kun ryhmäkopio on varmasti
+            # olemassa. Muuten valittu WMS-taso katoaisi kartalta kokonaan.
+            if group_copy_found and callable(remove_layer):
                 for root in roots:
                     try:
                         remove_layer(root)
@@ -1767,10 +1974,6 @@ class VaylaWFSDownloader(object):
                         pass
         self._msg("[INFO] Aino live-WMS lisätty: {}".format(layer_title or layer_name))
         return {"wms": top_layer, "group": group_name}
-
-    def _parse_source_values(self, value_as_text):
-        values = self._parse_multivalue(value_as_text)
-        return values if values else ["Väylä"]
 
     def _parse_multivalue_param(self, param):
         try:
@@ -2149,7 +2352,7 @@ class VaylaWFSDownloader(object):
         if headers:
             req_headers.update(headers)
         req = urllib.request.Request(url, headers=req_headers)
-        with urllib.request.urlopen(req, timeout=60) as response:
+        with _urlopen(req, timeout=60) as response:
             xml_bytes = response.read()
         root = ET.fromstring(xml_bytes)
         layers = []
@@ -2185,7 +2388,7 @@ class VaylaWFSDownloader(object):
         if headers:
             req_headers.update(headers)
         req = urllib.request.Request(url, headers=req_headers)
-        with urllib.request.urlopen(req, timeout=60) as response:
+        with _urlopen(req, timeout=60) as response:
             xml_bytes = response.read()
         root = ET.fromstring(xml_bytes)
         layers = []
@@ -2569,17 +2772,6 @@ class VaylaWFSDownloader(object):
                         )
                     )
                     source_entries = []
-            elif source_type == "mml_raster":
-                source_entries = []
-                try:
-                    for disp in self._get_mml_layers_cached(api_key=self._runtime_mml_api_key):
-                        source_entries.append({
-                            "id": self._mml_layer_mapping.get(disp, disp),
-                            "title": disp,
-                            "kind": "mml_raster"
-                        })
-                except Exception as ex:
-                    self._warn("[VAROITUS] MML karttatasojen listaus epäonnistui: {}".format(ex))
             elif source_type == "mml_ogcapi":
                 source_entries = []
                 try:
@@ -2703,7 +2895,7 @@ class VaylaWFSDownloader(object):
                         "User-Agent": "ArcGISPro-Suomenvaylat-OSM/1.1",
                     }
                 )
-                with urllib.request.urlopen(req, timeout=150) as response:
+                with _urlopen(req, timeout=150) as response:
                     raw = response.read().decode("utf-8", errors="replace")
                 payload = json.loads(raw)
                 if not isinstance(payload, dict):
@@ -2997,22 +3189,9 @@ class VaylaWFSDownloader(object):
         )
 
     def _boundary_wkt_3067(self, boundary_fc, for_cql=False):
-        geoms = []
-        with arcpy.da.SearchCursor(boundary_fc, ["SHAPE@"]) as cur:
-            for row in cur:
-                if row[0]:
-                    geoms.append(row[0])
-        if not geoms:
+        merged, _ = self._merged_boundary_geometry(boundary_fc)
+        if merged is None:
             return None
-        if len(geoms) == 1:
-            merged = geoms[0]
-        else:
-            try:
-                merged = geoms[0]
-                for geom in geoms[1:]:
-                    merged = merged.union(geom)
-            except Exception:
-                merged = geoms[0]
         if for_cql:
             try:
                 merged = merged.generalize(50)
@@ -3042,10 +3221,39 @@ class VaylaWFSDownloader(object):
         try:
             for geom in geoms[1:]:
                 merged = merged.union(geom)
-        except Exception:
-            # Sama turvallinen varakäytös kuin nykyisessä WKT-toteutuksessa.
-            merged = geoms[0]
+        except Exception as union_error:
+            # Pelkkä ensimmäinen geometria rajaisi hiljaa pois muut valitut
+            # alueet. Yhdistetään ne GP-työkalulla tai kaadetaan selkeästi.
+            merged = self._dissolve_boundary_geometry(boundary_fc, union_error)
         return merged, len(geoms)
+
+    def _dissolve_boundary_geometry(self, boundary_fc, union_error=None):
+        """Yhdistä rajauksen kohteet Dissolve-työkalulla yhdeksi geometriaksi."""
+        dissolved_fc = os.path.join(
+            self._scratch_gdb(), "boundary_dissolve_{}".format(uuid.uuid4().hex[:8])
+        )
+        try:
+            arcpy.management.Dissolve(boundary_fc, dissolved_fc, multi_part="MULTI_PART")
+            dissolved = []
+            with arcpy.da.SearchCursor(dissolved_fc, ["SHAPE@"]) as cur:
+                for row in cur:
+                    if row and row[0]:
+                        dissolved.append(row[0])
+        except Exception as dissolve_error:
+            raise Exception(
+                "Rajauksen geometrioita ei voitu yhdistää (union: {}; Dissolve: {}).".format(
+                    union_error, dissolve_error
+                )
+            )
+        finally:
+            self._safe_delete(dissolved_fc)
+        if len(dissolved) != 1:
+            raise Exception(
+                "Rajauksen geometrioiden yhdistäminen tuotti {} geometriaa yhden sijaan.".format(
+                    len(dissolved)
+                )
+            )
+        return dissolved[0]
 
     def _prepare_cql_wkts(self, boundary_fc, full_wkt, tolerance=50.0,
                           max_encoded_chars=6500, max_grid_size=8):
@@ -3611,7 +3819,7 @@ class VaylaWFSDownloader(object):
                 timings.add("verkkopyyntö", time.perf_counter() - network_start)
                 last_error = ex
                 raw_bytes = None
-                if attempt < max_attempts:
+                if attempt < max_attempts and _is_retryable_error(ex):
                     delay = self._retry_delay(attempt)
                     self._log_retry(request_url, attempt, max_attempts,
                                     type(ex).__name__, delay, quiet)
@@ -3754,7 +3962,7 @@ class VaylaWFSDownloader(object):
         headers.update(extra_headers or {})
         try:
             req = urllib.request.Request(request_url, headers=headers)
-            with urllib.request.urlopen(req, timeout=30) as response:
+            with _urlopen(req, timeout=30) as response:
                 root = ET.fromstring(response.read())
         except Exception:
             return
@@ -4012,7 +4220,8 @@ class VaylaWFSDownloader(object):
                 elif timing_name == "väliaikaisen JSON-tiedoston poistaminen":
                     stats["json_temp_delete_s"] += timing_value
 
-        while len(visited) < max_requests:
+        truncated = False
+        while True:
             page_start = time.perf_counter()
             page_timing = PhaseMetrics()
             request_build_start = time.perf_counter()
@@ -4109,9 +4318,17 @@ class VaylaWFSDownloader(object):
                 if isinstance(link, dict) and str(link.get("rel", "")).lower() == "next":
                     next_url = link.get("href")
                     break
-            if not next_url or next_url in visited:
+            if not next_url:
                 break
-            current_url = urllib.parse.urljoin(current_url, str(next_url))
+            next_url = urllib.parse.urljoin(current_url, str(next_url))
+            if next_url in visited:
+                # Palvelu palasi jo haettuun sivuun: sivutus ei etene.
+                truncated = True
+                break
+            if len(visited) >= max_requests:
+                truncated = True
+                break
+            current_url = next_url
 
         if pending_pages:
             page_fc, conversion_timing = self._pages_to_temp_fc(
@@ -4122,7 +4339,7 @@ class VaylaWFSDownloader(object):
             if page_fc:
                 page_fcs.append(page_fc)
 
-        stats["truncated"] = len(visited) >= max_requests
+        stats["truncated"] = truncated
         if stats["truncated"]:
             self._warn(
                 "[VAROITUS] Maksimipyyntömäärä saavutettu OGC API -kokoelmassa "
@@ -4320,8 +4537,11 @@ class VaylaWFSDownloader(object):
             if workers <= 1 or wave <= 0:
                 return []
             indexes = [from_index + step * max_features for step in range(wave)]
-            with concurrent.futures.ThreadPoolExecutor(max_workers=wave) as pool:
-                return list(pool.map(lambda i: _fetch_page_at(i, use_post), indexes))
+            try:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=wave) as pool:
+                    return list(pool.map(lambda i: _fetch_page_at(i, use_post), indexes))
+            finally:
+                self._flush_deferred_messages()
 
         def _number_matched(payload):
             if not isinstance(payload, dict):
@@ -4337,7 +4557,16 @@ class VaylaWFSDownloader(object):
                     continue
             return None
 
-        while request_count < max_requests:
+        truncated = False
+        while True:
+            if request_count >= max_requests:
+                # Edellinen sivu oli täysi, joten dataa olisi todennäköisesti
+                # tullut lisää. Jos palvelu kertoi kokonaismäärän ja se on jo
+                # haettu, aineisto on kuitenkin täydellinen.
+                truncated = not (
+                    reported_total is not None and start_index >= reported_total
+                )
+                break
             page_start = time.perf_counter()
             active_cql = cql_filter if (use_cql and not cql_disabled) else None
             cql_post_tried = False
@@ -4484,6 +4713,10 @@ class VaylaWFSDownloader(object):
             if repeated_guard >= 2:
                 _accumulate_page_timing(page_timing)
                 stats["pages"] += 1
+                # Palvelu ei noudata startIndexiä: loput kohteet jäisivät
+                # hakematta, joten tulos merkitään vaillinaiseksi.
+                truncated = True
+                stats["repeated_pages"] = True
                 self._warn(
                     "[VAROITUS] WFS sivutus toistaa samaa sisältöä tasolla '{}'. Keskeytetään sivutus turvallisesti.".format(
                         layer_clean
@@ -4522,11 +4755,9 @@ class VaylaWFSDownloader(object):
             request_build_s = page_timing.get("requestin muodostaminen", 0.0) or 0.0
             network_s = page_timing.get("verkkopyyntö", 0.0) or 0.0
             response_read_s = page_timing.get("vastauksen lukeminen", 0.0) or 0.0
-            decode_s = page_timing.get("vastauksen dekoodaus", 0.0) or 0.0
             json_parse_s = page_timing.get("JSON-jäsennys", 0.0) or 0.0
             json_write_s = page_timing.get("väliaikaisen JSON-tiedoston kirjoittaminen", 0.0) or 0.0
             json_to_features_s = page_timing.get("JSONToFeatures", 0.0) or 0.0
-            json_temp_delete_s = page_timing.get("väliaikaisen JSON-tiedoston poistaminen", 0.0) or 0.0
             _accumulate_page_timing(page_timing)
             page_elapsed = time.perf_counter() - page_start
             if getattr(self, "_verbose_diagnostics", False):
@@ -4566,7 +4797,6 @@ class VaylaWFSDownloader(object):
             if page_fc:
                 page_fcs.append(page_fc)
 
-        truncated = request_count >= max_requests
         stats["truncated"] = truncated
         if truncated:
             self._warn(
@@ -4582,12 +4812,6 @@ class VaylaWFSDownloader(object):
     # ---------------------------
     # KUNNAT (lista + polygonit) paikallisesta geopackagesta
     # ---------------------------
-    def _fetch_all_kunnat(self):
-        if self._kunnat_cache is not None:
-            return self._kunnat_cache
-        self._kunnat_cache = self._get_extent_choices("Kunta/Kaupunki")
-        return self._kunnat_cache
-
     def _fetch_all_kunnat_fc(self):
         gpkg = self._find_admin_gpkg()
         if not gpkg:
@@ -4609,23 +4833,6 @@ class VaylaWFSDownloader(object):
         arcpy.management.Delete(lyr)
         return out_fc
 
-    def _copy_single_feature(self, fc: str, oid: int):
-        scratch_gdb = self._scratch_gdb()
-        oid_field = arcpy.Describe(fc).OIDFieldName
-        lyr = f"one_lyr_{uuid.uuid4().hex[:8]}"
-        arcpy.management.MakeFeatureLayer(fc, lyr, f"{oid_field} = {int(oid)}")
-        out_fc = os.path.join(scratch_gdb, f"kunta_{uuid.uuid4().hex}")
-        arcpy.management.CopyFeatures(lyr, out_fc)
-        arcpy.management.Delete(lyr)
-        return out_fc
-
-    @staticmethod
-    def _direct_xml_text(parent, local_name):
-        for child in list(parent):
-            if child.tag.split("}")[-1] == local_name and child.text:
-                return child.text.strip()
-        return None
-
     @staticmethod
     def _mml_auth_headers(api_key, user_agent="ArcGISPro-MMLBasemapTool/1.1"):
         key = (api_key or "").strip()
@@ -4634,58 +4841,6 @@ class VaylaWFSDownloader(object):
             token = base64.b64encode("{}:".format(key).encode("utf-8")).decode("ascii")
             headers["Authorization"] = "Basic {}".format(token)
         return headers
-
-    def _fetch_mml_capabilities(self, api_key=""):
-        key = (api_key or "").strip()
-        if not key:
-            raise Exception("MML WMTS vaatii API-avaimen.")
-        req = urllib.request.Request(
-            self.mml_wmts_capabilities,
-            headers=self._mml_auth_headers(key),
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=60) as response:
-                return response.read()
-        except urllib.error.HTTPError as ex:
-            if ex.code in (401, 403):
-                raise Exception("MML WMTS hylkäsi API-avaimen (HTTP {}).".format(ex.code))
-            raise
-
-    def _fetch_mml_layer_list(self, api_key=""):
-        out = []
-        mapping = {}
-        xml_bytes = self._fetch_mml_capabilities(api_key)
-        root = ET.fromstring(xml_bytes)
-        for elem in root.iter():
-            if not elem.tag.endswith("Layer"):
-                continue
-            layer_id = None
-            title = None
-            for child in elem.iter():
-                if child.tag.endswith("Identifier") and child.text and not layer_id:
-                    layer_id = child.text.strip()
-                elif child.tag.endswith("Title") and child.text and not title:
-                    title = child.text.strip()
-            if layer_id:
-                display = title if title else layer_id
-                if display in mapping and mapping[display] != layer_id:
-                    display = f"{display} ({layer_id})"
-                mapping[display] = layer_id
-                out.append(display)
-        out_sorted = sorted(list(set(out)))
-        if not out_sorted:
-            raise Exception("Yhtään MML-karttatasoa ei löytynyt WMTS capabilities -vastauksesta.")
-        self._mml_layer_mapping = mapping
-        return out_sorted
-
-    def _get_mml_layers_cached(self, api_key=""):
-        cache_key = "auth:{}".format(self._secret_cache_key(api_key)) if (api_key or "").strip() else "noauth"
-        if cache_key not in self._all_mml_layers_cache:
-            self._all_mml_layers_cache[cache_key] = self._fetch_mml_layer_list(api_key=api_key)
-            self._mml_layer_mapping_cache[cache_key] = dict(self._mml_layer_mapping)
-        else:
-            self._mml_layer_mapping = dict(self._mml_layer_mapping_cache.get(cache_key, {}))
-        return self._all_mml_layers_cache[cache_key]
 
     def _fetch_mml_karttakuva_layer_list(self, user="", password=""):
         out = []
@@ -4698,7 +4853,7 @@ class VaylaWFSDownloader(object):
             headers["Authorization"] = "Basic {}".format(token)
         req = urllib.request.Request(self.mml_karttakuva_wmts, headers=headers)
         try:
-            with urllib.request.urlopen(req, timeout=60) as response:
+            with _urlopen(req, timeout=60) as response:
                 xml_bytes = response.read()
         except urllib.error.HTTPError as ex:
             if ex.code == 401:
@@ -4727,7 +4882,9 @@ class VaylaWFSDownloader(object):
         return out_sorted
 
     def _get_mml_karttakuva_layers_cached(self, user="", password=""):
-        cache_key = "{}:{}".format(self._norm(user), self._norm(password))
+        cache_key = "{}:{}".format(
+            self._secret_cache_key(user), self._secret_cache_key(password)
+        )
         if cache_key not in self._all_mml_karttakuva_layers_cache:
             self._all_mml_karttakuva_layers_cache[cache_key] = self._fetch_mml_karttakuva_layer_list(user=user, password=password)
         return self._all_mml_karttakuva_layers_cache[cache_key]
@@ -4769,7 +4926,7 @@ class VaylaWFSDownloader(object):
         for caps_url in caps_urls:
             try:
                 req = urllib.request.Request(caps_url, headers={"User-Agent": "ArcGISPro-KapsiBasemapTool/1.0"})
-                with urllib.request.urlopen(req, timeout=60) as response:
+                with _urlopen(req, timeout=60) as response:
                     xml_bytes = response.read()
                 root = ET.fromstring(xml_bytes)
             except Exception as ex:
@@ -4852,20 +5009,23 @@ class VaylaWFSDownloader(object):
                 self._all_kapsi_layers_cache = sorted(list(self._kapsi_layer_mapping.keys()))
         return self._all_kapsi_layers_cache
 
-    def _get_basemap_provider(self, download_type):
-        if download_type == "Kapsi taustakartat":
-            return "Kapsi"
-        return "MML"
-
     def _get_basemap_layers_cached(self, provider):
         if provider == "Kapsi":
             return self._get_kapsi_layers_cached()
-        return self._get_mml_layers_cached(api_key=self._runtime_mml_api_key)
+        # MML:n nykyinen avoin karttakuvapalvelu julkaisee TileJSONin kautta
+        # sekä maastotiedot että kiinteistöjaotuksen.
+        self._mml_layer_mapping = dict(MML_VECTOR_TILE_LAYER_IDS)
+        return list(MML_VECTOR_TILE_LAYER_IDS.keys())
 
     def _get_basemap_layer_id(self, provider, display_name):
         if provider == "Kapsi":
             return self._kapsi_layer_mapping.get(display_name, display_name)
-        return self._mml_layer_mapping.get(display_name, display_name)
+        # ArcGIS Pro voi ajaa executen eri instanssissa kuin tasolistauksen,
+        # joten MML:n kiinteä TileJSON-kartoitus luetaan vakiosta.
+        return (
+            MML_VECTOR_TILE_LAYER_IDS.get(display_name)
+            or self._mml_layer_mapping.get(display_name, display_name)
+        )
 
     def _get_basemap_mode_options(self, provider):
         if provider == "Kapsi":
@@ -4946,7 +5106,7 @@ class VaylaWFSDownloader(object):
             "User-Agent": "ArcGISPro-Suomenvaylat-Oskari/1.0",
             "Accept": "image/png",
         })
-        with urllib.request.urlopen(request, timeout=180) as response:
+        with _urlopen(request, timeout=180) as response:
             raw = response.read()
             content_type = (response.headers.get("Content-Type") or "").lower()
         if not content_type.startswith("image/") or not raw.startswith(b"\x89PNG\r\n\x1a\n"):
@@ -5005,7 +5165,7 @@ class VaylaWFSDownloader(object):
                 "Accept-Encoding": "identity",
             })
             try:
-                with urllib.request.urlopen(request, timeout=90) as response:
+                with _urlopen(request, timeout=90) as response:
                     raw = response.read()
                     content_type = (response.headers.get("Content-Type") or "").lower()
                 if not content_type.startswith("image/") or len(raw) < 26 or not raw.startswith(b"\x89PNG\r\n\x1a\n"):
@@ -5018,9 +5178,10 @@ class VaylaWFSDownloader(object):
                 return raw
             except (urllib.error.URLError, TimeoutError, OSError, http.client.IncompleteRead) as ex:
                 last_error = ex
-                if attempt < attempts:
+                if attempt < attempts and _is_retryable_error(ex):
                     time.sleep(0.5 * attempt)
                     continue
+                break
             except Exception as ex:
                 last_error = ex
                 break
@@ -5038,7 +5199,7 @@ class VaylaWFSDownloader(object):
                 "User-Agent": "ArcGISPro-Suomenvaylat-Oskari/1.0",
                 "Accept": "application/xml,text/xml",
             })
-            with urllib.request.urlopen(request, timeout=60) as response:
+            with _urlopen(request, timeout=60) as response:
                 root = ET.fromstring(response.read())
             self._traficom_wmts_capabilities_root = root
             self._traficom_wmts_capabilities_at = time.time()
@@ -5377,7 +5538,7 @@ class VaylaWFSDownloader(object):
                 "Accept-Encoding": "identity",
             })
             try:
-                with urllib.request.urlopen(req, timeout=180) as resp:
+                with _urlopen(req, timeout=180) as resp:
                     raw = resp.read()
                     ctype = (resp.headers.get("Content-Type", "") or "").lower()
                     content_length = resp.headers.get("Content-Length")
@@ -5390,9 +5551,10 @@ class VaylaWFSDownloader(object):
                 return raw
             except (http.client.IncompleteRead, urllib.error.URLError, TimeoutError, OSError) as ex:
                 last_error = ex
-                if attempt < attempts:
+                if attempt < attempts and _is_retryable_error(ex):
                     time.sleep(0.5 * attempt)
                     continue
+                break
             except Exception as ex:
                 last_error = ex
                 break
@@ -5666,14 +5828,14 @@ class VaylaWFSDownloader(object):
     def _boundary_extent_3067(self, boundary_fc):
         desc = arcpy.Describe(boundary_fc)
         sr = getattr(desc, "spatialReference", None)
-        if sr and int(getattr(sr, "factoryCode", 0) or 0) == MML_WMTS_EPSG:
+        if sr and int(getattr(sr, "factoryCode", 0) or 0) == EPSG_TM35FIN:
             # WMTS-ruudukon laskenta tehdään nimenomaan latausrajauksen
             # Describe().extentistä, ei oletetusta projektinäkymästä.
             return desc.extent
         if not sr:
             raise Exception("Latausrajauksen koordinaatistoa ei voitu tunnistaa.")
         tmp = os.path.join(self._scratch_gdb(), f"bnd_3067_{uuid.uuid4().hex[:8]}")
-        arcpy.management.Project(boundary_fc, tmp, arcpy.SpatialReference(MML_WMTS_EPSG))
+        arcpy.management.Project(boundary_fc, tmp, arcpy.SpatialReference(EPSG_TM35FIN))
         ext = arcpy.Describe(tmp).extent
         self._safe_delete(tmp)
         return ext
@@ -5728,225 +5890,6 @@ class VaylaWFSDownloader(object):
         self._safe_delete(src_fc)
         return poly_fc
 
-    def _parse_mml_wmts_layer(self, xml_bytes, layer_id):
-        """Palauta EPSG:3067 WMTS-tason tyyli, formaatti ja matriisit."""
-        root = ET.fromstring(xml_bytes)
-        contents = next((elem for elem in root.iter() if elem.tag.split("}")[-1] == "Contents"), None)
-        if contents is None:
-            raise Exception("MML WMTS -vastauksesta puuttuu Contents.")
-
-        selected_layer = None
-        for elem in list(contents):
-            if elem.tag.split("}")[-1] != "Layer":
-                continue
-            if self._direct_xml_text(elem, "Identifier") == layer_id:
-                selected_layer = elem
-                break
-        if selected_layer is None:
-            raise Exception("MML WMTS -tasoa '{}' ei löytynyt.".format(layer_id))
-
-        formats = [
-            (child.text or "").strip()
-            for child in list(selected_layer)
-            if child.tag.split("}")[-1] == "Format" and child.text
-        ]
-        image_format = next((fmt for fmt in formats if fmt.lower() == "image/png"), None)
-        image_format = image_format or next((fmt for fmt in formats if fmt.lower() in ("image/jpeg", "image/jpg")), None)
-        if not image_format:
-            raise Exception("MML WMTS -tasolla ei ole tuettua PNG/JPEG-kuvaformaattia.")
-
-        style_id = "default"
-        styles = [child for child in list(selected_layer) if child.tag.split("}")[-1] == "Style"]
-        preferred_style = next(
-            (style for style in styles if str(style.attrib.get("isDefault", "")).lower() == "true"),
-            styles[0] if styles else None,
-        )
-        if preferred_style is not None:
-            style_id = self._direct_xml_text(preferred_style, "Identifier") or style_id
-
-        linked_sets = []
-        for child in list(selected_layer):
-            if child.tag.split("}")[-1] == "TileMatrixSetLink":
-                matrix_set_id = self._direct_xml_text(child, "TileMatrixSet")
-                if matrix_set_id:
-                    linked_sets.append(matrix_set_id)
-
-        matrix_sets = {}
-        for elem in list(contents):
-            if elem.tag.split("}")[-1] != "TileMatrixSet":
-                continue
-            matrix_set_id = self._direct_xml_text(elem, "Identifier")
-            if matrix_set_id:
-                matrix_sets[matrix_set_id] = elem
-
-        selected_set_id = None
-        selected_set = None
-        for matrix_set_id in linked_sets:
-            elem = matrix_sets.get(matrix_set_id)
-            if elem is None:
-                continue
-            crs = self._direct_xml_text(elem, "SupportedCRS") or ""
-            if "3067" in crs or "tm35" in matrix_set_id.lower():
-                selected_set_id, selected_set = matrix_set_id, elem
-                break
-        if selected_set is None:
-            raise Exception("MML WMTS -tasolta puuttuu EPSG:3067 TileMatrixSet.")
-
-        matrices = []
-        for elem in list(selected_set):
-            if elem.tag.split("}")[-1] != "TileMatrix":
-                continue
-            try:
-                matrix_id = self._direct_xml_text(elem, "Identifier")
-                scale = float(self._direct_xml_text(elem, "ScaleDenominator"))
-                origin_parts = re.split(r"[\s,]+", self._direct_xml_text(elem, "TopLeftCorner") or "")
-                origin_values = [float(value) for value in origin_parts if value]
-                if len(origin_values) != 2:
-                    continue
-                origin_x, origin_y = origin_values
-                # Osa palveluista noudattaa EPSG-akselijärjestystä (N,E),
-                # vaikka WMTS-laskenta tarvitsee arvot järjestyksessä (E,N).
-                if abs(origin_x) > 2000000 and abs(origin_y) < 2000000:
-                    origin_x, origin_y = origin_y, origin_x
-                matrices.append({
-                    "id": matrix_id,
-                    "resolution": scale * 0.00028,
-                    "origin_x": origin_x,
-                    "origin_y": origin_y,
-                    "tile_width": int(self._direct_xml_text(elem, "TileWidth")),
-                    "tile_height": int(self._direct_xml_text(elem, "TileHeight")),
-                    "matrix_width": int(self._direct_xml_text(elem, "MatrixWidth")),
-                    "matrix_height": int(self._direct_xml_text(elem, "MatrixHeight")),
-                })
-            except (TypeError, ValueError):
-                continue
-        if not matrices:
-            raise Exception("MML WMTS -palvelusta ei löytynyt käyttökelpoisia tiilimatriiseja.")
-        return {
-            "style": style_id,
-            "format": image_format,
-            "matrix_set": selected_set_id,
-            "matrices": matrices,
-        }
-
-    @staticmethod
-    def _wmts_tile_range(matrix, ext):
-        span_x = matrix["tile_width"] * matrix["resolution"]
-        span_y = matrix["tile_height"] * matrix["resolution"]
-        epsilon_x = max(span_x * 1e-10, 1e-8)
-        epsilon_y = max(span_y * 1e-10, 1e-8)
-        col_min = int(math.floor((ext.XMin - matrix["origin_x"]) / span_x))
-        col_max = int(math.floor((ext.XMax - epsilon_x - matrix["origin_x"]) / span_x))
-        row_min = int(math.floor((matrix["origin_y"] - ext.YMax) / span_y))
-        row_max = int(math.floor((matrix["origin_y"] - ext.YMin - epsilon_y) / span_y))
-        col_min = max(0, col_min)
-        row_min = max(0, row_min)
-        col_max = min(matrix["matrix_width"] - 1, col_max)
-        row_max = min(matrix["matrix_height"] - 1, row_max)
-        if col_max < col_min or row_max < row_min:
-            return None
-        return col_min, col_max, row_min, row_max
-
-    def _choose_mml_wmts_matrix(self, matrices, ext, max_tiles=25):
-        candidates = []
-        for matrix in matrices:
-            tile_range = self._wmts_tile_range(matrix, ext)
-            if tile_range is None:
-                continue
-            col_min, col_max, row_min, row_max = tile_range
-            count = (col_max - col_min + 1) * (row_max - row_min + 1)
-            candidates.append((matrix["resolution"], count, matrix, tile_range))
-        if not candidates:
-            raise Exception("Valittu alue ei osu MML WMTS -palvelun tiiliruudukkoon.")
-        candidates.sort(key=lambda item: item[0])
-        for candidate in candidates:
-            if candidate[1] <= max_tiles:
-                return candidate[2], candidate[3]
-        # Karkeinkin taso on turvallisin vaihtoehto hyvin suurelle alueelle.
-        return candidates[-1][2], candidates[-1][3]
-
-    @staticmethod
-    def _mml_wmts_resolution(level):
-        level = int(level)
-        if level < MML_WMTS_MIN_LEVEL or level > MML_WMTS_MAX_LEVEL:
-            raise ValueError("MML WMTS -tason pitää olla välillä 0–13.")
-        return float(2 ** (MML_WMTS_MAX_LEVEL - level))
-
-    @staticmethod
-    def _mml_wmts_tile_range(ext, level):
-        """Laske MML:n kiinteän ETRS-TM35FIN-ruudukon kattavat tiilet."""
-        resolution = VaylaWFSDownloader._mml_wmts_resolution(level)
-        tile_span = MML_WMTS_TILE_SIZE * resolution
-        # Kun rajaus päättyy täsmälleen tiilen reunaan, viimeistä viereistä
-        # tiiltä ei tarvita. Pieni epsilon estää liukulukujen vuoksi syntyvän
-        # ylimääräisen rivi-/sarakepyynnön.
-        epsilon = max(resolution * 1e-10, 1e-8)
-        first_col = int(math.floor((ext.XMin - MML_WMTS_ORIGIN_X) / tile_span))
-        last_col = int(math.floor(
-            (ext.XMax - epsilon - MML_WMTS_ORIGIN_X) / tile_span
-        ))
-        first_row = int(math.floor((MML_WMTS_ORIGIN_Y - ext.YMax) / tile_span))
-        last_row = int(math.floor(
-            (MML_WMTS_ORIGIN_Y - ext.YMin - epsilon) / tile_span
-        ))
-        first_col = max(0, first_col)
-        first_row = max(0, first_row)
-        if last_col < first_col or last_row < first_row:
-            return None
-        return first_row, last_row, first_col, last_col
-
-    @classmethod
-    def _choose_mml_fixed_wmts_level(cls, ext):
-        """Valitse oletustaso 9, mutta harvenna tasoa yli 256 tiilen alueella."""
-        for level in range(MML_WMTS_DEFAULT_LEVEL, MML_WMTS_MIN_LEVEL - 1, -1):
-            tile_range = cls._mml_wmts_tile_range(ext, level)
-            if tile_range is None:
-                continue
-            first_row, last_row, first_col, last_col = tile_range
-            count = (last_row - first_row + 1) * (last_col - first_col + 1)
-            if count <= MML_WMTS_MAX_TILES:
-                return level, tile_range, count
-        raise Exception(
-            "MML WMTS -rajaukselle tarvittaisiin yli 256 tiiltä myös tasolla 0."
-        )
-
-    def _mml_wmts_tile_url(self, layer_id, level, row, column, api_key):
-        key = (api_key or "").strip()
-        if not key:
-            raise Exception("MML WMTS vaatii API-avaimen.")
-        service_url = self.mml_wmts_base.rstrip("/")
-        encoded_key = urllib.parse.quote(key, safe="")
-        return "{}/{}/default/{}/{}/{}/{}.png?api-key={}".format(
-            service_url,
-            layer_id,
-            MML_WMTS_MATRIX_SET,
-            int(level),
-            int(row),
-            int(column),
-            encoded_key,
-        )
-
-    def _download_mml_wmts_tile(self, request_url, api_key):
-        """Lataa yksi PNG8-tiili ja vaadi aidon PNG-tiedoston allekirjoitus."""
-        req = urllib.request.Request(
-            request_url,
-            headers=dict(self._mml_auth_headers(api_key), Accept="image/png"),
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=180) as response:
-                raw = response.read()
-        except urllib.error.HTTPError as ex:
-            if ex.code in (401, 403):
-                raise Exception(
-                    "MML WMTS hylkäsi API-avaimen tiiltä ladattaessa (HTTP {}).".format(
-                        ex.code
-                    )
-                )
-            raise
-        if not raw.startswith(b"\x89PNG\r\n\x1a\n"):
-            raise Exception("MML WMTS palautti kuvan sijaan muuta sisältöä kuin PNG:n.")
-        return raw
-
     @staticmethod
     def _path_exists(path):
         try:
@@ -5998,218 +5941,6 @@ class VaylaWFSDownloader(object):
                 except Exception:
                     pass
         raise Exception("PNG8-tiilen RGB-muunnos epäonnistui: {}".format("; ".join(errors)))
-
-    def _ensure_raster_file_gdb(self, workspace):
-        """Palauta File GDB rasteritulokselle, luo sellainen tarvittaessa."""
-        if not workspace:
-            try:
-                workspace = arcpy.mp.ArcGISProject("CURRENT").defaultGeodatabase
-            except Exception:
-                workspace = self._scratch_gdb()
-        workspace = os.path.abspath(str(workspace))
-        if workspace.lower().endswith(".gdb"):
-            if not self._path_exists(workspace):
-                raise Exception("Rasterin File Geodatabasea ei löydy: {}".format(workspace))
-            return workspace
-
-        if not os.path.isdir(workspace):
-            raise Exception("Rasterin tallennuskohde ei ole kansio tai File GDB: {}".format(workspace))
-        gdb_name = self._sanitize_table_name("Suomenvaylat_MML") + ".gdb"
-        gdb_path = os.path.join(workspace, gdb_name)
-        if not self._path_exists(gdb_path):
-            arcpy.management.CreateFileGDB(workspace, gdb_name)
-        return gdb_path
-
-    def _download_mml_wmts_geotiff(
-        self, layer_id: str, boundary_fc: str, workspace: str, api_key: str,
-        output_gdb: str = None,
-    ):
-        """Lataa MML:n PNG8-tiilet, muunna ne yksitellen RGB:ksi ja mosaiikoi.
-
-        ``output_gdb`` annetaan MML-taustakartalle, jolloin lopputulos syntyy
-        suoraan File Geodatabaseen. Yleisen MML-rasterilähteen vanha kutsu voi
-        edelleen käyttää väliaikaista kansiota ilman että karttatyönkulku
-        muuttuu.
-        """
-        key = (api_key or "").strip()
-        if not key:
-            raise Exception("MML WMTS vaatii API-avaimen.")
-        layer_id = (layer_id or "").strip()
-        if not layer_id:
-            raise Exception("MML WMTS -tason tunniste puuttuu.")
-
-        # Rajaus otetaan Describe().extentistä. Jos aineisto ei ole
-        # EPSG:3067:ssä, _boundary_extent_3067 projisoi sen ensin väliaikaisesti.
-        ext = self._boundary_extent_3067(boundary_fc)
-        level, tile_range, tile_count = self._choose_mml_fixed_wmts_level(ext)
-        first_row, last_row, first_col, last_col = tile_range
-        resolution = self._mml_wmts_resolution(level)
-        self._msg(
-            "[INFO] MML-tason lataus alkaa: {} (taso {}, {} tiiltä).".format(
-                layer_id, level, tile_count
-            )
-        )
-
-        raster_dir = self._raster_folder(workspace)
-        if not os.path.isdir(raster_dir):
-            os.makedirs(raster_dir, exist_ok=True)
-        temporary_dir = tempfile.mkdtemp(prefix="mml_wmts_tiles_", dir=raster_dir)
-        png_paths = []
-        rgb_paths = []
-        tile_span = MML_WMTS_TILE_SIZE * resolution
-
-        try:
-            # Sama rinnakkaistus kuin Kapsin laatoissa: verkkosidonnainen työ
-            # tehdään säikeissä, tiedostojen kirjoitus pääsäikeessä.
-            tile_plan = []
-            for row in range(first_row, last_row + 1):
-                for column in range(first_col, last_col + 1):
-                    tile_stem = self._sanitize_table_name(
-                        "MML_{}_L{}_R{}_C{}".format(layer_id, level, row, column)
-                    )
-                    tile_plan.append({
-                        "url": self._mml_wmts_tile_url(layer_id, level, row, column, key),
-                        "png_path": os.path.join(temporary_dir, tile_stem + ".png"),
-                        "row": row,
-                        "column": column,
-                    })
-
-            workers = max(1, int(getattr(self, "_tile_workers", 8) or 8))
-            workers = min(workers, len(tile_plan)) or 1
-            if workers > 1:
-                with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
-                    payloads = list(pool.map(
-                        lambda item: self._download_mml_wmts_tile(item["url"], key),
-                        tile_plan,
-                    ))
-            else:
-                payloads = [
-                    self._download_mml_wmts_tile(item["url"], key)
-                    for item in tile_plan
-                ]
-
-            if not payloads:
-                raise Exception("MML WMTS ei palauttanut yhtään tiiltä.")
-
-            use_pil = False
-            try:
-                import io
-                from PIL import Image
-                use_pil = True
-            except ImportError:
-                use_pil = False
-
-            output_workspace = output_gdb or raster_dir
-            is_gdb = str(output_workspace).lower().endswith(".gdb")
-            output_stem = "MML_{}_RGB".format(layer_id)
-            if is_gdb:
-                output_base = self._unique_output_name(output_stem, output_workspace)
-            else:
-                output_base = self._validated_name(output_stem, output_workspace)
-                suffix = 1
-                while os.path.exists(os.path.join(output_workspace, output_base + ".tif")):
-                    output_base = "{}_{}".format(
-                        self._validated_name(output_stem, output_workspace), suffix
-                    )
-                    suffix += 1
-            output_name = output_base if is_gdb else output_base + ".tif"
-            final_path = os.path.join(output_workspace, output_name)
-
-            if use_pil:
-                cols = last_col - first_col + 1
-                rows = last_row - first_row + 1
-                total_w = cols * MML_WMTS_TILE_SIZE
-                total_h = rows * MML_WMTS_TILE_SIZE
-                mosaic_img = Image.new("RGB", (total_w, total_h))
-                for item, raw in zip(tile_plan, payloads):
-                    tile_img = Image.open(io.BytesIO(raw))
-                    if tile_img.mode != "RGB":
-                        tile_img = tile_img.convert("RGB")
-                    c_off = (item["column"] - first_col) * MML_WMTS_TILE_SIZE
-                    r_off = (item["row"] - first_row) * MML_WMTS_TILE_SIZE
-                    mosaic_img.paste(tile_img, (c_off, r_off))
-
-                stitched_png = os.path.join(temporary_dir, "stitched.png")
-                mosaic_img.save(stitched_png, format="PNG")
-
-                class _TileExtent:
-                    pass
-
-                tile_ext = _TileExtent()
-                tile_ext.XMin = MML_WMTS_ORIGIN_X + first_col * tile_span
-                tile_ext.XMax = MML_WMTS_ORIGIN_X + (last_col + 1) * tile_span
-                tile_ext.YMax = MML_WMTS_ORIGIN_Y - first_row * tile_span
-                tile_ext.YMin = MML_WMTS_ORIGIN_Y - (last_row + 1) * tile_span
-                self._write_world_file(
-                    stitched_png, tile_ext, total_w, total_h
-                )
-
-                arcpy.management.CopyRaster(stitched_png, final_path)
-                try:
-                    sr_code = int(arcpy.Describe(final_path).spatialReference.factoryCode or 0)
-                except Exception:
-                    sr_code = 0
-                if sr_code != MML_WMTS_EPSG:
-                    arcpy.management.DefineProjection(final_path, arcpy.SpatialReference(MML_WMTS_EPSG))
-                self._msg("[INFO] RGB-mosaiikki valmis: {}".format(final_path))
-                if is_gdb:
-                    self._msg("[INFO] Rasteri tallennettu geodatabaseen: {}".format(final_path))
-                return final_path
-
-            # Fallback ilman PIL:iä
-            downloaded = 0
-            for item, raw in zip(tile_plan, payloads):
-                png_path = item["png_path"]
-                with open(png_path, "wb") as handle:
-                    handle.write(raw)
-
-                class _TileExtent:
-                    pass
-
-                tile_ext = _TileExtent()
-                tile_ext.XMin = MML_WMTS_ORIGIN_X + item["column"] * tile_span
-                tile_ext.XMax = tile_ext.XMin + tile_span
-                tile_ext.YMax = MML_WMTS_ORIGIN_Y - item["row"] * tile_span
-                tile_ext.YMin = tile_ext.YMax - tile_span
-                self._write_world_file(
-                    png_path, tile_ext, MML_WMTS_TILE_SIZE, MML_WMTS_TILE_SIZE
-                )
-                png_paths.append((png_path, tile_ext))
-                downloaded += 1
-
-            for png_path, tile_ext in png_paths:
-                rgb_path = os.path.splitext(png_path)[0] + "_RGB.tif"
-                self._colormap_to_rgb(png_path, rgb_path)
-                self._write_world_file(
-                    rgb_path, tile_ext, MML_WMTS_TILE_SIZE, MML_WMTS_TILE_SIZE
-                )
-                rgb_paths.append(rgb_path)
-
-            if not rgb_paths:
-                raise Exception("MML WMTS ei palauttanut yhtään tiiltä.")
-
-            arcpy.management.MosaicToNewRaster(
-                rgb_paths,
-                output_workspace,
-                output_name,
-                coordinate_system_for_the_raster=arcpy.SpatialReference(MML_WMTS_EPSG),
-                pixel_type="8_BIT_UNSIGNED",
-                number_of_bands=3,
-                cellsize=resolution,
-                mosaic_method="FIRST",
-                mosaic_colormap_mode="REJECT",
-            )
-            self._msg("[INFO] RGB-mosaiikki valmis: {}".format(final_path))
-            if is_gdb:
-                self._msg("[INFO] Rasteri tallennettu geodatabaseen: {}".format(final_path))
-            return final_path
-        finally:
-            # PNG:t, world/prj-tiedostot ja väliaikaiset RGB-TIFFit ovat vain
-            # ajon välivaiheita; lopullinen rasteri jää output_workspaceen.
-            try:
-                shutil.rmtree(temporary_dir, ignore_errors=True)
-            except Exception:
-                pass
 
     # ---------------------------
     # UI / PARAMETERS
@@ -6585,7 +6316,7 @@ class VaylaWFSDownloader(object):
         if selected_layers:
             for lbl in selected_layers:
                 info = self._layer_mapping.get(lbl)
-                if info and info.get("kind") in ("mml_raster", "mml_property_ogcapi"):
+                if info and info.get("kind") == "mml_property_ogcapi":
                     needs_mml_key = True
                     break
         if needs_mml_key and not mml_api_key.strip():
@@ -6678,6 +6409,8 @@ class VaylaWFSDownloader(object):
         self._tool_metrics = PhaseMetrics()
         self._run_had_layer_failures = False
         self._tool_run_start = time.perf_counter()
+        self._reserved_output_names = set()
+        self._begin_message_owner()
         original_overwrite = arcpy.env.overwriteOutput
         try:
             original_scratch_workspace = arcpy.env.scratchWorkspace
@@ -6736,6 +6469,162 @@ class VaylaWFSDownloader(object):
             self._log_phase_summary(
                 "[INFO] Työkalun vaiheajat:", self._tool_metrics, tool_phases, total_s
             )
+            self._end_message_owner()
+            self._transport().close_all()
+
+    @staticmethod
+    def _add_fetch_stats_to_metrics(stats, layer_metrics):
+        """Siirrä hakufunktion tilastot tason vaiheaikoihin.
+
+        Palauttaa (verkkoaika, JSONToFeatures-aika) tason yhteenvetoa varten.
+        """
+        stats = stats or {}
+        stat_to_phase = {
+            "request_build_s": "requestin muodostaminen",
+            "network_s": "verkkopyyntö",
+            "response_read_s": "vastauksen lukeminen",
+            "decode_s": "vastauksen dekoodaus",
+            "json_parse_s": "JSON-jäsennys",
+            "json_write_s": "väliaikaisen JSON-tiedoston kirjoittaminen",
+            "json_to_features_s": "JSONToFeatures",
+            "projection_s": "projektointi",
+            "json_temp_delete_s": "väliaikaisen JSON-tiedoston poistaminen",
+        }
+        for stat_name, phase_name in stat_to_phase.items():
+            value = stats.get(stat_name)
+            if isinstance(value, (int, float)) and value > 0:
+                layer_metrics.add(phase_name, value)
+        http_s = stats.get("network_s", stats.get("http_s", 0.0)) or 0.0
+        json_s = stats.get("json_to_features_s", stats.get("gp_json_s", 0.0)) or 0.0
+        return http_s, json_s
+
+    @staticmethod
+    def _shape_type_suffix(shape_type):
+        return {
+            "point": "pisteet", "multipoint": "pisteet",
+            "polyline": "viivat", "polygon": "alueet",
+        }.get(str(shape_type or "").lower(), str(shape_type or "muut").lower())
+
+    @staticmethod
+    def _shape_type_label(shape_type):
+        return {
+            "point": "pisteet", "multipoint": "pisteet",
+            "polyline": "viivat", "polygon": "alueet",
+        }.get(str(shape_type or "").lower(), str(shape_type or "tuntematon"))
+
+    @staticmethod
+    def _copy_phase_metrics(metrics):
+        copied = PhaseMetrics()
+        copied.seconds = dict(metrics.seconds)
+        copied.status = dict(metrics.status)
+        return copied
+
+    def _group_feature_classes_by_shape(self, feature_classes):
+        """Ryhmittele väliaineistot geometriatyypin mukaan vakaassa järjestyksessä.
+
+        Merge hyväksyy vain saman geometriatyypin aineistoja. Esimerkiksi
+        OSM-tasot voivat sisältää sekä pisteitä, viivoja että alueita.
+        """
+        order = {"point": 0, "multipoint": 1, "polyline": 2, "polygon": 3}
+        groups = {}
+        for feature_class in feature_classes:
+            shape_type = str(
+                getattr(arcpy.Describe(feature_class), "shapeType", "") or ""
+            )
+            # Point ja Multipoint ovat eri tyyppejä Mergelle, joten niitä ei
+            # yhdistetä samaan ryhmään.
+            groups.setdefault(shape_type, []).append(feature_class)
+        return sorted(
+            groups.items(), key=lambda item: (order.get(item[0].lower(), 9), item[0])
+        )
+
+    def _finalize_feature_group(self, group_fcs, staged_fc, boundary_fc, skip_clip,
+                                dedupe, metrics, layer_clean):
+        """Yhdistä, poista duplikaatit ja rajaa yhden geometriatyypin väliaineistot.
+
+        Palauttaa kohdemäärän ja vaiheajat. Poikkeus jätetään kutsujalle,
+        joka kirjaa tason epäonnistuneeksi ilman koko ajon kaatumista.
+        """
+        result = {"merge_s": 0.0, "stage_s": 0.0, "clip_s": 0.0, "feature_count": 0}
+        if len(group_fcs) == 1:
+            merged_fc = group_fcs[0]
+            created_merged = False
+        else:
+            merged_fc = os.path.join(self._scratch_gdb(), f"merged_{uuid.uuid4().hex[:10]}")
+            merge_start = time.perf_counter()
+            arcpy.management.Merge(group_fcs, merged_fc)
+            result["merge_s"] = time.perf_counter() - merge_start
+            metrics.add("Merge", result["merge_s"])
+            created_merged = True
+
+        # Kuntakohtaisessa ja Overpass-ruutuhaussa sama kohde voi tulla
+        # mukaan useasta bboxista. Kaikki attribuutit kuuluvat vertailuun,
+        # joten saman geometrian eri POI-fclass-rivit säilyvät.
+        if dedupe and created_merged:
+            try:
+                duplicate_start = time.perf_counter()
+                self._delete_identical_downloads(merged_fc)
+                metrics.add("duplikaattien poisto", time.perf_counter() - duplicate_start)
+            except Exception as ex:
+                self._warn(f"[VAROITUS] Duplikaattien poisto epäonnistui tasolla '{layer_clean}': {ex}")
+
+        if skip_clip:
+            stage_start = time.perf_counter()
+            arcpy.management.CopyFeatures(merged_fc, staged_fc)
+            result["stage_s"] = time.perf_counter() - stage_start
+            metrics.add("staging", result["stage_s"])
+            metrics.skip("Clip", "ohitettu (CQL palauttaa kokonaiset leikkaavat geometriat)")
+        else:
+            clip_start = time.perf_counter()
+            arcpy.analysis.Clip(merged_fc, boundary_fc, staged_fc)
+            result["clip_s"] = time.perf_counter() - clip_start
+            metrics.add("Clip", result["clip_s"])
+            metrics.skip("staging", "ei käytetty erillisenä vaiheena")
+
+        temp_cleanup_start = time.perf_counter()
+        for temp_fc in group_fcs:
+            if temp_fc != merged_fc:
+                self._safe_delete(temp_fc)
+        if created_merged:
+            self._safe_delete(merged_fc)
+        elif merged_fc != staged_fc:
+            self._safe_delete(merged_fc)
+        metrics.add("väliaineistojen poistaminen", time.perf_counter() - temp_cleanup_start)
+
+        count_start = time.perf_counter()
+        result["feature_count"] = int(arcpy.management.GetCount(staged_fc)[0])
+        metrics.add("kohdemäärän laskenta", time.perf_counter() - count_start)
+        return result
+
+    def _resolve_output_workspace(self, workspace):
+        """Palauta pysyvä tallennuskohde.
+
+        Tyhjä kohde korvataan projektin oletusgeodatabasella. Ajon scratch-
+        aineistoon ei koskaan tallenneta, koska se poistetaan ajon lopussa.
+        """
+        workspace = str(workspace or "").strip()
+        if not workspace:
+            try:
+                workspace = str(
+                    arcpy.mp.ArcGISProject("CURRENT").defaultGeodatabase or ""
+                ).strip()
+            except Exception:
+                workspace = ""
+        if not workspace:
+            raise Exception(
+                "Tallennuskohdetta ei annettu eikä ArcGIS Pro -projektilla ole "
+                "oletusgeodatabasea. Valitse tallennuskohde (GDB tai kansio)."
+            )
+        run_folder = getattr(self, "_run_scratch_folder", None)
+        if run_folder:
+            run_root = os.path.normcase(os.path.abspath(run_folder))
+            target = os.path.normcase(os.path.abspath(workspace))
+            if target == run_root or target.startswith(run_root + os.sep):
+                raise Exception(
+                    "Tallennuskohde ei voi olla ajon väliaikainen scratch-aineisto, "
+                    "koska se poistetaan ajon lopussa."
+                )
+        return workspace
 
     def _execute_impl(self, parameters, messages):
         self._msg("=== Työkalu käynnistyy ===")
@@ -6784,12 +6673,11 @@ class VaylaWFSDownloader(object):
             "parametrien lukeminen ja validointi", time.perf_counter() - parameter_start
         )
 
-        if not workspace or workspace.strip() == "":
-            try:
-                aprx = arcpy.mp.ArcGISProject("CURRENT")
-                workspace = aprx.defaultGeodatabase
-            except Exception:
-                workspace = self._scratch_gdb()
+        try:
+            workspace = self._resolve_output_workspace(workspace)
+        except Exception as ex:
+            self._error("[VIRHE] {}".format(ex))
+            raise arcpy.ExecuteError
 
         scratch_gdb = self._scratch_gdb()
         workspace_validation_start = time.perf_counter()
@@ -6846,7 +6734,6 @@ class VaylaWFSDownloader(object):
         bbox_str = f"{ext.XMin - buffer_m},{ext.YMin - buffer_m},{ext.XMax + buffer_m},{ext.YMax + buffer_m}"
 
         max_features = 5000  # Vähennetty 10000:sta tehokkaampia HTTP-pyyntöjä varten
-        scratch_folder = self._scratch_folder()
         output_formats = ["application/json", "application/geo+json", "application/json;subtype=geojson", "json"]
         wkt_start = time.perf_counter()
         boundary_wkt = self._boundary_wkt_3067(boundary_fc, for_cql=True)
@@ -7003,22 +6890,16 @@ class VaylaWFSDownloader(object):
             layer_metrics = PhaseMetrics()
             layer_http_s = 0.0
             layer_gp_json_s = 0.0
-            layer_gp_clip_s = 0.0
-            layer_gp_copy_s = 0.0
-            layer_gp_merge_s = 0.0
-            layer_gp_stage_s = 0.0
             skip_clip = False
             cql_split_effective = False
             stage_name = "stage_{}_{}".format(layer_index, uuid.uuid4().hex[:8])
             staged_fc = os.path.join(scratch_gdb, stage_name)
-            output_name_start = time.perf_counter()
-            proposed_output_name = self._unique_output_name(
-                layer_ui_name.rsplit(" - ", 1)[0], workspace
+            # Tulosnimi varataan vasta jälkikäsittelyssä, kun tiedetään, syntyykö
+            # tasosta feature class ja montako geometriatyyppiä siinä on.
+            output_base_name = layer_ui_name.rsplit(" - ", 1)[0]
+            proposed_output_path = self._dataset_output_path(
+                workspace, self._validated_name(output_base_name, workspace)
             )
-            layer_metrics.add(
-                "tulosnimen validointi", time.perf_counter() - output_name_start
-            )
-            proposed_output_path = self._dataset_output_path(workspace, proposed_output_name)
             # Kaikki ominaisuudet, jotka päätyvät yhteiseen staged_outputs-
             # yhteenvetoon, tarvitsevat hakutavan. OSM ei kulje WFS/OGC-haaran
             # kautta, joten alusta arvo ennen lähdekohtaista käsittelyä.
@@ -7169,27 +7050,6 @@ class VaylaWFSDownloader(object):
                     "download_s": time.perf_counter() - download_start,
                 })
                 continue
-            elif layer_kind == "mml_raster":
-                if not mml_api_key.strip():
-                    _record_layer_failure(layer_ui_name, "MML-rasteritaso vaatii API-avaimen")
-                    continue
-                download_start = time.perf_counter()
-                try:
-                    out_tif = self._download_mml_wmts_geotiff(
-                        layer_clean, boundary_fc, self._scratch_folder(), mml_api_key.strip()
-                    )
-                except Exception as ex:
-                    _record_layer_failure(layer_ui_name, ex)
-                    continue
-                staged_outputs.append({
-                    "path": out_tif,
-                    "output_name": os.path.splitext(os.path.basename(out_tif))[0],
-                    "output_type": "raster",
-                    "label": layer_ui_name,
-                    "layer_start": layer_start,
-                    "download_s": time.perf_counter() - download_start,
-                })
-                continue
             elif layer_kind == "kapsi_wms":
                 download_start = time.perf_counter()
                 try:
@@ -7266,23 +7126,11 @@ class VaylaWFSDownloader(object):
                             "OGC API -sivutuksen maksimipyyntömäärä täyttyi, joten taso "
                             "jäisi vaillinaiseksi. Rajaa alue pienemmäksi."
                         )
-                    layer_http_s += ogc_stats.get("network_s", 0.0)
-                    layer_gp_json_s += ogc_stats.get("json_to_features_s", 0.0)
-                    stat_to_phase = {
-                        "request_build_s": "requestin muodostaminen",
-                        "network_s": "verkkopyyntö",
-                        "response_read_s": "vastauksen lukeminen",
-                        "decode_s": "vastauksen dekoodaus",
-                        "json_parse_s": "JSON-jäsennys",
-                        "json_write_s": "väliaikaisen JSON-tiedoston kirjoittaminen",
-                        "json_to_features_s": "JSONToFeatures",
-                        "projection_s": "projektointi",
-                        "json_temp_delete_s": "väliaikaisen JSON-tiedoston poistaminen",
-                    }
-                    for stat_name, phase_name in stat_to_phase.items():
-                        value = ogc_stats.get(stat_name)
-                        if isinstance(value, (int, float)) and value > 0:
-                            layer_metrics.add(phase_name, value)
+                    http_s, json_s = self._add_fetch_stats_to_metrics(
+                        ogc_stats, layer_metrics
+                    )
+                    layer_http_s += http_s
+                    layer_gp_json_s += json_s
                     self._msg(
                         "  [INFO] OGC-yhteenveto: {} sivua ladattu ({} kohdetta).".format(
                             ogc_stats.get("pages", 0), total_found
@@ -7312,23 +7160,11 @@ class VaylaWFSDownloader(object):
                         bbox_3067=bbox_3067,
                     )
                     temp_feature_classes.extend(chunks)
-                    layer_http_s += oskari_stats.get("network_s", 0.0)
-                    layer_gp_json_s += oskari_stats.get("json_to_features_s", 0.0)
-                    stat_to_phase = {
-                        "request_build_s": "requestin muodostaminen",
-                        "network_s": "verkkopyyntö",
-                        "response_read_s": "vastauksen lukeminen",
-                        "decode_s": "vastauksen dekoodaus",
-                        "json_parse_s": "JSON-jäsennys",
-                        "json_write_s": "väliaikaisen JSON-tiedoston kirjoittaminen",
-                        "json_to_features_s": "JSONToFeatures",
-                        "projection_s": "projektointi",
-                        "json_temp_delete_s": "väliaikaisen JSON-tiedoston poistaminen",
-                    }
-                    for stat_name, phase_name in stat_to_phase.items():
-                        value = oskari_stats.get(stat_name)
-                        if isinstance(value, (int, float)) and value > 0:
-                            layer_metrics.add(phase_name, value)
+                    http_s, json_s = self._add_fetch_stats_to_metrics(
+                        oskari_stats, layer_metrics
+                    )
+                    layer_http_s += http_s
+                    layer_gp_json_s += json_s
                     self._msg(
                         "  [INFO] Oskari-yhteenveto: {} kohdetta GeoJSONissa; "
                         "EPSG:3067, paikallinen Clip.".format(total_found)
@@ -7349,144 +7185,45 @@ class VaylaWFSDownloader(object):
                 except Exception:
                     total_kunnat = 0
 
-                i_kunta = 0
-                for oid, kunta_name, geom in self._iter_kunnat(kunnat_sel_fc, name_field):
-                    i_kunta += 1
-                    one_kunta_fc = None
-                    try:
-                        one_kunta_fc = self._copy_single_feature(kunnat_sel_fc, oid)
-                        kext = arcpy.Describe(one_kunta_fc).extent
+                try:
+                    i_kunta = 0
+                    for oid, kunta_name, geom in self._iter_kunnat(kunnat_sel_fc, name_field):
+                        i_kunta += 1
+                        kext = geom.extent
                         kbbox = f"{kext.XMin},{kext.YMin},{kext.XMax},{kext.YMax}"
-
-                        start_index = 0
-                        has_more_data = True
-                        request_count_kunta = 0
-                        max_requests_kunta = 50
-                        prev_hash_kunta = None
-                        repeated_guard_kunta = 0
-                        while has_more_data and request_count_kunta < max_requests_kunta:
-                            page_start = time.perf_counter()
-                            page_timing = PhaseMetrics()
-                            request_count_kunta += 1
-                            if self._verbose_diagnostics:
-                                if total_kunnat > 0:
-                                    self._msg(f"  [INFO] Haetaan kohteet {kunta_name} [{i_kunta}/{total_kunnat}] {start_index} - {start_index + max_features - 1}...")
-                                else:
-                                    self._msg(f"  [INFO] Haetaan kohteet {kunta_name} {start_index} - {start_index + max_features - 1}...")
-
-                            json_data = None
-                            raw_text = ""
-                            status = None
-                            ctype = ""
-
-                            for fmt in output_formats:
-                                request_build_start = time.perf_counter()
-                                request_url = self._build_wfs_getfeature_url(
-                                    base_wfs=base_wfs,
-                                    layer_clean=layer_clean,
-                                    max_features=max_features,
-                                    start_index=start_index,
-                                    output_format=fmt,
-                                    bbox_str=kbbox,
-                                    geometry_only=False,
-                                )
-                                page_timing.add(
-                                    "requestin muodostaminen",
-                                    time.perf_counter() - request_build_start,
-                                )
-                                json_data, raw_text, status, ctype = self._fetch_json(
-                                    request_url, timeout=120, quiet=True,
-                                    extra_headers=auth_headers, timings=page_timing,
-                                )
-                                if json_data is not None:
-                                    break
-                            layer_http_s += page_timing.get("verkkopyyntö", 0.0) or 0.0
-
-                            if json_data is None:
-                                # Siivoa temp-tiedostot ennen virhettä
-                                for t in temp_feature_classes:
-                                    self._safe_delete(t)
-                                dump_path = os.path.join(scratch_folder, f"wfs_error_{uuid.uuid4().hex}.txt")
-                                try:
-                                    with open(dump_path, "w", encoding="utf-8") as f:
-                                        f.write(self._redact_secrets(raw_text or ""))
-                                except Exception:
-                                    pass
-                                self._error(f"[VIRHE] WFS-pyyntö epäonnistui (HTTP {status}, Content-Type: {ctype}). Virhevastaus: {dump_path}")
-                                raise arcpy.ExecuteError
-
-                            features = json_data.get("features", []) if isinstance(json_data, dict) else []
-                            if features and len(features) > 0:
-                                text_hash_kunta = hashlib.md5(raw_text[:8000].encode('utf-8', errors='replace')).hexdigest() if raw_text else None
-                                if prev_hash_kunta == text_hash_kunta:
-                                    repeated_guard_kunta += 1
-                                else:
-                                    repeated_guard_kunta = 0
-                                prev_hash_kunta = text_hash_kunta
-                                if repeated_guard_kunta >= 2:
-                                    self._warn(f"[VAROITUS] WFS sivutus toistaa samaa sisältöä kunnassa '{kunta_name}'. Keskeytetään.")
-                                    break
-
-                                temp_json_path = os.path.join(scratch_folder, f"temp_{uuid.uuid4().hex}.json")
-                                json_write_start = time.perf_counter()
-                                with open(temp_json_path, "w", encoding="utf-8") as f:
-                                    f.write(raw_text)
-                                page_timing.add(
-                                    "väliaikaisen JSON-tiedoston kirjoittaminen",
-                                    time.perf_counter() - json_write_start,
-                                )
-
-                                temp_fc = os.path.join(self._scratch_gdb(), f"temp_fc_{uuid.uuid4().hex}")
-                                json_start = time.perf_counter()
-                                arcpy.conversion.JSONToFeatures(temp_json_path, temp_fc)
-                                json_elapsed = time.perf_counter() - json_start
-                                layer_gp_json_s += json_elapsed
-                                page_timing.add("JSONToFeatures", json_elapsed)
-                                temp_feature_classes.append(temp_fc)
-
-                                try:
-                                    os.remove(temp_json_path)
-                                except Exception:
-                                    pass
-
-                                for phase_name, phase_value in page_timing.seconds.items():
-                                    if isinstance(phase_value, (int, float)):
-                                        layer_metrics.add(phase_name, phase_value)
-
-                                got = len(features)
-                                if self._verbose_diagnostics:
-                                    self._msg(
-                                        "    [EDISTYMINEN] Kunta {} / sivu {}: +{} kohdetta, "
-                                        "request {:.3f} s, verkko {:.3f} s, luku {:.3f} s, "
-                                        "JSON-jäsennys {:.3f} s, JSON-kirjoitus {:.3f} s, "
-                                        "JSONToFeatures {:.3f} s, sivu yhteensä {:.3f} s".format(
-                                            kunta_name, request_count_kunta, got,
-                                            page_timing.get("requestin muodostaminen", 0.0) or 0.0,
-                                            page_timing.get("verkkopyyntö", 0.0) or 0.0,
-                                            page_timing.get("vastauksen lukeminen", 0.0) or 0.0,
-                                            page_timing.get("JSON-jäsennys", 0.0) or 0.0,
-                                            page_timing.get("väliaikaisen JSON-tiedoston kirjoittaminen", 0.0) or 0.0,
-                                            page_timing.get("JSONToFeatures", 0.0) or 0.0,
-                                            time.perf_counter() - page_start,
-                                        )
-                                    )
-
-                                start_index += len(features)
-
-                                if len(features) < max_features:
-                                    has_more_data = False
-                            else:
-                                has_more_data = False
-
-                        if request_count_kunta >= max_requests_kunta:
-                            self._warn(f"[VAROITUS] Kunnan '{kunta_name}' maksimipyyntömäärä ({max_requests_kunta}) saavutettu.")
-
-                    finally:
-                        try:
-                            if one_kunta_fc and arcpy.Exists(one_kunta_fc):
-                                arcpy.management.Delete(one_kunta_fc)
-                        except Exception:
-                            pass
+                        if self._verbose_diagnostics:
+                            self._msg("  [INFO] Haetaan kohteet {} [{}/{}]...".format(
+                                kunta_name, i_kunta, total_kunnat or "?"
+                            ))
+                        chunks, _, _, kunta_stats, _ = self._fetch_bbox_feature_chunks(
+                            base_wfs=base_wfs,
+                            layer_clean=layer_clean,
+                            bbox_str=kbbox,
+                            output_formats=output_formats,
+                            max_features=max_features,
+                            max_requests=50,
+                            extra_headers=auth_headers,
+                            boundary_wkt=None,
+                            source_name=source_name,
+                            allow_bbox_fallback=True,
+                        )
+                        temp_feature_classes.extend(chunks)
+                        http_s, json_s = self._add_fetch_stats_to_metrics(
+                            kunta_stats, layer_metrics
+                        )
+                        layer_http_s += http_s
+                        layer_gp_json_s += json_s
+                        if kunta_stats.get("truncated"):
+                            raise Exception(
+                                "Kunnan '{}' sivutus jäi vaillinaiseksi (maksimipyyntömäärä "
+                                "tai toistuva sivu), joten taso jäisi vajaaksi.".format(kunta_name)
+                            )
+                except Exception as ex:
+                    for temp_fc in temp_feature_classes:
+                        self._safe_delete(temp_fc)
+                    temp_feature_classes = []
+                    _record_layer_failure(layer_ui_name, ex)
+                    continue
 
             else:
                 if boundary_wkt and self._wfs_supports_cql(source_name):
@@ -7501,22 +7238,11 @@ class VaylaWFSDownloader(object):
                         nonlocal layer_http_s, layer_gp_json_s
                         if stats.get("truncated"):
                             truncation_state["hit"] = True
-                        layer_http_s += stats.get("network_s", stats.get("http_s", 0.0))
-                        layer_gp_json_s += stats.get("json_to_features_s", stats.get("gp_json_s", 0.0))
-                        stat_to_phase = {
-                            "request_build_s": "requestin muodostaminen",
-                            "network_s": "verkkopyyntö",
-                            "response_read_s": "vastauksen lukeminen",
-                            "decode_s": "vastauksen dekoodaus",
-                            "json_parse_s": "JSON-jäsennys",
-                            "json_write_s": "väliaikaisen JSON-tiedoston kirjoittaminen",
-                            "json_to_features_s": "JSONToFeatures",
-                            "json_temp_delete_s": "väliaikaisen JSON-tiedoston poistaminen",
-                        }
-                        for stat_name, phase_name in stat_to_phase.items():
-                            value = stats.get(stat_name)
-                            if isinstance(value, (int, float)) and value > 0:
-                                layer_metrics.add(phase_name, value)
+                        http_s, json_s = self._add_fetch_stats_to_metrics(
+                            stats, layer_metrics
+                        )
+                        layer_http_s += http_s
+                        layer_gp_json_s += json_s
 
                     def _fetch_bbox_once(tile_bbox, batch_size):
                         tile_wkt = boundary_wkt if tile_bbox == bbox_str else None
@@ -7622,89 +7348,80 @@ class VaylaWFSDownloader(object):
                 self._msg("  [INFO] Tasolta ei löytynyt kohteita annetulla rajauksella; vienti ohitettiin.")
                 continue
 
-            if len(temp_feature_classes) == 1:
-                merged_fc = temp_feature_classes[0]
-                created_merged = False
-            else:
-                merged_fc = os.path.join(self._scratch_gdb(), f"merged_{uuid.uuid4().hex[:10]}")
-                merge_start = time.perf_counter()
-                arcpy.management.Merge(temp_feature_classes, merged_fc)
-                layer_gp_merge_s += time.perf_counter() - merge_start
-                layer_metrics.add("Merge", time.perf_counter() - merge_start)
-                created_merged = True
-
-            # Kuntakohtaisessa ja Overpass-ruutuhaussa sama kohde voi tulla
-            # mukaan useasta bboxista. Kaikki attribuutit kuuluvat vertailuun,
-            # joten saman geometrian eri POI-fclass-rivit säilyvät.
-            # Poistetaan geometrialtaan identtiset duplikaatit ennen leikkausta.
-            if (
-                used_kunta_chunks or cql_split_effective or used_overpass_grid > 1
-            ) and created_merged:
-                try:
-                    duplicate_start = time.perf_counter()
-                    self._delete_identical_downloads(merged_fc)
-                    layer_metrics.add("duplikaattien poisto", time.perf_counter() - duplicate_start)
-                except Exception as ex:
-                    self._warn(f"[VAROITUS] Duplikaattien poisto epäonnistui tasolla '{layer_clean}': {ex}")
-
-            if skip_clip:
-                stage_start = time.perf_counter()
-                arcpy.management.CopyFeatures(merged_fc, staged_fc)
-                layer_gp_stage_s += time.perf_counter() - stage_start
-                layer_metrics.add("staging", time.perf_counter() - stage_start)
-                layer_metrics.skip(
-                    "Clip",
-                    "ohitettu (CQL palauttaa kokonaiset leikkaavat geometriat)"
+            layer_outputs = []
+            group_output_name = None
+            try:
+                grouped = self._group_feature_classes_by_shape(temp_feature_classes)
+                dedupe = bool(
+                    used_kunta_chunks or cql_split_effective or used_overpass_grid > 1
                 )
-            else:
-                clipped_fc = staged_fc
-                clip_start = time.perf_counter()
-                arcpy.analysis.Clip(merged_fc, boundary_fc, clipped_fc)
-                layer_gp_clip_s += time.perf_counter() - clip_start
-                layer_metrics.add("Clip", time.perf_counter() - clip_start)
-                layer_metrics.skip("staging", "ei käytetty erillisenä vaiheena")
-
-            temp_cleanup_start = time.perf_counter()
-            for t in temp_feature_classes:
-                if t != merged_fc:
-                    try:
-                        arcpy.management.Delete(t)
-                    except Exception:
-                        pass
-
-            if created_merged and merged_fc and arcpy.Exists(merged_fc):
-                try:
-                    arcpy.management.Delete(merged_fc)
-                except Exception:
-                    pass
-            layer_metrics.add(
-                "väliaineistojen poistaminen", time.perf_counter() - temp_cleanup_start
-            )
-
-            count_start = time.perf_counter()
-            staged_feature_count = int(arcpy.management.GetCount(staged_fc)[0])
-            layer_metrics.add("kohdemäärän laskenta", time.perf_counter() - count_start)
-
-            layer_processing_total = time.perf_counter() - layer_start
-
-            staged_outputs.append({
-                "path": staged_fc,
-                "output_name": proposed_output_name,
-                "output_name_is_final": True,
-                "output_type": "feature",
-                "label": layer_ui_name,
-                "kind": "wfs",
-                "layer_start": layer_start,
-                "http_s": layer_http_s,
-                "json_s": layer_gp_json_s,
-                "merge_s": layer_gp_merge_s,
-                "stage_s": layer_gp_stage_s,
-                "clip_s": layer_gp_clip_s,
-                "metrics": layer_metrics,
-                "processing_total_s": layer_processing_total,
-                "requested_mode": requested_mode,
-                "feature_count": staged_feature_count,
-            })
+                multiple_types = len(grouped) > 1
+                if multiple_types:
+                    # Eri geometriatyyppejä ei voi yhdistää yhdeksi feature
+                    # classiksi, joten jokaisesta tulee oma tulostasonsa.
+                    self._msg(
+                        "  [INFO] Tasossa on useita geometriatyyppejä ({}); jokaisesta "
+                        "tehdään oma tulostaso.".format(
+                            ", ".join(self._shape_type_label(t) for t, _ in grouped)
+                        )
+                    )
+                for shape_type, group_fcs in grouped:
+                    name_start = time.perf_counter()
+                    if multiple_types:
+                        suffix = self._shape_type_suffix(shape_type)
+                        group_output_name = self._unique_output_name(
+                            "{}_{}".format(output_base_name, suffix), workspace
+                        )
+                        group_staged_fc = "{}_{}".format(staged_fc, suffix)
+                        group_label = "{} ({})".format(
+                            layer_ui_name, self._shape_type_label(shape_type)
+                        )
+                        group_metrics = self._copy_phase_metrics(layer_metrics)
+                    else:
+                        group_output_name = self._unique_output_name(
+                            output_base_name, workspace
+                        )
+                        group_staged_fc = staged_fc
+                        group_label = layer_ui_name
+                        group_metrics = layer_metrics
+                    group_metrics.add(
+                        "tulosnimen validointi", time.perf_counter() - name_start
+                    )
+                    group_result = self._finalize_feature_group(
+                        group_fcs, group_staged_fc, boundary_fc, skip_clip,
+                        dedupe, group_metrics, layer_clean,
+                    )
+                    layer_outputs.append({
+                        "path": group_staged_fc,
+                        "output_name": group_output_name,
+                        "output_name_is_final": True,
+                        "output_type": "feature",
+                        "label": group_label,
+                        "kind": "wfs",
+                        "layer_start": layer_start,
+                        "http_s": layer_http_s,
+                        "json_s": layer_gp_json_s,
+                        "merge_s": group_result["merge_s"],
+                        "stage_s": group_result["stage_s"],
+                        "clip_s": group_result["clip_s"],
+                        "metrics": group_metrics,
+                        "processing_total_s": time.perf_counter() - layer_start,
+                        "requested_mode": requested_mode,
+                        "feature_count": group_result["feature_count"],
+                    })
+            except Exception as ex:
+                for temp_fc in temp_feature_classes:
+                    self._safe_delete(temp_fc)
+                for output in layer_outputs:
+                    self._safe_delete(output["path"])
+                    self._release_output_name(output["output_name"], workspace)
+                if group_output_name and not any(
+                    output["output_name"] == group_output_name for output in layer_outputs
+                ):
+                    self._release_output_name(group_output_name, workspace)
+                _record_layer_failure(layer_ui_name, ex)
+                continue
+            staged_outputs.extend(layer_outputs)
 
         if layer_failures:
             self._warn(
@@ -7770,57 +7487,66 @@ class VaylaWFSDownloader(object):
             self._msg("[INFO] Kaikki käsittely on valmis. Kopioidaan tulokset kohteeseen vasta nyt...")
         outputs_copy_start = time.perf_counter()
         for output in staged_outputs:
-            copy_start = time.perf_counter()
-            if output["output_type"] == "feature":
-                copy_metrics = output.get("metrics") or PhaseMetrics()
-                if self._runtime_workspace_validated:
-                    copy_metrics.skip(
-                        "kohde-GDB:n olemassaolon tarkistus",
-                        "ohitettu (kohde validoitiin ajon alussa)"
+            try:
+                copy_start = time.perf_counter()
+                if output["output_type"] == "feature":
+                    copy_metrics = output.get("metrics") or PhaseMetrics()
+                    if self._runtime_workspace_validated:
+                        copy_metrics.skip(
+                            "kohde-GDB:n olemassaolon tarkistus",
+                            "ohitettu (kohde validoitiin ajon alussa)"
+                        )
+                    else:
+                        target_check_start = time.perf_counter()
+                        if not (arcpy.Exists(workspace) or os.path.exists(workspace)):
+                            raise Exception("Tallennuskohdetta ei löydy: {}".format(workspace))
+                        copy_metrics.add(
+                            "kohde-GDB:n olemassaolon tarkistus",
+                            time.perf_counter() - target_check_start,
+                        )
+                        self._runtime_workspace_validated = True
+                    if output.get("output_name_is_final"):
+                        output_name = output["output_name"]
+                    else:
+                        name_start = time.perf_counter()
+                        output_name = self._unique_output_name(output["output_name"], workspace)
+                        copy_metrics.add("tulosnimen validointi", time.perf_counter() - name_start)
+                    final_path = self._copy_features_compatible(
+                        output["path"], workspace, output_name, copy_metrics,
+                        output_known_absent=True,
                     )
+                    if "feature_count" not in output:
+                        count_start = time.perf_counter()
+                        output["feature_count"] = int(arcpy.management.GetCount(output["path"])[0])
+                        copy_metrics.add("kohdemäärän laskenta", time.perf_counter() - count_start)
+                    copy_metrics.skip("indeksien luonti", "ei tarpeen")
+                    copy_metrics.skip("metatietojen käsittely", "ei käytetty")
+                    output["metrics"] = copy_metrics
+                elif output["output_type"] == "raster":
+                    final_path = self._copy_raster_to_workspace(output["path"], workspace)
                 else:
-                    target_check_start = time.perf_counter()
-                    if not (arcpy.Exists(workspace) or os.path.exists(workspace)):
-                        raise Exception("Tallennuskohdetta ei löydy: {}".format(workspace))
-                    copy_metrics.add(
-                        "kohde-GDB:n olemassaolon tarkistus",
-                        time.perf_counter() - target_check_start,
+                    final_path = self._copy_raster_bundle_to_workspace(output["path"], workspace)
+                output["copy_s"] = time.perf_counter() - copy_start
+                output["final_path"] = final_path
+                to_add.append(output)
+                local_delete_start = time.perf_counter()
+                source_key = os.path.normcase(os.path.abspath(str(output["path"])))
+                staged_source_counts[source_key] -= 1
+                if staged_source_counts[source_key] <= 0:
+                    self._remove_local_output(output["path"])
+                if output.get("metrics"):
+                    output["metrics"].add(
+                        "väliaineistojen poistaminen", time.perf_counter() - local_delete_start
                     )
-                    self._runtime_workspace_validated = True
-                if output.get("output_name_is_final"):
-                    output_name = output["output_name"]
-                else:
-                    name_start = time.perf_counter()
-                    output_name = self._unique_output_name(output["output_name"], workspace)
-                    copy_metrics.add("tulosnimen validointi", time.perf_counter() - name_start)
-                final_path = self._copy_features_compatible(
-                    output["path"], workspace, output_name, copy_metrics,
-                    output_known_absent=True,
+                output["copy_and_local_cleanup_s"] = time.perf_counter() - copy_start
+            except Exception as ex:
+                # Yhden tuloksen kopiointivirhe ei saa estää muiden tulosten
+                # tallennusta. Väliaineisto säilyy scratchissa vianmääritystä varten.
+                _record_layer_failure(
+                    output.get("label") or output.get("output_name"),
+                    "tuloksen kopiointi kohteeseen epäonnistui: {}".format(ex),
                 )
-                if "feature_count" not in output:
-                    count_start = time.perf_counter()
-                    output["feature_count"] = int(arcpy.management.GetCount(output["path"])[0])
-                    copy_metrics.add("kohdemäärän laskenta", time.perf_counter() - count_start)
-                copy_metrics.skip("indeksien luonti", "ei tarpeen")
-                copy_metrics.skip("metatietojen käsittely", "ei käytetty")
-                output["metrics"] = copy_metrics
-            elif output["output_type"] == "raster":
-                final_path = self._copy_raster_to_workspace(output["path"], workspace)
-            else:
-                final_path = self._copy_raster_bundle_to_workspace(output["path"], workspace)
-            output["copy_s"] = time.perf_counter() - copy_start
-            output["final_path"] = final_path
-            to_add.append(output)
-            local_delete_start = time.perf_counter()
-            source_key = os.path.normcase(os.path.abspath(str(output["path"])))
-            staged_source_counts[source_key] -= 1
-            if staged_source_counts[source_key] <= 0:
-                self._remove_local_output(output["path"])
-            if output.get("metrics"):
-                output["metrics"].add(
-                    "väliaineistojen poistaminen", time.perf_counter() - local_delete_start
-                )
-            output["copy_and_local_cleanup_s"] = time.perf_counter() - copy_start
+                continue
         self._tool_metrics.set(
             "lopputulosten kopiointi", time.perf_counter() - outputs_copy_start
         )
@@ -8096,19 +7822,6 @@ class MMLBasemapDownloader(VaylaWFSDownloader):
         # Kaikki MML-/WMS-attribuutit ja apumetodit peritään emoluokasta
         # (VaylaWFSDownloader); vain UI ja execute eroavat.
 
-    def _get_basemap_layers_cached(self, provider):
-        if provider == "MML":
-            # Nykyinen MML:n avoin karttakuvapalvelu julkaisee TileJSONin
-            # kautta sekä maastotiedot että kiinteistöjaotuksen.
-            self._mml_layer_mapping = dict(MML_VECTOR_TILE_LAYER_IDS)
-            return list(MML_VECTOR_TILE_LAYER_IDS.keys())
-        return super()._get_basemap_layers_cached(provider)
-
-    def _get_basemap_mode_options(self, provider):
-        if provider == "MML":
-            return ["Live vector tile"]
-        return super()._get_basemap_mode_options(provider)
-
     def getParameterInfo(self):
         p_provider = arcpy.Parameter(
             displayName="Taustakarttapalvelu",
@@ -8268,7 +7981,6 @@ class MMLBasemapDownloader(VaylaWFSDownloader):
         extent_type = parameters[4].valueAsText
         extent_value_text = parameters[5].valueAsText
         custom_layer = parameters[6].valueAsText
-        mode = parameters[3].valueAsText or "Live vector tile"
         api_key = parameters[8].valueAsText or ""
 
         vals = self._parse_multivalue(extent_value_text)
@@ -8292,12 +8004,40 @@ class MMLBasemapDownloader(VaylaWFSDownloader):
             parameters[8].clearMessage()
 
     def execute(self, parameters, messages):
-        arcpy.env.overwriteOutput = True
+        original_overwrite = arcpy.env.overwriteOutput
+        self._reserved_output_names = set()
+        self._run_had_layer_failures = False
+        self._begin_message_owner()
+        success = False
+        scratch_created = False
+        try:
+            arcpy.env.overwriteOutput = True
+            provider = parameters[0].valueAsText or "MML"
+            if provider == "Kapsi":
+                # Kapsin laatat ja rajaus tehdään ajokohtaisessa scratchissa,
+                # joka siivotaan ajon lopuksi.
+                self._create_run_scratch()
+                scratch_created = True
+            self._execute_basemap(parameters)
+            success = True
+        finally:
+            if scratch_created:
+                _, cleanup_error = self._cleanup_run_scratch(preserve=not success)
+                if cleanup_error:
+                    self._warn(
+                        "[VAROITUS] Scratch-aineiston siivous epäonnistui: {}".format(
+                            cleanup_error
+                        )
+                    )
+            arcpy.env.overwriteOutput = original_overwrite
+            self._end_message_owner()
+            self._transport().close_all()
+
+    def _execute_basemap(self, parameters):
         self._msg("=== Taustakarttatyökalu käynnistyy ===")
 
         provider = parameters[0].valueAsText or "MML"
         map_display = parameters[2].valueAsText
-        mode = parameters[3].valueAsText or "Live vector tile"
         extent_type = parameters[4].valueAsText
         extent_vals = self._parse_multivalue(parameters[5].valueAsText)
         custom_layer = parameters[6].valueAsText
@@ -8305,18 +8045,18 @@ class MMLBasemapDownloader(VaylaWFSDownloader):
         api_key = parameters[8].valueAsText or ""
         self._runtime_mml_api_key = api_key.strip()
 
-        if not workspace or workspace.strip() == "":
-            try:
-                aprx = arcpy.mp.ArcGISProject("CURRENT")
-                workspace = aprx.defaultGeodatabase
-            except Exception:
-                workspace = self._scratch_gdb()
-
         if not map_display or self._is_layer_placeholder(map_display):
             raise Exception("Valitse taustakartta.")
+        try:
+            # Täytä näyttönimen ja teknisen tunnisteen kartoitus myös silloin,
+            # kun execute ajetaan uudessa työkaluinstanssissa.
+            self._get_basemap_layers_cached(provider)
+        except Exception as ex:
+            self._warn("[VAROITUS] Taustakarttojen luettelon haku epäonnistui: {}".format(ex))
         layer_id = self._get_basemap_layer_id(provider, map_display)
         boundary_fc = None
         if provider == "Kapsi":
+            workspace = self._resolve_output_workspace(workspace)
             if extent_type == "Oma aineisto (Polygon/Polyline)":
                 boundary_fc = self._prepare_custom_boundary(custom_layer)
             else:
@@ -8336,7 +8076,9 @@ class MMLBasemapDownloader(VaylaWFSDownloader):
                     layer_id, boundary_fc, self._scratch_folder()
                 )
                 final_jpg = self._copy_raster_bundle_to_workspace(out_jpg, workspace)
-                self._add_to_map(final_jpg)
+                added, add_error = self._add_to_map(final_jpg)
+                if not added and add_error and "CURRENT" not in add_error:
+                    self._warn("[VAROITUS] Rasteria ei lisätty kartalle: {}".format(add_error))
                 self._remove_local_output(out_jpg)
         finally:
             if boundary_fc:

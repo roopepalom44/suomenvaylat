@@ -1,6 +1,6 @@
 # Suomenväylät - ArcGIS Pro Add-in
 
-**QGIS-versio (esijulkaisu):** [asennus ja nykyinen toiminnallisuus](qgis_plugin/README.md). Ladattavat ZIP-paketit ovat [GitHub-julkaisussa](https://github.com/roopepalom44/suomenvaylat/releases/tag/qgis-v0.2.1).
+**QGIS-versio (esijulkaisu):** [asennus ja nykyinen toiminnallisuus](qgis_plugin/README.md). Ladattavat ZIP-paketit ovat [uusimmassa GitHub-julkaisussa](https://github.com/roopepalom44/suomenvaylat/releases/latest) AddInX-paketin rinnalla.
 
 ArcGIS Pro -laajennus Suomenväylät-aineistojen lataamiseen WFS-rajapinnoista.
 
@@ -16,6 +16,12 @@ Jokainen `main`-haaraan tehty push käynnistää työnkulun
 julkaisee tiedoston `Suomenvaylat.esriAddInX` GitHub-releasen liitteenä.
 Julkaisun ja AddInX:n versio muodostetaan `Config.daml`-version sekä GitHub-ajon
 numeron perusteella, joten jokaisella pushilla on oma päivitettävä pakettinsa.
+Ennen käännöstä työnkulku ajaa yksikkötestit (`.github/workflows/tests.yml`); julkaisua
+ei tehdä, jos testit epäonnistuvat. Samat testit ajetaan myös jokaiselle pull requestille.
+AddIn-release merkitään aina uusimmaksi (`--latest`), jotta pysyvä latauslinkki
+`releases/latest/download/Suomenvaylat.esriAddInX` osoittaa aina AddInX-pakettiin.
+Jos QGIS-lisäosalle tehdään erillinen `qgis-v*`-julkaisu, se luodaan valinnalla
+`--latest=false`.
 
 Työnkulku käyttää GitHubin `windows-2025`-runneria ja `actions/setup-dotnet`
 toimintoa .NET 8 SDK:n asentamiseen. ArcGIS Pro 3.5:n käännösviitteet haetaan
@@ -32,11 +38,20 @@ add-init ovat eteenpäin yhteensopivia minor-versioissa. Näin release on
 tarkoitettu ArcGIS Pro 3.5:stä alkaen.
 
 Paikallista julkaisua varten on edelleen `release.ps1`, joka rakentaa ja julkaisee
-version `v<Config.daml-versio>` käyttäen `gh`-kirjautumista. Se tarvitsee .NET 8
-SDK:n tai uudemman, Visual Studio 2022:n täyden MSBuildin sekä puhtaan `main`-
-haaran, joka vastaa GitHubin `main`-haaraa.
+version `v<Config.daml-versio>` (AddInX ja QGIS-ZIPit) käyttäen `gh`-kirjautumista.
+Se tarvitsee .NET 8 SDK:n tai uudemman, Visual Studio 2022:n täyden MSBuildin,
+Pythonin sekä puhtaan `main`-haaran, joka vastaa GitHubin `main`-haaraa. GitHub-
+remoten nimi tunnistetaan automaattisesti; sen voi antaa myös parametrilla `-Remote`.
 
 ## Vaatimukset
+
+- **Käyttö:** ArcGIS Pro 3.5 tai uudempi (Windows). Verkkoyhteys käytettäviin
+  rajapintoihin. MML-, Karttapaikka-, MML Karttakuva- ja Aino-lähteet vaativat
+  omat tunnuksensa.
+- **Käännös:** .NET 8 SDK, Visual Studio 2022:n täysi MSBuild ja NuGet-paketti
+  `Esri.ArcGISPro.Extensions30` 3.5.0.57366 (ks. alla).
+- **Testit:** Python 3.9+; `python -m unittest discover -s tests` ei tarvitse
+  ArcGIS Prota eikä verkkoyhteyttä.
 
 
 `Config.daml` käyttää oletusnimitilaa `suomenvaylat` ja luokkien lyhyitä nimiä
@@ -66,8 +81,6 @@ DLL:n ja työkalut viralliseen `Install\`-hakemistoon, tarkistaa CLR-tyypit ja
 validoi paketin sisällön. Paketti käyttää `Config.daml`-tiedoston AddIn-
 versionumeroa. Automaattinen GitHub-julkaisu lisää siihen ajonumeron, jotta
 jokaiselle main-pushille syntyy uusi päivitettävä versio.
-
-Kapsin tarkat mittakaavatasot jaetaan tarvittaessa useaan enintään 25 laatan latauserään ja yhdistetään lopuksi yhdeksi rasteriksi.
 
 Jos DLL on muualla, anna sen polku:
 
@@ -135,9 +148,26 @@ WFS- ja rasterikäsittely tehdään ajokohtaisessa paikallisessa scratch-geodata
   400 ja 414 ovat CQL:n varareiteille merkitseviä signaaleja. Jokainen
   uudelleenyritys lokitetaan sanitisoidulla palveluosoitteella.
 - **Vaillinaista aineistoa ei enää tallenneta hiljaisesti.** Jos sivutuksen
-  `max_requests` täyttyy, taso kaatuu ja näkyy ajon yhteenvedon
-  epäonnistuneissa tasoissa. Aiemmin vajaa aineisto tallennettiin ja lisättiin
-  kartalle kuin se olisi täysi.
+  `max_requests` täyttyy tai palvelu palauttaa saman sivun toistuvasti, taso
+  kaatuu ja näkyy ajon yhteenvedon epäonnistuneissa tasoissa. Tämä koskee myös
+  raskaiden tasojen kuntakohtaista hakua. Jos viimeinen sivu on vajaa tai palvelun
+  `numberMatched` on jo haettu, rajalle osuvaa hakua ei tulkita vajaaksi.
+- **Yksi epäonnistunut taso ei kaada koko ajoa.** Haun, yhdistämisen, Clipin
+  ja tuloksen kopioinnin virheet kirjataan tasokohtaisesti; onnistuneet tasot
+  tallennetaan normaalisti.
+- **Samannimiset tulokset eivät ylikirjoita toisiaan.** Tulosnimet varataan ajon
+  ajaksi, joten esimerkiksi `Tiet - Väylä` ja `Tiet - DigiRoad` tallentuvat nimillä
+  `Tiet` ja `Tiet_1`.
+- **Tallennuskohde on aina pysyvä.** Jos kohdetta ei anneta, käytetään projektin
+  oletusgeodatabasea; jos sitäkään ei ole, ajo pysähtyy virheeseen sen sijaan,
+  että tulokset kirjoitettaisiin ajon lopussa poistettavaan scratch-aineistoon.
+- **Uudelleenohjaukset ovat turvallisia.** API-avaimen sisältävää
+  `Authorization`-otsaketta ei lähetetä toiselle palvelimelle, eikä HTTPS-
+  yhteyttä alenneta HTTP:ksi. HTTP 4xx- ja varmennevirheitä ei yritetä uudelleen.
+- **Rinnakkaiset haut eivät kutsu arcpyä.** Taustasäikeiden lokiviestit
+  kirjoitetaan geoprosessoinnin omasta säikeestä.
+- **Kapsin tarkat mittakaavatasot** jaetaan tarvittaessa useaan enintään 25
+  laatan latauserään ja yhdistetään lopuksi yhdeksi rasteriksi.
 - **Rasterilaatat ladataan rinnakkain.** Kapsin JPEG-laatat ja MML:n WMTS-tiilet
   haetaan säikeissä (`_tile_workers`, oletus 5); tiedostojen kirjoitus ja
   nimien varaus tehdään pääsäikeessä, joten nimet eivät voi törmätä.
@@ -214,6 +244,13 @@ kuvattu tiedostossa [`docs/OSKARI.md`](docs/OSKARI.md).
 
 ## OpenStreetMap POI-pisteet
 
+OpenStreetMap-tasoissa relaatiot (esim. hallinnolliset alueet sekä metsä- ja
+vesialueiden multipolygonit) kootaan jäsenwaysta alueiksi. Suljettu way on alue
+vain, jos sen tägit kuvaavat aluetta (esim. `building`, `landuse`, `natural=water`
+tai `area=yes`); suljetut tiet, aidat ja rautatiet pysyvät viivoina. Jos tasossa on
+useita geometriatyyppejä, niistä tallennetaan omat tulostasot päätteillä
+`_pisteet`, `_viivat` ja `_alueet`.
+
 **OpenStreetMap**-lähteen **POI-pisteet**-taso hakee rajauksen POI-kohteet
 Overpass APIsta ja kokoaa ne yhdeksi pistetasoksi. Luokitus vastaa Geofabrikin
 `gis_osm_pois_free`-rakennetta: tuloksessa ovat `osm_id`, `code`, `fclass` ja
@@ -245,6 +282,10 @@ Jos token on kopioitu lähteestä, jossa yhtäsuuruusmerkki on koodattu muotoon
 1.0.15 ja uudemmat tunnistavat ja korjaavat tämän tarkan kopiointimuodon. Haku
 raportoi lisäksi HTTP 401/403 -tunnistusvirheen suoraan tokenkentässä sen sijaan,
 että aineistolista jäisi selityksettä tyhjäksi.
+
+Aino hyväksyy tokenin vain `token`-kyselyparametrina, joten se kulkee
+palvelupyyntöjen osoitteessa (HTTPS-salattuna). Työkalu ei kirjoita osoitetta
+lokiin, ja ArcGIS Pron live-WMS saa tokenin erillisenä palveluparametrina.
 
 Aino käyttää WFS 1.1.0:aa. Suomenväylät muodostaa sille palvelun vaatimat
 `typeName`- ja `maxFeatures`-parametrit, sivuttaa `startIndex`-parametrilla,
@@ -294,6 +335,11 @@ palveluosoite, jotta rakennusten piste- ja polygoniversiot eivät sekoitu.
 
 
 API-avaimet, Aino-token ja salasanat ovat käyttöliittymässä piilotettuja kenttiä. Tallennetut tunnisteet suojataan Windowsin käyttäjäkohtaisella DPAPI-salauksella. Aiemman version selväkieliset arvot migroidaan salattuun muotoon niitä luettaessa. Lokissa WFS-palvelusta näytetään vain sanitisoitu perusosoite ilman query-parametreja, käyttäjätunnusta tai salasanaa.
+
+**MML Karttakuva -tunnukset:** ArcGIS Pron `addDataFromPath` ei tue erillistä
+Basic-tunnistautumista WMTS-palvelulle, joten käyttäjätunnus ja salasana
+välitetään palveluosoitteessa ja tallentuvat projektiin (`.aprx`). Älä jaa
+projektia, johon on lisätty MML Karttakuva -taso, tai poista taso ennen jakamista.
 
 Jos tunniste on ehtinyt näkyä jaetussa ArcGIS-lokissa, vaihda se palveluntarjoajan hallinnassa. Lokin poistaminen ei yksin peruuta paljastunutta avainta.
 

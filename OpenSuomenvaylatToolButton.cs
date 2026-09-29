@@ -13,10 +13,10 @@ namespace suomenvaylat
         {
             try
             {
-                // 1) Hae add-inin asennuskansio varmasti (UriBuilder estää välilyöntien ja erikoismerkkien hajoamisen polussa)
+                // 1) Hae add-inin asennuskansio. Assembly.Location on jo tiedostopolku,
+                //    joten sitä ei muunneta URI:ksi (URI-muunnos rikkoisi esim. #-merkin).
                 string assemblyLocation = Assembly.GetExecutingAssembly().Location;
-                UriBuilder uri = new UriBuilder(assemblyLocation);
-                string addinFolder = Path.GetDirectoryName(Uri.UnescapeDataString(uri.Path));
+                string addinFolder = Path.GetDirectoryName(assemblyLocation);
 
                 // 2) Määritä absoluuttinen polku .pyt-tiedostoon
                 string pytPath = Path.Combine(addinFolder, "Toolboxes", "VaylaWFSDownloader.pyt");

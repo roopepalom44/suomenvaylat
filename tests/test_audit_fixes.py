@@ -1,0 +1,331 @@
+"""Regressiotestit katselmoinnin P0/P1-korjauksille (ei vaadi arcpyä)."""
+
+import pathlib
+import ssl
+import sys
+import threading
+import types
+import unittest
+import urllib.error
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+
+import fake_http  # noqa: E402
+from test_toolbox_helpers import MODULE  # noqa: E402
+
+
+def _new_tool():
+    tool = MODULE.VaylaWFSDownloader.__new__(MODULE.VaylaWFSDownloader)
+    tool._wfs_geometry_field_cache = {}
+    tool._wfs_sort_candidate_cache = {}
+    tool._wfs_sort_field_cache = {}
+    tool._wfs_output_format_cache = {}
+    tool._verbose_diagnostics = False
+    tool._runtime_workspace = None
+    tool._runtime_workspace_is_folder = None
+    tool._run_scratch_gdb = None
+    tool._run_scratch_folder = None
+    tool._run_id = "abcdef12"
+    tool._workspace_kind_cache = {}
+    return tool
+
+
+class _ArcpyPatch(object):
+    """Aseta arcpy-moduulin attribuutteja testin ajaksi."""
+
+    def __init__(self, **attrs):
+        self.attrs = attrs
+        self.saved = {}
+
+    def __enter__(self):
+        for name, value in self.attrs.items():
+            self.saved[name] = getattr(MODULE.arcpy, name, _ArcpyPatch)
+            setattr(MODULE.arcpy, name, value)
+        return self
+
+    def __exit__(self, *exc):
+        for name, value in self.saved.items():
+            if value is _ArcpyPatch:
+                delattr(MODULE.arcpy, name)
+            else:
+                setattr(MODULE.arcpy, name, value)
+
+
+class OutputNameReservationTests(unittest.TestCase):
+    def setUp(self):
+        self.tool = _new_tool()
+        self.tool._reserved_output_names = set()
+        self.tool._validated_name = lambda raw, ws: raw.replace(" ", "_")
+        self.tool._is_filesystem_workspace = lambda ws: False
+
+    def test_same_title_from_two_sources_gets_distinct_local_names(self):
+        with _ArcpyPatch(Exists=lambda path: False):
+            first = self.tool._unique_output_name("Tiet", r"C:\data\out.gdb")
+            second = self.tool._unique_output_name("Tiet", r"C:\data\out.gdb")
+            third = self.tool._unique_output_name("TIET", r"C:\data\out.gdb")
+        self.assertEqual("Tiet", first)
+        self.assertEqual("Tiet_1", second)
+        self.assertEqual("TIET_2", third)
+
+    def test_existing_dataset_is_still_skipped(self):
+        existing = {r"C:\data\out.gdb/Tiet".replace("/", "\\")}
+        self.tool._dataset_output_path = lambda ws, name: ws + "\\" + name
+        with _ArcpyPatch(Exists=lambda path: path in existing):
+            self.assertEqual("Tiet_1", self.tool._unique_output_name("Tiet", r"C:\data\out.gdb"))
+
+    def test_remote_workspace_names_do_not_collide_within_run(self):
+        workspace = r"\\server\share\results.gdb"
+        first = self.tool._unique_output_name("Kaiteet", workspace)
+        second = self.tool._unique_output_name("Kaiteet", workspace)
+        self.assertEqual("Kaiteet_abcdef12", first)
+        self.assertEqual("Kaiteet_2_abcdef12", second)
+
+    def test_released_name_can_be_reused(self):
+        workspace = r"\\server\share\results.gdb"
+        name = self.tool._unique_output_name("Kaiteet", workspace)
+        self.tool._release_output_name(name, workspace)
+        self.assertEqual(name, self.tool._unique_output_name("Kaiteet", workspace))
+
+
+class OutputWorkspaceTests(unittest.TestCase):
+    def setUp(self):
+        self.tool = _new_tool()
+
+    def _mp(self, default_gdb=None, fail=False):
+        def project(name):
+            if fail:
+                raise RuntimeError("no CURRENT project")
+            return types.SimpleNamespace(defaultGeodatabase=default_gdb)
+        return types.SimpleNamespace(ArcGISProject=project)
+
+    def test_explicit_workspace_is_kept(self):
+        self.assertEqual(r"C:\out.gdb", self.tool._resolve_output_workspace(r"C:\out.gdb"))
+
+    def test_project_default_gdb_is_used(self):
+        with _ArcpyPatch(mp=self._mp(r"C:\proj\default.gdb")):
+            self.assertEqual(r"C:\proj\default.gdb", self.tool._resolve_output_workspace(""))
+
+    def test_missing_project_is_an_error_not_scratch(self):
+        with _ArcpyPatch(mp=self._mp(fail=True)):
+            with self.assertRaises(Exception):
+                self.tool._resolve_output_workspace("")
+        with _ArcpyPatch(mp=self._mp("")):
+            with self.assertRaises(Exception):
+                self.tool._resolve_output_workspace(None)
+
+    def test_run_scratch_is_rejected(self):
+        self.tool._run_scratch_folder = "/tmp/suomenvaylat_run"
+        with self.assertRaises(Exception):
+            self.tool._resolve_output_workspace("/tmp/suomenvaylat_run/scratch.gdb")
+
+
+class GeometryGroupingTests(unittest.TestCase):
+    def test_feature_classes_are_grouped_by_shape_type(self):
+        tool = _new_tool()
+        shapes = {"a": "Polygon", "b": "Point", "c": "Polyline", "d": "Polygon"}
+        with _ArcpyPatch(Describe=lambda fc: types.SimpleNamespace(shapeType=shapes[fc])):
+            groups = tool._group_feature_classes_by_shape(["a", "b", "c", "d"])
+        self.assertEqual(
+            [("Point", ["b"]), ("Polyline", ["c"]), ("Polygon", ["a", "d"])], groups
+        )
+        self.assertEqual("alueet", tool._shape_type_suffix("Polygon"))
+        self.assertEqual("viivat", tool._shape_type_suffix("Polyline"))
+        self.assertEqual("pisteet", tool._shape_type_suffix("Point"))
+
+
+class BoundaryUnionTests(unittest.TestCase):
+    def test_union_failure_uses_dissolve_instead_of_first_geometry(self):
+        tool = _new_tool()
+        tool._scratch_gdb = lambda: "scratch.gdb"
+        tool._safe_delete = lambda path: None
+
+        class Geometry(object):
+            def __init__(self, name):
+                self.name = name
+
+            def union(self, other):
+                raise RuntimeError("topology error")
+
+        rows = {"boundary": [(Geometry("a"),), (Geometry("b"),)],
+                "dissolved": [(Geometry("a+b"),)]}
+        dissolve_calls = []
+
+        class Cursor(object):
+            def __init__(self, fc, fields):
+                key = "dissolved" if "boundary_dissolve" in fc else "boundary"
+                self.rows = rows[key]
+
+            def __enter__(self):
+                return iter(self.rows)
+
+            def __exit__(self, *exc):
+                return False
+
+        with _ArcpyPatch(
+            da=types.SimpleNamespace(SearchCursor=Cursor),
+            management=types.SimpleNamespace(
+                Dissolve=lambda src, dst, multi_part=None: dissolve_calls.append((src, dst))
+            ),
+        ):
+            merged, count = tool._merged_boundary_geometry("boundary")
+        self.assertEqual("a+b", merged.name)
+        self.assertEqual(2, count)
+        self.assertEqual(1, len(dissolve_calls))
+
+
+class PaginationCompletenessTests(unittest.TestCase):
+    def setUp(self):
+        self.tool = _new_tool()
+        self.tool._http_max_attempts = 1
+        self.tool._page_workers = 1
+        self.tool._json_batch_pages = 1
+        self.warnings = []
+        self.tool._msg = lambda text: None
+        self.tool._warn = self.warnings.append
+        self.tool.heavy_chunk_sources = []
+
+        def fake_pages_to_fc(pages, project_to_epsg=None):
+            return "fc", MODULE.PhaseMetrics()
+
+        self.tool._pages_to_temp_fc = fake_pages_to_fc
+
+    def _fetch(self, total, max_requests, number_matched=False):
+        def handler(url, method, headers, body):
+            import urllib.parse as up
+            query = dict(up.parse_qsl(up.urlsplit(url).query))
+            start = int(query.get("startIndex", 0))
+            payload = fake_http.feature_page(min(100, max(0, total - start)), start)
+            if number_matched:
+                payload["numberMatched"] = total
+            return fake_http.FakeResponse(payload)
+
+        self.tool._http_transport = fake_http.FakeTransport(handler=handler)
+        return self.tool._fetch_bbox_feature_chunks(
+            "https://example.test/wfs", "other:test", "1,2,3,4",
+            ["application/json"], 100, max_requests=max_requests, source_name="Liiteri",
+        )
+
+    def test_partial_last_page_at_limit_is_complete(self):
+        _, found, requests, stats, _ = self._fetch(total=350, max_requests=4)
+        self.assertEqual(350, found)
+        self.assertEqual(4, requests)
+        self.assertFalse(stats["truncated"])
+
+    def test_full_last_page_at_limit_is_truncated_without_total(self):
+        _, found, _, stats, _ = self._fetch(total=400, max_requests=4)
+        self.assertEqual(400, found)
+        self.assertTrue(stats["truncated"])
+
+    def test_full_last_page_matching_number_matched_is_complete(self):
+        _, found, _, stats, _ = self._fetch(total=400, max_requests=4, number_matched=True)
+        self.assertEqual(400, found)
+        self.assertFalse(stats["truncated"])
+
+    def test_repeated_pages_mark_layer_truncated(self):
+        self.tool._http_transport = fake_http.FakeTransport(
+            handler=lambda url, method, headers, body: fake_http.FakeResponse(
+                fake_http.feature_page(100, 0)
+            )
+        )
+        _, _, _, stats, _ = self.tool._fetch_bbox_feature_chunks(
+            "https://example.test/wfs", "other:test", "1,2,3,4",
+            ["application/json"], 100, max_requests=10, source_name="Liiteri",
+        )
+        self.assertTrue(stats["truncated"])
+
+    def test_ogc_revisited_next_link_is_truncated(self):
+        page = {"features": [{"type": "Feature", "geometry": None, "properties": {}}],
+                "links": [{"rel": "next", "href": "https://example.test/collections/c/items?limit=1&bbox=1"}]}
+        self.tool._http_transport = fake_http.FakeTransport(
+            handler=lambda url, method, headers, body: fake_http.FakeResponse(page)
+        )
+        # Ensimmäinen URL on muodossa ...items?limit=1&bbox=1, joten next-linkki
+        # osoittaa jo haettuun sivuun.
+        _, _, stats = self.tool._fetch_ogcapi_feature_chunks(
+            "https://example.test", "c", "1", 1,
+        )
+        self.assertTrue(stats["truncated"])
+
+    def test_ogc_last_page_without_next_is_complete(self):
+        self.tool._http_transport = fake_http.FakeTransport([
+            fake_http.FakeResponse({"features": [{"type": "Feature"}], "links": []}),
+        ])
+        _, found, stats = self.tool._fetch_ogcapi_feature_chunks(
+            "https://example.test", "c", "1", 10, max_requests=1,
+        )
+        self.assertEqual(1, found)
+        self.assertFalse(stats["truncated"])
+
+
+class RedirectSecurityTests(unittest.TestCase):
+    def test_credentials_are_dropped_on_cross_origin_redirect(self):
+        headers = {"Authorization": "Basic secret", "Cookie": "a=b", "Accept": "x"}
+        same = MODULE._redirect_headers(
+            "https://api.example/a", "https://api.example:443/b", headers
+        )
+        other = MODULE._redirect_headers("https://api.example/a", "https://evil.example/b", headers)
+        self.assertEqual(headers, same)
+        self.assertEqual({"Accept": "x"}, other)
+
+    def test_https_downgrade_is_refused(self):
+        with self.assertRaises(urllib.error.URLError):
+            MODULE._redirect_headers("https://api.example/a", "http://api.example/a", {})
+
+    def test_transport_redirect_strips_authorization(self):
+        transport = MODULE.HttpTransport()
+        calls = []
+
+        def single(url, method, headers, body, timeout):
+            calls.append((url, dict(headers)))
+            if len(calls) == 1:
+                return 302, {}, b"", "https://other.example/x", 0.0
+            return 200, {}, b"{}", None, 0.0
+
+        transport._single_request = single
+        transport.request("https://api.example/x", headers={"Authorization": "Basic k"})
+        self.assertIn("Authorization", calls[0][1])
+        self.assertNotIn("Authorization", calls[1][1])
+
+    def test_urllib_redirect_handler_strips_authorization(self):
+        request = MODULE.urllib.request.Request(
+            "https://api.example/x", headers={"Authorization": "Basic k", "Accept": "x"}
+        )
+        handler = MODULE._SafeRedirectHandler()
+        new_request = handler.redirect_request(
+            request, None, 302, "Found", {}, "https://other.example/y"
+        )
+        self.assertIsNone(new_request.get_header("Authorization"))
+        self.assertEqual("x", new_request.get_header("Accept"))
+
+    def test_retry_predicate(self):
+        http_404 = urllib.error.HTTPError("u", 404, "nf", {}, None)
+        http_503 = urllib.error.HTTPError("u", 503, "busy", {}, None)
+        self.assertFalse(MODULE._is_retryable_error(http_404))
+        self.assertTrue(MODULE._is_retryable_error(http_503))
+        self.assertTrue(MODULE._is_retryable_error(TimeoutError("t")))
+        self.assertFalse(MODULE._is_retryable_error(ssl.SSLCertVerificationError("bad")))
+        self.assertFalse(MODULE._is_retryable_error(ValueError("x")))
+
+
+class ThreadSafeLoggingTests(unittest.TestCase):
+    def test_worker_thread_messages_are_written_by_owner_thread(self):
+        tool = _new_tool()
+        tool._runtime_mml_api_key = ""
+        written = []
+        with _ArcpyPatch(
+            AddMessage=lambda text: written.append((threading.get_ident(), text)),
+            AddWarning=lambda text: written.append((threading.get_ident(), text)),
+        ):
+            tool._begin_message_owner()
+            worker = threading.Thread(target=lambda: tool._warn("from worker"))
+            worker.start()
+            worker.join()
+            self.assertEqual([], written)
+            tool._msg("from owner")
+            tool._end_message_owner()
+        owner = threading.get_ident()
+        self.assertEqual([(owner, "from worker"), (owner, "from owner")], written)
+
+
+if __name__ == "__main__":
+    unittest.main()

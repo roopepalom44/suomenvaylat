@@ -17,6 +17,7 @@ project = QgsProject.instance()
 project.addMapLayer(QgsVectorLayer('Point?crs=EPSG:3857', 'existing basemap', 'memory'))
 project.setCrs(QgsCoordinateReferenceSystem())
 dialog = SuomenvaylatDialog()
+dialog.run_tasks_synchronously = True
 dialog.background_key.setText('dummy')
 for title in ('Kapsi — Taustakartta', 'Kapsi — Peruskartta', 'Kapsi — Ortokuva'):
     dialog.background.setCurrentText(title)
@@ -35,6 +36,12 @@ for map_name in ('Taustakartta', 'Maastokartta', 'Kiinteistöjaotus'):
 assert project.crs().authid() == 'EPSG:3857'
 assert len(requested_urls) == 3
 assert all('WGS84_Pseudo-Mercator' in url for url in requested_urls)
+second_dialog = SuomenvaylatDialog()
+second_dialog.background_key.setText('dummy')
+second_dialog._add_mml_background('Taustakartta')
+auth_names = [config.name() for config in
+              QgsApplication.authManager().availableAuthMethodConfigs().values()]
+assert auth_names.count('Suomenväylät — MML API') == 1, auth_names
 print('MML tile configuration passed', flush=True)
 dialog.karttakuva_user.setText('dummy')
 dialog.karttakuva_password.setText('dummy')

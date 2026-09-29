@@ -158,3 +158,39 @@ Yhdistetyn JSONin tai suoran feature class -kirjoituksen toteutusta ei pidä ott
 6. Oskari-tasoluettelon ja kohdehaun tarkemmat rajapintapolut sekä testitulos
    ovat tiedostossa [`OSKARI.md`](OSKARI.md). ArcGIS Pro 3.7:n Python-ympäristön
    toistettava smoke-testi on `tests/smoke_traficom_oskari_arcgispro.py`.
+
+## 12. Katselmointikorjaukset (1.0.17)
+
+1. **Samannimiset tulokset.** Valitse lähteet **Väylä** ja **DigiRoad** sekä
+   kaksi tasoa, joiden nimi on sama ennen ` - Lähde`-osaa (tai kaksi saman
+   lähteen tasoa, joista toinen on saanut listassa päätteen `(2)`). Tuloksia
+   pitää syntyä kaksi (`Nimi` ja `Nimi_1`); kumpikaan ei saa ylikirjoittaa toista.
+   Toista verkko-GDB:hen: nimet `Nimi_<ajotunnus>` ja `Nimi_2_<ajotunnus>`.
+2. **Tallennuskohde.** Tyhjennä **Tallennuskohde** ja aja: tulokset tallentuvat
+   projektin oletusgeodatabaseen. Ajon jälkeen lokissa mainittua
+   `%TEMP%\suomenvaylat_*`-kansiota ei saa olla, ja tulokset löytyvät edelleen.
+3. **OSM, useita geometriatyyppejä.** Aja pienellä kuntarajauksella tasot
+   **Osoitteet**, **Tiet** ja **Kaupat**. Ajo ei saa kaatua Mergeen. Jos tasossa
+   on eri geometriatyyppejä, syntyy omat tulokset päätteillä `_pisteet`,
+   `_viivat` ja `_alueet`. Suljetut tiet (esim. kiertoliittymät) ovat viivoja.
+4. **OSM-relaatiot.** Aja **Hallinnolliset alueet** ja **Metsat** pienellä
+   alueella. Hallinnollisten alueiden tulos ei saa olla tyhjä, ja relaatioista
+   muodostetut monialueet (myös reiälliset) näkyvät oikein.
+5. **Tasokohtainen virheensieto.** Valitse samaan ajoon toimiva taso ja taso,
+   joka varmasti epäonnistuu (esim. katkaise verkko kesken tai valitse Aino
+   virheellisellä tokenilla). Onnistunut taso tallentuu ja lisätään kartalle;
+   epäonnistunut näkyy yhteenvedon listassa, ja ajo päättyy tekstiin
+   `Ajo suoritettu osittain`.
+6. **Raskas taso kuntakohtaisesti.** Aja Väylän `liikennemaar*`-alkuinen taso
+   rajauksella **Maakunta**. Lokiin tulee kuntakohtainen haku, ja lopputulos
+   sisältää kohteita ilman duplikaatteja. Yksittäisen kunnan virhe näkyy
+   tasovirheenä eikä kaada koko ajoa.
+7. **Rajauksen yhdistäminen.** Valitse useita vierekkäisiä kuntia. CQL-lokin
+   pistemäärä ja lopputulos kattavat kaikki valitut kunnat, ei vain ensimmäistä.
+8. **Taustakarttatyökalu.** Aja **Taustakartat (MML/Kapsi)** Kapsilla ja
+   tarkista, että Geoprocessing-asetus *Allow geoprocessing tools to overwrite
+   existing datasets* palautuu ajon jälkeen entiseen arvoonsa. MML-vektoritiili
+   lisätään kartalle oikealla TileJSON-osoitteella.
+9. **Rinnakkainen sivutus.** Aja monisivuinen WFS-taso (esim. DigiRoad
+   `Linkki` maakuntarajauksella). Mahdolliset uudelleenyritysviestit näkyvät
+   lokissa normaalisti, eikä ArcGIS Pro kaadu tai jäädy.

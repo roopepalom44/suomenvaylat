@@ -307,8 +307,8 @@ class ToolboxHelperTests(unittest.TestCase):
                 </WMS_Capabilities>'''.encode("utf-8")
 
         calls = []
-        original_open = MODULE.urllib.request.urlopen
-        MODULE.urllib.request.urlopen = lambda request, timeout=60: (
+        original_open = MODULE._urlopen
+        MODULE._urlopen = lambda request, timeout=60: (
             calls.append(request.full_url) or Response()
         )
         try:
@@ -316,7 +316,7 @@ class ToolboxHelperTests(unittest.TestCase):
                 "https://aino.sitowise.com/ows?token=secret"
             )
         finally:
-            MODULE.urllib.request.urlopen = original_open
+            MODULE._urlopen = original_open
 
         self.assertEqual(
             ["taustakartat:tausta", "aineisto:kohteet"],
@@ -354,14 +354,14 @@ class ToolboxHelperTests(unittest.TestCase):
             def read(self):
                 return xml
 
-        original_open = MODULE.urllib.request.urlopen
-        MODULE.urllib.request.urlopen = lambda request, timeout=60: Response()
+        original_open = MODULE._urlopen
+        MODULE._urlopen = lambda request, timeout=60: Response()
         try:
             layers = self.tool._fetch_wms_capabilities_with_headers(
                 "https://aino.sitowise.com/ows?token=secret"
             )
         finally:
-            MODULE.urllib.request.urlopen = original_open
+            MODULE._urlopen = original_open
         self.assertEqual(175, len(layers))
         self.assertEqual(175, len({item["id"] for item in layers}))
 
@@ -807,7 +807,7 @@ class ToolboxHelperTests(unittest.TestCase):
 
         def fake_fetch(sources, cache_key=None, allow_disk_cache=True):
             self.tool._layer_mapping = {
-                entries[source]: {"source": source, "kind": "mml_raster" if source == "MML" else "wfs"}
+                entries[source]: {"source": source, "kind": "mml_property_ogcapi" if source == "MML" else "wfs"}
                 for source in sources
             }
             return [entries[source] for source in sources]
@@ -839,39 +839,6 @@ class ToolboxHelperTests(unittest.TestCase):
         self.tool.updateParameters(parameters)
         self.assertEqual([second, third], parameters[2].values)
         self.assertEqual([second, third], parameters[2].filter.list)
-
-    def test_wmts_matrix_parser_and_selection_use_epsg3067(self):
-        xml = b'''<?xml version="1.0"?>
-        <Capabilities xmlns="http://www.opengis.net/wmts/1.0"
-                      xmlns:ows="http://www.opengis.net/ows/1.1">
-          <Contents>
-            <Layer>
-              <ows:Identifier>taustakartta</ows:Identifier>
-              <Style isDefault="true"><ows:Identifier>default</ows:Identifier></Style>
-              <Format>image/png</Format>
-              <TileMatrixSetLink><TileMatrixSet>ETRS-TM35FIN</TileMatrixSet></TileMatrixSetLink>
-            </Layer>
-            <TileMatrixSet>
-              <ows:Identifier>ETRS-TM35FIN</ows:Identifier>
-              <ows:SupportedCRS>urn:ogc:def:crs:EPSG::3067</ows:SupportedCRS>
-              <TileMatrix>
-                <ows:Identifier>0</ows:Identifier>
-                <ScaleDenominator>3571428.5714285714</ScaleDenominator>
-                <TopLeftCorner>-548576 8388608</TopLeftCorner>
-                <TileWidth>256</TileWidth><TileHeight>256</TileHeight>
-                <MatrixWidth>8</MatrixWidth><MatrixHeight>8</MatrixHeight>
-              </TileMatrix>
-            </TileMatrixSet>
-          </Contents>
-        </Capabilities>'''
-        spec = self.tool._parse_mml_wmts_layer(xml, "taustakartta")
-        ext = types.SimpleNamespace(XMin=-500000, YMin=8100000, XMax=-300000, YMax=8300000)
-        matrix, tile_range = self.tool._choose_mml_wmts_matrix(spec["matrices"], ext)
-
-        self.assertEqual("ETRS-TM35FIN", spec["matrix_set"])
-        self.assertEqual("image/png", spec["format"])
-        self.assertEqual("0", matrix["id"])
-        self.assertIsNotNone(tile_range)
 
     def test_mml_basemap_uses_current_vector_tile_services(self):
         self.assertEqual(
@@ -1112,71 +1079,6 @@ class ToolboxHelperTests(unittest.TestCase):
         self.tool._move_group_to_map_bottom(active_map, background)
         self.assertEqual([(roads, background, "AFTER")], active_map.calls)
 
-    def test_fixed_mml_wmts_range_and_tile_url(self):
-        span = MODULE.MML_WMTS_TILE_SIZE * (2 ** (13 - 9))
-        ext = types.SimpleNamespace(
-            XMin=MODULE.MML_WMTS_ORIGIN_X + (2 * span) + 1,
-            XMax=MODULE.MML_WMTS_ORIGIN_X + (2 * span) + 100,
-            YMin=MODULE.MML_WMTS_ORIGIN_Y - (4 * span) + 100,
-            YMax=MODULE.MML_WMTS_ORIGIN_Y - (3 * span) - 100,
-        )
-        self.assertEqual(
-            (3, 3, 2, 2),
-            self.tool._mml_wmts_tile_range(ext, 9),
-        )
-        self.assertEqual(16.0, self.tool._mml_wmts_resolution(9))
-
-        self.tool.mml_wmts_base = MODULE.MML_WMTS_SERVICE_URL
-        url = self.tool._mml_wmts_tile_url("taustakartta", 9, 3, 2, "A/B")
-        self.assertEqual(
-            "https://avoin-karttakuva.maanmittauslaitos.fi/avoin/wmts/1.0.0/"
-            "taustakartta/default/ETRS-TM35FIN/9/3/2.png?api-key=A%2FB",
-            url,
-        )
-        auth = self.tool._mml_auth_headers("A/B")["Authorization"]
-        self.assertEqual("Basic " + MODULE.base64.b64encode(b"A/B:").decode("ascii"), auth)
-
-    def test_mml_background_adds_wms_top_and_hides_local_raster(self):
-        class Layer:
-            def __init__(self, name, group=False):
-                self.name = name
-                self.isGroupLayer = group
-                self.visible = True
-
-        class Map:
-            def __init__(self):
-                self.group = Layer("Taustakartta", group=True)
-                self.local = Layer("local")
-                self.wms = Layer("wms")
-                self.calls = []
-
-            def listLayers(self):
-                return [self.group]
-
-            def addDataFromPath(self, path, data_type=None):
-                self.calls.append((path, data_type))
-                return [self.wms if data_type == "WMS" else self.local]
-
-            def addLayerToGroup(self, group, layer, position):
-                self.calls.append(("group", layer, position))
-
-        self.tool._runtime_map_loaded = True
-        self.tool._runtime_map = Map()
-        self.tool.mml_wms_services = dict(MODULE.MML_WMS_SERVICE_URLS)
-        self.tool._msg = lambda message: None
-        self.tool._warn = lambda message: None
-        result = self.tool._add_mml_background_layers(
-            "C:/tmp/MML_RGB", "taustakartta", "Taustakartta"
-        )
-        self.assertTrue(result["wms_added"])
-        self.assertFalse(result["local"].visible)
-        self.assertTrue(result["wms"].visible)
-        self.assertEqual("MML WMS – Taustakartta", result["wms"].name)
-        self.assertIn(
-            (MODULE.MML_WMS_SERVICE_URLS["taustakartta"], "WMS"),
-            self.tool._runtime_map.calls,
-        )
-
     def test_kapsi_uses_selected_scale_dependent_layer(self):
         self.assertEqual(
             "taustakartta_800k",
@@ -1289,12 +1191,12 @@ class ToolboxHelperTests(unittest.TestCase):
         self.tool._kapsi_layer_mapping = {}
         self.tool._kapsi_layer_scale_ranges = {}
         self.tool._warn = lambda message: None
-        original_open = MODULE.urllib.request.urlopen
-        MODULE.urllib.request.urlopen = lambda request, timeout=60: Response()
+        original_open = MODULE._urlopen
+        MODULE._urlopen = lambda request, timeout=60: Response()
         try:
             layers = self.tool._fetch_kapsi_layer_list()
         finally:
-            MODULE.urllib.request.urlopen = original_open
+            MODULE._urlopen = original_open
 
         references = [self.tool._kapsi_layer_mapping[layer] for layer in layers]
         self.assertEqual(len(references), len(set(references)))
@@ -1378,7 +1280,7 @@ class ToolboxHelperTests(unittest.TestCase):
     def test_osm_branch_defines_mode_for_common_staging_summary(self):
         source = TOOLBOX.read_text(encoding="utf-8")
         osm_branch = source.index('if layer_kind == "osm":')
-        osm_branch_end = source.index('elif layer_kind == "mml_raster":', osm_branch)
+        osm_branch_end = source.index('elif layer_kind == "oskari_wms":', osm_branch)
         self.assertIn(
             'requested_mode = "OpenStreetMap Overpass API + paikallinen Clip"',
             source[osm_branch:osm_branch_end],
@@ -1426,12 +1328,12 @@ class ToolboxHelperTests(unittest.TestCase):
             return Response()
 
         self.tool.wfs_registry = Registry()
-        original_open = MODULE.urllib.request.urlopen
-        MODULE.urllib.request.urlopen = fake_open
+        original_open = MODULE._urlopen
+        MODULE._urlopen = fake_open
         try:
             result = self.tool._fetch_overpass_json("[out:json];node(1);out;")
         finally:
-            MODULE.urllib.request.urlopen = original_open
+            MODULE._urlopen = original_open
 
         self.assertEqual({"elements": [{"type": "node", "id": 1}]}, result)
         self.assertEqual(
@@ -1471,12 +1373,12 @@ class ToolboxHelperTests(unittest.TestCase):
             return Response(responses.pop(0))
 
         self.tool.wfs_registry = Registry()
-        original_open = MODULE.urllib.request.urlopen
-        MODULE.urllib.request.urlopen = fake_open
+        original_open = MODULE._urlopen
+        MODULE._urlopen = fake_open
         try:
             result = self.tool._fetch_overpass_json("[out:json];node(1);out;")
         finally:
-            MODULE.urllib.request.urlopen = original_open
+            MODULE._urlopen = original_open
 
         self.assertEqual([{"type": "node", "id": 2}], result["elements"])
         self.assertEqual([], responses)
@@ -1650,14 +1552,14 @@ class ToolboxHelperTests(unittest.TestCase):
             def read(self):
                 return schema
 
-        original = MODULE.urllib.request.urlopen
-        MODULE.urllib.request.urlopen = lambda request, timeout=30: Response()
+        original = MODULE._urlopen
+        MODULE._urlopen = lambda request, timeout=30: Response()
         try:
             self.tool._discover_wfs_schema(
                 "https://example.test/wfs", "test:polygon"
             )
         finally:
-            MODULE.urllib.request.urlopen = original
+            MODULE._urlopen = original
 
         self.assertEqual("geom", self.tool._get_wfs_geometry_field("test:polygon"))
         self.assertEqual("objectid", self.tool._wfs_sort_candidate_cache["test:polygon"])
@@ -1689,14 +1591,14 @@ class ToolboxHelperTests(unittest.TestCase):
                 return b"\xff\xd8complete\xff\xd9"
 
         responses = iter([Response(True), Response(False)])
-        original_open = MODULE.urllib.request.urlopen
+        original_open = MODULE._urlopen
         original_sleep = MODULE.time.sleep
-        MODULE.urllib.request.urlopen = lambda request, timeout=180: next(responses)
+        MODULE._urlopen = lambda request, timeout=180: next(responses)
         MODULE.time.sleep = lambda seconds: None
         try:
             raw = self.tool._download_kapsi_image_bytes("https://example.test/map")
         finally:
-            MODULE.urllib.request.urlopen = original_open
+            MODULE._urlopen = original_open
             MODULE.time.sleep = original_sleep
         self.assertEqual(b"\xff\xd8complete\xff\xd9", raw)
 

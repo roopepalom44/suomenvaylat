@@ -22,6 +22,15 @@ try {
 
     foreach ($profile in $profiles) {
         $target = Join-Path $profile.FullName "python\plugins\$PluginName"
+        # Poista edellinen versio kokonaan, jotta vanhoja tiedostoja ei jää.
+        if (Test-Path -LiteralPath $target) {
+            $existing = Get-Item -LiteralPath $target -Force
+            if ($existing.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+                # Kehittäjän linkkiä lähdekoodiin ei saa tyhjentää.
+                throw "Lisäosakansio on linkki ($target). Poista linkki käsin ennen asennusta."
+            }
+            Remove-Item -LiteralPath $target -Recurse -Force
+        }
         New-Item -ItemType Directory -Path $target -Force | Out-Null
         foreach ($file in Get-ChildItem -LiteralPath $source -File -Recurse) {
             $relative = $file.FullName.Substring($source.Length).TrimStart('\')

@@ -10,6 +10,7 @@ import time
 import unicodedata
 import uuid
 from functools import lru_cache
+import urllib.error
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -21,6 +22,8 @@ from qgis.core import (
     QgsProject, QgsRasterLayer, QgsVectorFileWriter, QgsVectorLayer, QgsWkbTypes,
 )
 from qgis.PyQt.QtCore import QVariant
+
+from .osm_geometry import element_geometry
 
 WFS_SOURCES = {
     "Väylä": ["https://avoinapi.vaylapilvi.fi/vaylatiedot/ows"],
@@ -51,6 +54,53 @@ KAPSI_SERVICES = {
     "Taustakartta": "https://tiles.kartat.kapsi.fi/taustakartta",
     "Ortokuva": "https://tiles.kartat.kapsi.fi/ortokuva",
 }
+
+
+# Näille lähteille ArcGIS Pro -versio käyttää CQL INTERSECTS -hakua, joka
+# palauttaa kokonaiset rajaukseen osuvat geometriat ilman leikkausta. Muut
+# vektorilähteet leikataan rajaukseen kuten ArcGIS Pron Clip-vaiheessa.
+UNCLIPPED_WFS_SOURCES = frozenset(["Väylä", "DigiRoad"])
+SENSITIVE_HEADERS = frozenset(["authorization", "proxy-authorization", "cookie"])
+
+
+def _url_origin(url):
+    parsed = urllib.parse.urlsplit(str(url or ""))
+    scheme = (parsed.scheme or "").lower()
+    port = parsed.port or {"http": 80, "https": 443}.get(scheme)
+    return scheme, (parsed.hostname or "").lower(), port
+
+
+def _redirect_headers(old_url, new_url, headers):
+    """Pudota tunnisteet toiselle palvelimelle ohjattaessa ja estä HTTPS→HTTP."""
+    old_origin = _url_origin(old_url)
+    new_origin = _url_origin(new_url)
+    if old_origin[0] == "https" and new_origin[0] != "https":
+        raise urllib.error.URLError("uudelleenohjaus HTTPS:stä salaamattomaan osoitteeseen estettiin")
+    if old_origin == new_origin:
+        return dict(headers or {})
+    return {key: value for key, value in (headers or {}).items()
+            if str(key).lower() not in SENSITIVE_HEADERS}
+
+
+class _SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        new_request = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if new_request is None:
+            return None
+        safe = _redirect_headers(req.full_url, newurl, dict(new_request.header_items()))
+        new_request.headers = {}
+        new_request.unredirected_hdrs = {}
+        for key, value in safe.items():
+            new_request.add_header(key, value)
+        return new_request
+
+
+_SAFE_URL_OPENER = urllib.request.build_opener(_SafeRedirectHandler())
+
+
+def _urlopen(request, timeout=45):
+    """``urlopen`` ilman tunnisteiden vuotoa uudelleenohjauksessa."""
+    return _SAFE_URL_OPENER.open(request, timeout=timeout)
 
 
 def _add_project_layer(layer):
@@ -87,7 +137,7 @@ def _request_json(url, key=""):
     if key:
         headers["Authorization"] = "Basic " + base64.b64encode((key + ":").encode()).decode()
     request = urllib.request.Request(url, headers=headers)
-    with urllib.request.urlopen(request, timeout=45) as response:
+    with _urlopen(request, timeout=45) as response:
         return json.load(response)
 
 
@@ -103,7 +153,7 @@ def catalog(source, api_key="", password=""):
         request = urllib.request.Request(KARTTAKUVA_WMS + "?SERVICE=WMS&REQUEST=GetCapabilities",
                                          headers={"Authorization": "Basic " + credentials})
         try:
-            with urllib.request.urlopen(request, timeout=45) as response:
+            with _urlopen(request, timeout=45) as response:
                 root = ET.fromstring(response.read())
         except Exception as exc:
             raise RuntimeError(f"MML Karttakuva -tasoluettelo ei avaudu: {str(exc).replace(api_key, '[PIILOTETTU]').replace(password, '[PIILOTETTU]')}") from None
@@ -123,7 +173,7 @@ def catalog(source, api_key="", password=""):
         for service, endpoint in KAPSI_SERVICES.items():
             try:
                 url = endpoint + "?SERVICE=WMS&REQUEST=GetCapabilities"
-                with urllib.request.urlopen(url, timeout=45) as response:
+                with _urlopen(url, timeout=45) as response:
                     root = ET.fromstring(response.read())
                 for element in root.iter():
                     if element.tag.split("}")[-1] != "Layer":
@@ -158,7 +208,7 @@ def catalog(source, api_key="", password=""):
             endpoint = endpoint + "?" + urllib.parse.urlencode({"token": api_key})
         url = endpoint + ("&" if "?" in endpoint else "?") + "SERVICE=WFS&REQUEST=GetCapabilities"
         try:
-            with urllib.request.urlopen(url, timeout=45) as response:
+            with _urlopen(url, timeout=45) as response:
                 root = ET.fromstring(response.read())
             for element in root.iter():
                 if element.tag.split("}")[-1] != "FeatureType":
@@ -175,7 +225,7 @@ def catalog(source, api_key="", password=""):
         url = endpoint + "?" + urllib.parse.urlencode({"token": api_key,
                                                          "SERVICE": "WMS", "REQUEST": "GetCapabilities"})
         try:
-            with urllib.request.urlopen(url, timeout=45) as response:
+            with _urlopen(url, timeout=45) as response:
                 root = ET.fromstring(response.read())
             for element in root.iter():
                 if element.tag.split("}")[-1] != "Layer":
@@ -213,7 +263,7 @@ def _oskari_catalog():
     for endpoint in TRAFICOM_WFS_ENDPOINTS:
         try:
             url = endpoint + "?SERVICE=WFS&REQUEST=GetCapabilities"
-            with urllib.request.urlopen(url, timeout=60) as response:
+            with _urlopen(url, timeout=60) as response:
                 root = ET.fromstring(response.read())
             for feature_type in root.iter():
                 if feature_type.tag.split("}")[-1] != "FeatureType":
@@ -251,7 +301,17 @@ def _oskari_catalog():
 
 
 def admin_path():
-    return Path(__file__).parent / "resources" / "hallinnolliset_aluejaot.gpkg"
+    """Paketissa GeoPackage on lisäosan resources-kansiossa.
+
+    Lähdekoodista ajettaessa käytetään ArcGIS Pro -työkalun samaa aineistoa,
+    jotta 36 Mt:n tiedostoa ei tarvitse pitää repossa kahdesti.
+    """
+    packaged = Path(__file__).parent / "resources" / "hallinnolliset_aluejaot.gpkg"
+    if packaged.exists():
+        return packaged
+    repository_copy = (Path(__file__).resolve().parents[2] / "Toolboxes" / "Resources"
+                       / "hallinnolliset_aluejaot.gpkg")
+    return repository_copy if repository_copy.exists() else packaged
 
 
 def area_choices(area_type):
@@ -275,11 +335,17 @@ def selection_geometry(area_type, names=(), custom_layer=None):
         layer = QgsVectorLayer(f"{admin_path()}|layername={name}", name, "ogr")
     if layer is None or not layer.isValid():
         raise ValueError("Rajausaineistoa ei voitu avata")
-    if layer.geometryType() not in (1, 2):
+    geometry_type = _geometry_type_value(layer.geometryType())
+    if geometry_type not in (1, 2):
         raise ValueError("Rajausaineiston tulee olla viiva tai polygon")
     chosen = []
     names = set(names)
-    for feature in layer.getFeatures():
+    if area_type == "Oma aineisto" and layer.selectedFeatureCount() > 0:
+        # Kuten ArcGIS Prossa: tason valinta rajaa käytettävät kohteet.
+        features = layer.getSelectedFeatures()
+    else:
+        features = layer.getFeatures()
+    for feature in features:
         if not names or area_type == "Oma aineisto" or str(feature["namefin"]) in names:
             geom = QgsGeometry(feature.geometry())
             if not geom.isEmpty():
@@ -287,9 +353,18 @@ def selection_geometry(area_type, names=(), custom_layer=None):
     if not chosen:
         raise ValueError("Valitulta alueelta ei löytynyt geometriaa")
     mask = QgsGeometry.unaryUnion(chosen)
-    if layer.geometryType() == 1:
-        mask = mask.buffer(1, 8)
+    if geometry_type == 1:
+        # Kuten ArcGIS Pron MinimumBoundingGeometry(CONVEX_HULL, ALL):
+        # viivarajaus muutetaan kaikkien kohteiden konveksiksi peitteeksi.
+        mask = mask.convexHull()
+        if mask.isEmpty() or mask.area() <= 0:
+            raise ValueError("Viivarajauksesta ei voitu muodostaa aluetta (viivat ovat samalla suoralla)")
     return mask, layer.crs()
+
+
+def _geometry_type_value(value):
+    """Palauta Qgis.GeometryType kokonaislukuna (0 piste, 1 viiva, 2 alue)."""
+    return int(getattr(value, "value", value))
 
 
 def _open_remote_layer(entry):
@@ -307,18 +382,23 @@ def _open_remote_layer(entry):
     return layer
 
 
-def download(entry, mask, mask_crs, destination, key="", progress=None):
-    """Stream intersecting features into a GeoPackage in EPSG:3067."""
+def download(entry, mask, mask_crs, destination, key="", progress=None, add_layer=None):
+    """Stream intersecting features into a GeoPackage in EPSG:3067.
+
+    ``add_layer`` lisää valmiin tason projektiin. Taustatehtävä antaa oman
+    funktionsa, joka siirtää tason pääsäikeeseen lisättäväksi.
+    """
+    add_layer = add_layer or _add_project_layer
     if entry["kind"] == "kapsi_wms":
-        return _download_kapsi(entry, mask, mask_crs, destination, progress)
+        return _download_kapsi(entry, mask, mask_crs, destination, progress, add_layer)
     if entry["kind"] == "osm":
-        return _download_osm(entry, mask, mask_crs, destination, progress)
+        return _download_osm(entry, mask, mask_crs, destination, progress, add_layer)
     if entry["kind"] == "ogc":
-        return _download_ogc(entry, mask, mask_crs, destination, key, progress)
+        return _download_ogc(entry, mask, mask_crs, destination, key, progress, add_layer)
     if entry["kind"] == "oskari_wms":
-        return _download_oskari_wms(entry, mask, mask_crs, destination)
+        return _download_oskari_wms(entry, mask, mask_crs, destination, add_layer)
     if entry["kind"] == "oskari_wmts":
-        return _download_oskari_wmts(entry, mask, mask_crs, destination)
+        return _download_oskari_wmts(entry, mask, mask_crs, destination, add_layer)
     if entry["kind"] == "oskari_wfs":
         project = QgsProject.instance()
         target = QgsCoordinateReferenceSystem("EPSG:3067")
@@ -353,17 +433,20 @@ def download(entry, mask, mask_crs, destination, key="", progress=None):
             if not layer.isValid() or layer.featureCount() != len(data["features"]):
                 raise RuntimeError("QGIS ei avannut kaikkia Oskarin vektorikohteita")
             layer.setCrs(target)
-            return _download_vector_layer(entry, layer, mask, mask_crs, destination, progress)
+            return _download_vector_layer(entry, layer, mask, mask_crs, destination, progress,
+                                          add_layer, clip=True)
         finally:
             if layer is not None:
                 from qgis.PyQt import sip
                 sip.delete(layer)
             gdal.Unlink(path)
     layer = _open_remote_layer(entry)
-    return _download_vector_layer(entry, layer, mask, mask_crs, destination, progress)
+    return _download_vector_layer(entry, layer, mask, mask_crs, destination, progress, add_layer,
+                                  clip=entry.get("source") not in UNCLIPPED_WFS_SOURCES)
 
 
-def _download_vector_layer(entry, layer, mask, mask_crs, destination, progress=None):
+def _download_vector_layer(entry, layer, mask, mask_crs, destination, progress=None,
+                           add_layer=None, clip=True):
     project = QgsProject.instance()
     to_source = QgsCoordinateTransform(mask_crs, layer.crs(), project)
     source_mask = QgsGeometry(mask)
@@ -392,6 +475,10 @@ def _download_vector_layer(entry, layer, mask, mask_crs, destination, progress=N
             geometry.transform(to_target)
             if not geometry.intersects(target_mask):
                 continue
+            if clip:
+                geometry = geometry.intersection(target_mask)
+                if geometry.isEmpty():
+                    continue
             output = QgsFeature(layer.fields())
             output.setAttributes(feature.attributes())
             output.setGeometry(geometry)
@@ -408,11 +495,11 @@ def _download_vector_layer(entry, layer, mask, mask_crs, destination, progress=N
     output = QgsVectorLayer(f"{destination}|layername={options.layerName}", entry["title"], "ogr")
     if not output.isValid():
         raise RuntimeError("Tallennettu taso ei avaudu")
-    _add_project_layer(output)
+    (add_layer or _add_project_layer)(output)
     return count
 
 
-def _download_oskari_wms(entry, mask, mask_crs, destination):
+def _download_oskari_wms(entry, mask, mask_crs, destination, add_layer=None):
     """Save an Oskari map image as a georeferenced GeoTIFF."""
     from osgeo import gdal
     target = QgsCoordinateReferenceSystem("EPSG:3067")
@@ -441,7 +528,7 @@ def _download_oskari_wms(entry, mask, mask_crs, destination):
               "TRANSPARENT": "TRUE"}
     request = urllib.request.Request(entry["endpoint"] + "?" + urllib.parse.urlencode(params),
                                      headers={"Accept": "image/png"})
-    with urllib.request.urlopen(request, timeout=180) as response:
+    with _urlopen(request, timeout=180) as response:
         raw = response.read()
         content_type = response.headers.get("Content-Type", "").lower()
     if not content_type.startswith("image/") or not raw.startswith(b"\x89PNG\r\n\x1a\n"):
@@ -461,11 +548,11 @@ def _download_oskari_wms(entry, mask, mask_crs, destination):
     if not layer.isValid():
         destination.unlink(missing_ok=True)
         raise RuntimeError("Tallennettu Oskari-karttakuva ei avaudu")
-    _add_project_layer(layer)
+    (add_layer or _add_project_layer)(layer)
     return 1
 
 
-def _download_oskari_wmts(entry, mask, mask_crs, destination):
+def _download_oskari_wmts(entry, mask, mask_crs, destination, add_layer=None):
     """Read the service's EPSG:3067 tile matrix through GDAL and save a GeoTIFF."""
     from osgeo import gdal
     target = QgsCoordinateReferenceSystem("EPSG:3067")
@@ -506,7 +593,7 @@ def _download_oskari_wmts(entry, mask, mask_crs, destination):
     if not layer.isValid():
         destination.unlink(missing_ok=True)
         raise RuntimeError("Tallennettu Oskari-WMTS ei avaudu")
-    _add_project_layer(layer)
+    (add_layer or _add_project_layer)(layer)
     return 1
 
 
@@ -542,34 +629,16 @@ def _overpass_fetch(query):
             try:
                 request = urllib.request.Request(endpoint, data=payload,
                                                  headers={"Content-Type": "application/x-www-form-urlencoded"})
-                with urllib.request.urlopen(request, timeout=160) as response:
+                with _urlopen(request, timeout=160) as response:
                     data = json.load(response)
                 if data.get("remark") and "error" in data["remark"].lower():
                     raise RuntimeError(data["remark"])
                 return data.get("elements", [])
             except Exception as exc:
                 last_error = exc
-                time.sleep(attempt + 1)
+                if attempt == 0:
+                    time.sleep(1)
     raise RuntimeError(f"Overpass-haku epäonnistui: {last_error}")
-
-
-def _osm_geometry(element, poi=False):
-    if poi:
-        point = element if element.get("type") == "node" else element.get("center") or {}
-        if "lon" in point and "lat" in point:
-            return {"type": "Point", "coordinates": [point["lon"], point["lat"]]}
-        return None
-    if element.get("type") == "node":
-        if "lon" in element and "lat" in element:
-            return {"type": "Point", "coordinates": [element["lon"], element["lat"]]}
-        return None
-    points = [(point["lon"], point["lat"]) for point in element.get("geometry", [])
-              if "lon" in point and "lat" in point]
-    if len(points) < 2:
-        return None
-    if len(points) >= 4 and points[0] == points[-1]:
-        return {"type": "Polygon", "coordinates": [points]}
-    return {"type": "LineString", "coordinates": points}
 
 
 def _poi_classes(tags):
@@ -617,10 +686,53 @@ def _poi_table():
     return json.loads((Path(__file__).parent / "osm_poi_classes.json").read_text(encoding="utf-8"))
 
 
-def _download_osm(entry, mask, mask_crs, destination, progress=None):
+GEOMETRY_FAMILIES = ((0, "pisteet"), (1, "viivat"), (2, "alueet"))
+
+
+def _write_feature_groups(destination, base_name, title, fields, groups, target_crs, add_layer):
+    """Kirjoita geometriatyypeittäin ryhmitellyt kohteet samaan GeoPackageen.
+
+    Jos tyyppejä on useita, jokaisesta tulee oma GeoPackage-taso ja
+    projektitaso (kuten ArcGIS Pro -versiossa).
+    """
+    project = QgsProject.instance()
+    non_empty = [(family, suffix, groups[family]) for family, suffix in GEOMETRY_FAMILIES
+                 if groups.get(family)]
+    written = []
+    for index, (_family, suffix, features) in enumerate(non_empty):
+        options = QgsVectorFileWriter.SaveVectorOptions()
+        options.driverName = "GPKG"
+        options.layerName = base_name if len(non_empty) == 1 else f"{base_name}_{suffix}"[:63]
+        if index:
+            options.actionOnExistingFile = QgsVectorFileWriter.CreateOrOverwriteLayer
+        writer = QgsVectorFileWriter.create(str(destination), fields, QgsWkbTypes.Unknown,
+                                            target_crs, project.transformContext(), options)
+        if writer.hasError() != QgsVectorFileWriter.NoError:
+            error = writer.errorMessage()
+            del writer
+            raise RuntimeError(error)
+        try:
+            for feature in features:
+                if not writer.addFeature(feature):
+                    raise RuntimeError(writer.errorMessage())
+        finally:
+            del writer
+        layer_title = title if len(non_empty) == 1 else f"{title} ({suffix})"
+        written.append((options.layerName, layer_title))
+    for layer_name, layer_title in written:
+        layer = QgsVectorLayer(f"{destination}|layername={layer_name}", layer_title, "ogr")
+        if not layer.isValid():
+            raise RuntimeError(f"Tallennettu taso ei avaudu: {layer_title}")
+        add_layer(layer)
+    return len(written)
+
+
+def _download_osm(entry, mask, mask_crs, destination, progress=None, add_layer=None):
+    add_layer = add_layer or _add_project_layer
     project = QgsProject.instance()
     wgs84 = QgsCoordinateReferenceSystem("EPSG:4326")
     target = QgsCoordinateReferenceSystem("EPSG:3067")
+    to_target = QgsCoordinateTransform(wgs84, target, project)
     wgs_mask = QgsGeometry(mask)
     wgs_mask.transform(QgsCoordinateTransform(mask_crs, wgs84, project))
     target_mask = QgsGeometry(mask)
@@ -635,65 +747,59 @@ def _download_osm(entry, mask, mask_crs, destination, progress=None):
     for name, kind in (("osm_id", QVariant.String), ("osm_type", QVariant.String),
                        ("tags", QVariant.String), ("code", QVariant.Int), ("fclass", QVariant.String)):
         fields.append(QgsField(name, kind))
-    options = QgsVectorFileWriter.SaveVectorOptions()
-    options.driverName = "GPKG"
-    options.layerName = re.sub(r"[^\w]+", "_", entry["id"])[:60]
-    writer = QgsVectorFileWriter.create(str(destination), fields, QgsWkbTypes.Unknown,
-                                        target, project.transformContext(), options)
-    if writer.hasError() != QgsVectorFileWriter.NoError:
-        raise RuntimeError(writer.errorMessage())
+    groups = {0: [], 1: [], 2: []}
     count, seen = 0, set()
     poi = entry["id"] == "osm_poi_points"
-    try:
-        for row in range(rows):
-            for col in range(cols):
-                west = bounds.xMinimum() + col * bounds.width() / cols
-                east = bounds.xMinimum() + (col + 1) * bounds.width() / cols
-                south = bounds.yMinimum() + row * bounds.height() / rows
-                north = bounds.yMinimum() + (row + 1) * bounds.height() / rows
-                bbox = f"{south},{west},{north},{east}"
-                for element in _overpass_fetch(_osm_query(entry, bbox)):
-                    key = (element.get("type"), element.get("id"))
-                    if key in seen:
-                        continue
-                    seen.add(key)
-                    raw_geometry = _osm_geometry(element, poi)
-                    if raw_geometry is None:
-                        continue
-                    geometry = QgsJsonUtils.geometryFromGeoJson(json.dumps(raw_geometry))
-                    if geometry.isEmpty() or not geometry.intersects(wgs_mask):
-                        continue
-                    geometry.transform(QgsCoordinateTransform(wgs84, target, project))
-                    if not geometry.intersects(target_mask):
-                        continue
-                    geometry = geometry.intersection(target_mask)
-                    if geometry.isEmpty():
-                        continue
-                    tags = element.get("tags") or {}
-                    classes = _poi_classes(tags) if poi else [(None, None)]
-                    for code, fclass in classes:
-                        feature = QgsFeature(fields)
-                        feature.setAttributes([str(element.get("id") or ""), str(element.get("type") or ""),
-                                               json.dumps(tags, ensure_ascii=False), code, fclass])
-                        feature.setGeometry(geometry)
-                        if not writer.addFeature(feature):
-                            raise RuntimeError(writer.errorMessage())
-                        count += 1
-                if progress:
-                    progress(count)
-    finally:
-        del writer
+    for row in range(rows):
+        for col in range(cols):
+            west = bounds.xMinimum() + col * bounds.width() / cols
+            east = bounds.xMinimum() + (col + 1) * bounds.width() / cols
+            south = bounds.yMinimum() + row * bounds.height() / rows
+            north = bounds.yMinimum() + (row + 1) * bounds.height() / rows
+            bbox = f"{south},{west},{north},{east}"
+            for element in _overpass_fetch(_osm_query(entry, bbox)):
+                key = (element.get("type"), element.get("id"))
+                if key in seen:
+                    continue
+                seen.add(key)
+                raw_geometry = element_geometry(element, poi)
+                if raw_geometry is None:
+                    continue
+                geometry = QgsJsonUtils.geometryFromGeoJson(json.dumps(raw_geometry))
+                if geometry.isEmpty() or not geometry.intersects(wgs_mask):
+                    continue
+                geometry.transform(to_target)
+                if not geometry.intersects(target_mask):
+                    continue
+                geometry = geometry.intersection(target_mask)
+                if geometry.isEmpty():
+                    continue
+                family = _geometry_type_value(geometry.type())
+                if family not in groups:
+                    continue
+                tags = element.get("tags") or {}
+                classes = _poi_classes(tags) if poi else [(None, None)]
+                for code, fclass in classes:
+                    feature = QgsFeature(fields)
+                    feature.setAttributes([str(element.get("id") or ""), str(element.get("type") or ""),
+                                           json.dumps(tags, ensure_ascii=False), code, fclass])
+                    feature.setGeometry(geometry)
+                    groups[family].append(feature)
+                    count += 1
+            if progress:
+                progress(count)
     if not count:
-        Path(destination).unlink(missing_ok=True)
         raise RuntimeError("Rajauksesta ei löytynyt OSM-kohteita")
-    layer = QgsVectorLayer(str(destination), entry["title"], "ogr")
-    if not layer.isValid():
-        raise RuntimeError("OSM-tulosta ei voitu avata")
-    _add_project_layer(layer)
+    base_name = re.sub(r"[^\w]+", "_", entry["id"])[:60]
+    try:
+        _write_feature_groups(destination, base_name, entry["title"], fields, groups, target, add_layer)
+    except Exception:
+        Path(destination).unlink(missing_ok=True)
+        raise
     return count
 
 
-def _download_kapsi(entry, mask, mask_crs, destination, progress=None):
+def _download_kapsi(entry, mask, mask_crs, destination, progress=None, add_layer=None):
     """Fetch Kapsi WMS in parallel tiles, mosaic to georeferenced GeoTIFF."""
     from osgeo import gdal, osr
     target = QgsCoordinateReferenceSystem("EPSG:3067")
@@ -731,7 +837,7 @@ def _download_kapsi(entry, mask, mask_crs, destination, progress=None):
         last_error = None
         for attempt in range(3):
             try:
-                with urllib.request.urlopen(urllib.request.Request(url, headers={"Accept": "image/jpeg"}), timeout=180) as response:
+                with _urlopen(urllib.request.Request(url, headers={"Accept": "image/jpeg"}), timeout=180) as response:
                     payload = response.read()
                     if not response.headers.get("Content-Type", "").lower().startswith("image/"):
                         raise RuntimeError("Kapsi ei palauttanut kuvatiedostoa")
@@ -784,15 +890,59 @@ def _download_kapsi(entry, mask, mask_crs, destination, progress=None):
         raise RuntimeError("Kapsi-rasteria ei voitu avata")
     if layer.crs().authid() != "EPSG:3067":
         raise RuntimeError("Kapsi-rasterin koordinaatisto ei tallentunut oikein")
-    _add_project_layer(layer)
+    (add_layer or _add_project_layer)(layer)
     return 1
 
 
-def _download_ogc(entry, mask, mask_crs, destination, key="", progress=None):
-    """Download all OGC API Features pages using the service's next links."""
+def _ogc_field_kind(value):
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return "bool"
+    if isinstance(value, int):
+        return "int"
+    if isinstance(value, float):
+        return "float"
+    return "string"
+
+
+def _ogc_variant(kinds):
+    kinds = {kind for kind in kinds if kind}
+    if not kinds or "string" in kinds:
+        return QVariant.String
+    if kinds == {"bool"}:
+        return QVariant.Bool
+    if kinds == {"int"}:
+        return QVariant.LongLong
+    if kinds <= {"int", "float"}:
+        return QVariant.Double
+    return QVariant.String
+
+
+def _ogc_value(value, variant):
+    if value is None:
+        return None
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, ensure_ascii=False)
+    if variant == QVariant.String:
+        return value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
+    if variant == QVariant.Double:
+        return float(value)
+    return value
+
+
+def _download_ogc(entry, mask, mask_crs, destination, key="", progress=None, add_layer=None):
+    """Download all OGC API Features pages using the service's next links.
+
+    Kentät päätellään kaikkien sivujen kohteista, joten myöhemmillä sivuilla
+    esiintyvät ominaisuudet eivät katoa. Kohteet puskuroidaan väliaikaiseen
+    tiedostoon ennen GeoPackagen kirjoitusta.
+    """
+    add_layer = add_layer or _add_project_layer
     project = QgsProject.instance()
     wgs84 = QgsCoordinateReferenceSystem("EPSG:4326")
     target_crs = QgsCoordinateReferenceSystem("EPSG:3067")
+    to_target = QgsCoordinateTransform(wgs84, target_crs, project)
     wgs_mask = QgsGeometry(mask)
     wgs_mask.transform(QgsCoordinateTransform(mask_crs, wgs84, project))
     target_mask = QgsGeometry(mask)
@@ -802,80 +952,83 @@ def _download_ogc(entry, mask, mask_crs, destination, key="", progress=None):
     base = urllib.parse.urljoin(entry["endpoint"],
                                 f"collections/{urllib.parse.quote(entry['id'], safe='')}/items")
     url = base + "?" + urllib.parse.urlencode({"bbox": bbox, "limit": 1000, "f": "json"})
-    fields = None
-    writer = None
+    field_kinds = {}
     count, pages = 0, 0
     visited = set()
     destination = str(destination)
-    try:
-        while url:
-            if url in visited or pages >= 10000:
-                raise RuntimeError("OGC-sivutus pysähtyi; aineistoa ei tallennettu vajaana")
-            visited.add(url)
-            data = _request_json(url, key)
-            features = data.get("features", [])
-            if fields is None:
-                if not features:
-                    break
-                fields = QgsFields()
-                properties = features[0].get("properties") or {}
-                for name, value in properties.items():
-                    variant = QVariant.String
-                    if isinstance(value, bool):
-                        variant = QVariant.Bool
-                    elif isinstance(value, int):
-                        variant = QVariant.LongLong
-                    elif isinstance(value, float):
-                        variant = QVariant.Double
-                    fields.append(QgsField(str(name), variant))
-                options = QgsVectorFileWriter.SaveVectorOptions()
-                options.driverName = "GPKG"
-                options.layerName = re.sub(r"[^\w]+", "_", entry["id"])[:60] or "data"
-                writer = QgsVectorFileWriter.create(destination, fields, QgsWkbTypes.Unknown,
-                                                    target_crs, project.transformContext(), options)
-                if writer.hasError() != QgsVectorFileWriter.NoError:
-                    raise RuntimeError(writer.errorMessage())
-            for raw in features:
-                geom_data = raw.get("geometry")
-                if not geom_data:
-                    continue
-                geometry = QgsJsonUtils.geometryFromGeoJson(json.dumps(geom_data))
-                if geometry.isEmpty() or not geometry.intersects(wgs_mask):
-                    continue
-                geometry.transform(QgsCoordinateTransform(wgs84, target_crs, project))
-                if not geometry.intersects(target_mask):
-                    continue
-                geometry = geometry.intersection(target_mask)
-                if geometry.isEmpty():
-                    continue
-                output = QgsFeature(fields)
-                properties = raw.get("properties") or {}
-                values = []
-                for field in fields:
-                    value = properties.get(field.name())
-                    values.append(json.dumps(value, ensure_ascii=False) if isinstance(value, (dict, list)) else value)
-                output.setAttributes(values)
-                output.setGeometry(geometry)
-                if not writer.addFeature(output):
-                    raise RuntimeError(writer.errorMessage())
-                count += 1
-            pages += 1
-            if progress:
-                progress(count)
-            next_url = None
-            for link in data.get("links", []):
-                if link.get("rel") == "next" and link.get("href"):
-                    next_url = urllib.parse.urljoin(url, link["href"])
-                    break
-            url = next_url
-    finally:
-        if writer is not None:
+    with tempfile.TemporaryDirectory(prefix="suomenvaylat_ogc_") as temp:
+        spool_path = Path(temp) / "features.jsonl"
+        with spool_path.open("w", encoding="utf-8") as spool:
+            while url:
+                if url in visited or pages >= 10000:
+                    raise RuntimeError("OGC-sivutus pysähtyi; aineistoa ei tallennettu vajaana")
+                visited.add(url)
+                data = _request_json(url, key)
+                for raw in data.get("features", []):
+                    geom_data = raw.get("geometry")
+                    if not geom_data:
+                        continue
+                    geometry = QgsJsonUtils.geometryFromGeoJson(json.dumps(geom_data))
+                    if geometry.isEmpty() or not geometry.intersects(wgs_mask):
+                        continue
+                    geometry.transform(to_target)
+                    if not geometry.intersects(target_mask):
+                        continue
+                    geometry = geometry.intersection(target_mask)
+                    if geometry.isEmpty():
+                        continue
+                    properties = raw.get("properties") or {}
+                    for name, value in properties.items():
+                        field_kinds.setdefault(str(name), set()).add(_ogc_field_kind(value))
+                    spool.write(json.dumps({"wkt": geometry.asWkt(), "properties": properties},
+                                           ensure_ascii=False) + "\n")
+                    count += 1
+                pages += 1
+                if progress:
+                    progress(count)
+                next_url = None
+                for link in data.get("links", []):
+                    if link.get("rel") == "next" and link.get("href"):
+                        next_url = urllib.parse.urljoin(url, link["href"])
+                        break
+                url = next_url
+        if count == 0:
+            raise RuntimeError("Rajauksesta ei löytynyt kohteita")
+        fields = QgsFields()
+        variants = {}
+        for name, kinds in field_kinds.items():
+            variants[name] = _ogc_variant(kinds)
+            fields.append(QgsField(name, variants[name]))
+        options = QgsVectorFileWriter.SaveVectorOptions()
+        options.driverName = "GPKG"
+        options.layerName = re.sub(r"[^\w]+", "_", entry["id"])[:60] or "data"
+        writer = QgsVectorFileWriter.create(destination, fields, QgsWkbTypes.Unknown,
+                                            target_crs, project.transformContext(), options)
+        if writer.hasError() != QgsVectorFileWriter.NoError:
+            error = writer.errorMessage()
             del writer
-    if count == 0:
-        Path(destination).unlink(missing_ok=True)
-        raise RuntimeError("Rajauksesta ei löytynyt kohteita")
-    output = QgsVectorLayer(destination, entry["title"], "ogr")
+            raise RuntimeError(error)
+        completed = False
+        try:
+            with spool_path.open("r", encoding="utf-8") as spool:
+                for line in spool:
+                    record = json.loads(line)
+                    properties = record["properties"]
+                    output = QgsFeature(fields)
+                    output.setAttributes([
+                        _ogc_value(properties.get(field.name()), variants[field.name()])
+                        for field in fields
+                    ])
+                    output.setGeometry(QgsGeometry.fromWkt(record["wkt"]))
+                    if not writer.addFeature(output):
+                        raise RuntimeError(writer.errorMessage())
+            completed = True
+        finally:
+            del writer
+            if not completed:
+                Path(destination).unlink(missing_ok=True)
+    output = QgsVectorLayer(f"{destination}|layername={options.layerName}", entry["title"], "ogr")
     if not output.isValid():
         raise RuntimeError("Tallennettu taso ei avaudu")
-    _add_project_layer(output)
+    add_layer(output)
     return count

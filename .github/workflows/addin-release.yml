@@ -9,7 +9,11 @@ permissions:
   contents: write
 
 jobs:
+  tests:
+    uses: ./.github/workflows/tests.yml
+
   build-and-release:
+    needs: tests
     # The official Pro 3.5 Extensions NuGet pins compile-time APIs to the minimum supported Pro version.
     runs-on: windows-2025
     timeout-minutes: 60
@@ -131,7 +135,10 @@ jobs:
             '--repo', $env:GITHUB_REPOSITORY,
             '--target', $env:GITHUB_SHA,
             '--title', "Suomenväylät $env:RELEASE_VERSION",
-            '--generate-notes'
+            '--generate-notes',
+            # Pysyvä latauslinkki releases/latest/download/Suomenvaylat.esriAddInX
+            # vaatii, että AddIn-release on aina uusin.
+            '--latest'
           )
           & gh @ghArgs
           if ($LASTEXITCODE -ne 0) {

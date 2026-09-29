@@ -4,7 +4,8 @@ import importlib.machinery
 import importlib.util
 from pathlib import Path
 
-import arcpy
+# Pysähtyy heti, jos skriptiä ei ajeta ArcGIS Pron Python-ympäristössä.
+importlib.import_module('arcpy')
 
 
 toolbox_path = Path(__file__).resolve().parents[1] / 'Toolboxes' / 'VaylaWFSDownloader.pyt'
@@ -22,7 +23,7 @@ labels = {'Väylä': 'Tieverkko - Väylä',
 
 def fake_fetch(sources, cache_key=None, allow_disk_cache=True):
     tool._layer_mapping = {
-        labels[source]: {'source': source, 'kind': 'mml_raster' if source == 'MML' else 'wfs'}
+        labels[source]: {'source': source, 'kind': 'mml_property_ogcapi' if source == 'MML' else 'wfs'}
         for source in sources
     }
     return [labels[source] for source in sources]

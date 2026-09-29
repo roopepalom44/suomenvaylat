@@ -15,6 +15,7 @@ geometry, crs = selection_geometry('Maakunta', names[:1])
 assert not geometry.isEmpty() and crs.authid() == 'EPSG:3067'
 print('areas passed', len(names), flush=True)
 dialog = SuomenvaylatDialog()
+dialog.run_tasks_synchronously = True
 assert any(dialog.sources.item(index).text() == 'Traficom Oskari'
            for index in range(dialog.sources.count()))
 from qgis.PyQt.QtCore import Qt
@@ -80,13 +81,13 @@ class FakeResponse:
     def __enter__(self): return self
     def __exit__(self, *args): return False
     def read(self): return self.data
-old_urlopen = services.urllib.request.urlopen
+old_urlopen = services._urlopen
 def fake_urlopen(request, timeout=45):
     url = request if isinstance(request, str) else request.full_url
     if 'SERVICE=WMS' in url:
         return FakeResponse(b'<WMS_Capabilities><Layer><Name>aino:map</Name><Title>Aino map</Title></Layer></WMS_Capabilities>')
     return FakeResponse(b'<WFS_Capabilities><FeatureType><Name>aino:data</Name><Title>Aino data</Title></FeatureType></WFS_Capabilities>')
-services.urllib.request.urlopen = fake_urlopen
+services._urlopen = fake_urlopen
 try:
     entries, errors = services.catalog('Aino', 'dummy')
     assert len(entries) == 2 and not errors
@@ -95,4 +96,4 @@ try:
     assert len(karttakuva) == 1 and karttakuva[0]['kind'] == 'karttakuva_wms' and not errors
     print('Aino WFS/WMS catalog passed', flush=True)
 finally:
-    services.urllib.request.urlopen = old_urlopen
+    services._urlopen = old_urlopen

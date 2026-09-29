@@ -1,0 +1,41 @@
+name: Tests
+
+on:
+  pull_request:
+  push:
+    branches-ignore:
+      - main
+  # Julkaisutyönkulku kutsuu tätä ennen AddInX:n käännöstä.
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out commit
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Install static checker
+        run: python -m pip install --disable-pip-version-check pyflakes==4.0.0
+
+      - name: Static checks
+        run: |
+          python -m pyflakes Toolboxes/VaylaWFSDownloader.pyt qgis_plugin/suomenvaylat_qgis tests
+          python -m py_compile Toolboxes/VaylaWFSDownloader.pyt qgis_plugin/package.py
+
+      - name: Unit tests (ilman arcpyä ja verkkoa)
+        run: python -m unittest discover -s tests -v
+
+      - name: QGIS plugin package
+        run: python qgis_plugin/package.py

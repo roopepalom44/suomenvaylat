@@ -33,11 +33,12 @@ original_information = plugin_module.QMessageBox.information
 plugin_module.catalog = fake_catalog
 plugin_module.selection_geometry = lambda *args: (None, None)
 downloaded = []
-plugin_module.download = lambda entry, mask, crs, path, key, progress: downloaded.append(entry['source']) or 1
+plugin_module.download = lambda entry, mask, crs, path, key, progress, **kwargs: downloaded.append(entry['source']) or 1
 plugin_module.QMessageBox.information = lambda *args: plugin_module.QMessageBox.Ok
 
 try:
     dialog = plugin_module.SuomenvaylatDialog()
+    dialog.run_tasks_synchronously = True
     checked_item(dialog, 'DigiRoad').setCheckState(Qt.Checked)
     dialog._load_catalog()
     for query in ('Ensimmäinen', 'Toinen'):
