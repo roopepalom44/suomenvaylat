@@ -51,6 +51,18 @@ KAPSI_SERVICES = {
     "Taustakartta": "https://tiles.kartat.kapsi.fi/taustakartta",
     "Ortokuva": "https://tiles.kartat.kapsi.fi/ortokuva",
 }
+
+
+def _add_project_layer(layer):
+    """Enable on-the-fly reprojection before adding georeferenced data."""
+    if not layer.crs().isValid():
+        raise RuntimeError(f"Tason koordinaatistoa ei tunnistettu: {layer.name()}")
+    project = QgsProject.instance()
+    if not project.crs().isValid():
+        project.setCrs(layer.crs())
+    project.addMapLayer(layer)
+
+
 KARTTAKUVA_WMS = "https://karttakuva.maanmittauslaitos.fi/maasto/wms"
 OVERPASS_ENDPOINTS = [
     "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
@@ -396,7 +408,7 @@ def _download_vector_layer(entry, layer, mask, mask_crs, destination, progress=N
     output = QgsVectorLayer(f"{destination}|layername={options.layerName}", entry["title"], "ogr")
     if not output.isValid():
         raise RuntimeError("Tallennettu taso ei avaudu")
-    project.addMapLayer(output)
+    _add_project_layer(output)
     return count
 
 
@@ -449,7 +461,7 @@ def _download_oskari_wms(entry, mask, mask_crs, destination):
     if not layer.isValid():
         destination.unlink(missing_ok=True)
         raise RuntimeError("Tallennettu Oskari-karttakuva ei avaudu")
-    QgsProject.instance().addMapLayer(layer)
+    _add_project_layer(layer)
     return 1
 
 
@@ -494,7 +506,7 @@ def _download_oskari_wmts(entry, mask, mask_crs, destination):
     if not layer.isValid():
         destination.unlink(missing_ok=True)
         raise RuntimeError("Tallennettu Oskari-WMTS ei avaudu")
-    QgsProject.instance().addMapLayer(layer)
+    _add_project_layer(layer)
     return 1
 
 
@@ -677,7 +689,7 @@ def _download_osm(entry, mask, mask_crs, destination, progress=None):
     layer = QgsVectorLayer(str(destination), entry["title"], "ogr")
     if not layer.isValid():
         raise RuntimeError("OSM-tulosta ei voitu avata")
-    project.addMapLayer(layer)
+    _add_project_layer(layer)
     return count
 
 
@@ -772,7 +784,7 @@ def _download_kapsi(entry, mask, mask_crs, destination, progress=None):
         raise RuntimeError("Kapsi-rasteria ei voitu avata")
     if layer.crs().authid() != "EPSG:3067":
         raise RuntimeError("Kapsi-rasterin koordinaatisto ei tallentunut oikein")
-    QgsProject.instance().addMapLayer(layer)
+    _add_project_layer(layer)
     return 1
 
 
@@ -865,5 +877,5 @@ def _download_ogc(entry, mask, mask_crs, destination, key="", progress=None):
     output = QgsVectorLayer(destination, entry["title"], "ogr")
     if not output.isValid():
         raise RuntimeError("Tallennettu taso ei avaudu")
-    project.addMapLayer(output)
+    _add_project_layer(output)
     return count

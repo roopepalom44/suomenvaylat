@@ -1,4 +1,4 @@
-from qgis.core import QgsApplication, QgsProject
+from qgis.core import QgsApplication, QgsCoordinateReferenceSystem, QgsProject, QgsVectorLayer
 QgsApplication.setPrefixPath('C:/Program Files/QGIS 3.44.14/apps/qgis-ltr', True)
 app = QgsApplication([], False)
 app.initQgis()
@@ -13,6 +13,9 @@ def fake_tilejson(url, key):
 plugin_module._request_json = fake_tilejson
 QMessageBox.information = lambda *args: None
 QMessageBox.critical = lambda *args: (_ for _ in ()).throw(RuntimeError(str(args)))
+project = QgsProject.instance()
+project.addMapLayer(QgsVectorLayer('Point?crs=EPSG:3857', 'existing basemap', 'memory'))
+project.setCrs(QgsCoordinateReferenceSystem())
 dialog = SuomenvaylatDialog()
 dialog.background_key.setText('dummy')
 for title in ('Kapsi — Taustakartta', 'Kapsi — Peruskartta', 'Kapsi — Ortokuva'):
@@ -20,13 +23,16 @@ for title in ('Kapsi — Taustakartta', 'Kapsi — Peruskartta', 'Kapsi — Orto
     dialog._add_background()
     assert any(layer.name() == title and layer.crs().authid() == 'EPSG:3067'
                for layer in QgsProject.instance().mapLayers().values())
+assert project.crs().authid() == 'EPSG:3067'
 print('Kapsi live WMS configuration passed', flush=True)
+project.setCrs(QgsCoordinateReferenceSystem())
 for map_name in ('Taustakartta', 'Maastokartta', 'Kiinteistöjaotus'):
     dialog._add_mml_background(map_name)
     layer = next(layer for layer in QgsProject.instance().mapLayers().values()
                  if layer.name() == f'MML — {map_name}')
     assert layer.crs().authid() == 'EPSG:3857'
     assert 'WGS84_Pseudo-Mercator' in layer.source()
+assert project.crs().authid() == 'EPSG:3857'
 assert len(requested_urls) == 3
 assert all('WGS84_Pseudo-Mercator' in url for url in requested_urls)
 print('MML tile configuration passed', flush=True)

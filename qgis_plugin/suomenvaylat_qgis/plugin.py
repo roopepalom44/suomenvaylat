@@ -15,7 +15,7 @@ from qgis.core import (QgsApplication, QgsAuthMethodConfig, QgsDataSourceUri,
                        QgsNetworkAccessManager, QgsProject, QgsSettings,
                        QgsVectorLayer, QgsVectorTileLayer)
 
-from .services import WFS_SOURCES, OGC_SOURCES, KAPSI_SERVICES, _request_json, area_choices, catalog, download, selection_geometry
+from .services import WFS_SOURCES, OGC_SOURCES, KAPSI_SERVICES, _add_project_layer, _request_json, area_choices, catalog, download, selection_geometry
 
 MML_TILEJSON = {
     # QGIS's XYZ vector tile provider uses the Web Mercator tile matrix.
@@ -411,6 +411,7 @@ class SuomenvaylatDialog(QDialog):
         progress = None
         canceled = False
         successes, failures = [], []
+        project_crs_missing = not QgsProject.instance().crs().isValid()
         try:
             mask, crs = selection_geometry(area_type, names, layer) if needs_folder else (None, None)
             if needs_folder:
@@ -469,6 +470,9 @@ class SuomenvaylatDialog(QDialog):
                 progress.close()
         status = "Lataus keskeytettiin" if canceled else "Lataus valmis"
         message = f"{status}: {len(successes)} tasoa onnistui, {len(failures)} epäonnistui."
+        if project_crs_missing and QgsProject.instance().crs().isValid():
+            message += ("\nProjektin koordinaattijärjestelmä asetettiin: "
+                        f"{QgsProject.instance().crs().authid()}.")
         details = "\n".join(successes + failures)
         if details:
             message += "\n\n" + details
@@ -489,7 +493,7 @@ class SuomenvaylatDialog(QDialog):
         uri = f"crs=EPSG:3067&dpiMode=7&format=image/png&layers={layer_name}&styles=&url={url}"
         layer = QgsRasterLayer(uri, title, "wms")
         if layer.isValid():
-            QgsProject.instance().addMapLayer(layer)
+            _add_project_layer(layer)
             QMessageBox.information(self, "Suomenväylät", f"Lisättiin: {title}")
         else:
             QMessageBox.critical(self, "Suomenväylät", "WMS-tasoa ei voitu avata")
@@ -512,7 +516,7 @@ class SuomenvaylatDialog(QDialog):
             layer = QgsVectorTileLayer(bytes(uri.encodedUri()).decode("utf-8"), f"MML — {map_name}")
             if not layer.isValid():
                 raise RuntimeError("QGIS ei voinut avata MML-vektoritiilitasoa")
-            QgsProject.instance().addMapLayer(layer)
+            _add_project_layer(layer)
             QMessageBox.information(self, "Suomenväylät", f"Lisättiin: MML — {map_name}")
         except Exception as exc:
             QMessageBox.critical(self, "Suomenväylät", str(exc).replace(key, "[PIILOTETTU]"))
@@ -549,7 +553,7 @@ class SuomenvaylatDialog(QDialog):
                                f"MML Karttakuva — {entry['title']}", "wms")
         if not layer.isValid():
             raise RuntimeError(f"MML Karttakuva -tasoa ei voitu avata: {entry['title']}")
-        QgsProject.instance().addMapLayer(layer)
+        _add_project_layer(layer)
 
     def _add_aino_wms(self, entry):
         from qgis.core import QgsRasterLayer
@@ -567,7 +571,7 @@ class SuomenvaylatDialog(QDialog):
                                f"Aino — {entry['title']}", "wms")
         if not layer.isValid():
             raise RuntimeError(f"Aino WMS -tasoa ei voitu avata: {entry['title']}")
-        QgsProject.instance().addMapLayer(layer)
+        _add_project_layer(layer)
 
 
 class SuomenvaylatPlugin:

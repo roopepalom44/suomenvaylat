@@ -25,3 +25,8 @@ Tässä versiossa toimivat WFS- ja OGC API Features -aineistojen haku aluerajauk
 
 - Kapsista ladattu GeoTIFF tallentaa EPSG:3067-koordinaattijärjestelmän, jolloin rasteri sijoittuu QGISissä Suomeen.
 - MML:n XYZ-vektoritiilet pyydetään Web Mercator -tiilistössä, jota QGIS käyttää näillä tasoilla.
+
+## Suomenväylät QGIS 0.2.6
+
+- Jos QGIS-projektilta puuttuu koordinaattijärjestelmä, lisäosa asettaa sen ensimmäisen ladatun tason mukaan ennen tason lisäämistä. Näin QGIS voi sovittaa EPSG:3067-aineistot ja eri CRS:ssä olevan karttapohjan yhteen.
+- Latauksen valmistumisviesti kertoo, kun projektin CRS asetettiin automaattisesti.

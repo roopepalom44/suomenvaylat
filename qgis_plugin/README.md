@@ -1,12 +1,12 @@
-# Suomenväylät QGIS (esijulkaisu 0.2.5)
+# Suomenväylät QGIS (esijulkaisu 0.2.6)
 
 QGIS 3.44:lle tehty erillinen, natiivi Python-lisäosa. ArcGIS Pro -laajennus pysyy samassa projektissa.
 
 ## Asennus
 
-**Windows, suoraviivainen asennus:** Lataa [QGIS 0.2.5 -julkaisusta](https://github.com/roopepalom44/suomenvaylat/releases/tag/qgis-v0.2.5) `Suomenvaylat-QGIS-0.2.5-Windows.zip`, pura ZIP ja kaksoisnapsauta `install_windows.bat`. Sulje QGIS ennen asennusta. Asennin kopioi lisäosan käyttäjän kaikkiin olemassa oleviin QGIS 3 -profiileihin (tai luo `default`-profiilin) ja ottaa lisäosan käyttöön. Käynnistä QGIS asennuksen jälkeen.
+**Windows, suoraviivainen asennus:** Lataa [QGIS 0.2.6 -julkaisusta](https://github.com/roopepalom44/suomenvaylat/releases/tag/qgis-v0.2.6) `Suomenvaylat-QGIS-0.2.6-Windows.zip`, pura ZIP ja kaksoisnapsauta `install_windows.bat`. Sulje QGIS ennen asennusta. Asennin kopioi lisäosan käyttäjän kaikkiin olemassa oleviin QGIS 3 -profiileihin (tai luo `default`-profiilin) ja ottaa lisäosan käyttöön. Käynnistä QGIS asennuksen jälkeen.
 
-**QGISin oma asennus:** Lataa samasta julkaisusta `Suomenvaylat-QGIS-0.2.5.zip` ja valitse QGISissä **Lisäosat → Hallitse ja asenna lisäosia → Asenna ZIP-tiedostosta**. Poista aiemmin väärään paikkaan sijoittuneet ladatut tasot projektista ja lataa ne uudelleen; lisäosan päivitys ei muuta jo tallennettuja aineistoja.
+**QGISin oma asennus:** Lataa samasta julkaisusta `Suomenvaylat-QGIS-0.2.6.zip` ja valitse QGISissä **Lisäosat → Hallitse ja asenna lisäosia → Asenna ZIP-tiedostosta**. Jos vanhan projektin asetuksissa lukee **Ei koordinaattijärjestelmää**, valitse projektin CRS:ksi **EPSG:3067**. Tämä sijoittaa jo ladatut EPSG:3067-tasot oikein ilman uutta latausta.
 
 ## Toimii tässä versiossa
 
