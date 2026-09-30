@@ -178,7 +178,7 @@ class ToolboxHelperTests(unittest.TestCase):
         metrics = MODULE.PhaseMetrics()
         metrics.set("JSONToFeatures", 0.01)
         self.tool._pages_to_temp_fc = lambda pages: (
-            converted_payloads.extend(pages) or "oskari_fc", metrics
+            converted_payloads.extend(pages) or ["oskari_fc"], metrics
         )
         original_describe = getattr(MODULE.arcpy, "Describe", None)
         original_management = getattr(MODULE.arcpy, "management", None)
@@ -574,7 +574,7 @@ class ToolboxHelperTests(unittest.TestCase):
         conversion.set("JSONToFeatures", 0.2)
         conversion.set("projektointi", 0.3)
         self.tool._fetch_json = fake_fetch
-        self.tool._json_to_temp_fc = lambda raw, project_to_epsg=None: ("fc{}".format(len(calls)), conversion)
+        self.tool._json_to_temp_fc = lambda raw, project_to_epsg=None, geometry_type=None: ("fc{}".format(len(calls)), conversion)
         self.tool._warn = lambda message: None
         chunks, found, stats = self.tool._fetch_ogcapi_feature_chunks(
             "https://example.test/features/v1/",
@@ -1520,7 +1520,7 @@ class ToolboxHelperTests(unittest.TestCase):
         )
         conversion = MODULE.PhaseMetrics()
         conversion.set("JSONToFeatures", 0.125)
-        self.tool._json_to_temp_fc = lambda raw, project_to_epsg=None: (
+        self.tool._json_to_temp_fc = lambda raw, project_to_epsg=None, geometry_type=None: (
             "temporary_fc", conversion
         )
         chunks, found, requests, stats, cql_ok = self.tool._fetch_bbox_feature_chunks(
@@ -1656,11 +1656,11 @@ class NetworkPathTests(unittest.TestCase):
         def fake_pages_to_fc(pages, project_to_epsg=None):
             merged = MODULE.VaylaWFSDownloader._merge_feature_pages(pages)
             if not merged or not merged.get("features"):
-                return None, MODULE.PhaseMetrics()
+                return [], MODULE.PhaseMetrics()
             self.converted.append(len(merged["features"]))
             timings = MODULE.PhaseMetrics()
             timings.set("JSONToFeatures", 0.01)
-            return "fc_{}".format(len(self.converted)), timings
+            return ["fc_{}".format(len(self.converted))], timings
 
         self.tool._pages_to_temp_fc = fake_pages_to_fc
 

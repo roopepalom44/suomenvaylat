@@ -4145,26 +4145,151 @@ class VaylaWFSDownloader(object):
             merged.pop(stale_key, None)
         return merged
 
+    # GeoJSON-tyyppi -> JSONToFeaturesin geometry_type. Point ja MultiPoint
+    # ovat ArcGISissa eri geometriatyyppejä, joten ne pidetään erillään.
+    _GEOJSON_GEOMETRY_FAMILY = {
+        "Point": "POINT",
+        "MultiPoint": "MULTIPOINT",
+        "LineString": "POLYLINE",
+        "MultiLineString": "POLYLINE",
+        "Polygon": "POLYGON",
+        "MultiPolygon": "POLYGON",
+    }
+
+    @classmethod
+    def _flatten_geometry_collection(cls, geometry):
+        """Pura GeometryCollection geometriaperheittäin Multi-geometrioiksi.
+
+        Palauttaa listan (perhe, GeoJSON-geometria). ArcGISin JSONToFeatures
+        tekee GeometryCollection-kohteista pelkän taulun ilman geometriaa.
+        """
+        points, lines, polygons = [], [], []
+        stack = list(geometry.get("geometries") or [])
+        while stack:
+            member = stack.pop(0)
+            if not isinstance(member, dict):
+                continue
+            kind = member.get("type")
+            coords = member.get("coordinates")
+            if kind == "GeometryCollection":
+                stack.extend(member.get("geometries") or [])
+            elif kind == "Point" and coords:
+                points.append(coords)
+            elif kind == "MultiPoint" and coords:
+                points.extend(coords)
+            elif kind == "LineString" and coords:
+                lines.append(coords)
+            elif kind == "MultiLineString" and coords:
+                lines.extend(coords)
+            elif kind == "Polygon" and coords:
+                polygons.append(coords)
+            elif kind == "MultiPolygon" and coords:
+                polygons.extend(coords)
+        parts = []
+        if points:
+            parts.append(("POINT", {"type": "Point", "coordinates": points[0]})
+                         if len(points) == 1 else
+                         ("MULTIPOINT", {"type": "MultiPoint", "coordinates": points}))
+        if lines:
+            parts.append(("POLYLINE", {"type": "MultiLineString", "coordinates": lines}))
+        if polygons:
+            parts.append(("POLYGON", {"type": "MultiPolygon", "coordinates": polygons}))
+        return parts
+
+    @classmethod
+    def _split_features_by_geometry(cls, features):
+        """Ryhmittele GeoJSON-kohteet JSONToFeaturesin geometriatyypeittäin.
+
+        Palauttaa None, kun kaikki kohteet ovat samaa tavallista tyyppiä
+        (nopea polku: yksi muunnos kuten ennenkin). Muuten palauttaa
+        ``[(geometry_type, features), ...]``. Kohteet ilman geometriaa
+        liitetään suurimpaan ryhmään, jotta niiden rivit säilyvät.
+        """
+        families = set()
+        needs_split = False
+        for feature in features:
+            geometry = feature.get("geometry") if isinstance(feature, dict) else None
+            kind = geometry.get("type") if isinstance(geometry, dict) else None
+            if kind is None:
+                continue
+            family = cls._GEOJSON_GEOMETRY_FAMILY.get(kind)
+            if family is None:
+                needs_split = True
+                continue
+            families.add(family)
+            if len(families) > 1:
+                needs_split = True
+        if not needs_split:
+            return None
+
+        groups = {}
+        without_geometry = []
+        for feature in features:
+            geometry = feature.get("geometry") if isinstance(feature, dict) else None
+            kind = geometry.get("type") if isinstance(geometry, dict) else None
+            if kind is None:
+                without_geometry.append(feature)
+            elif kind == "GeometryCollection":
+                for family, part in cls._flatten_geometry_collection(geometry):
+                    copy = dict(feature)
+                    copy["geometry"] = part
+                    groups.setdefault(family, []).append(copy)
+            elif kind in cls._GEOJSON_GEOMETRY_FAMILY:
+                groups.setdefault(cls._GEOJSON_GEOMETRY_FAMILY[kind], []).append(feature)
+        if without_geometry and groups:
+            largest = max(groups, key=lambda family: len(groups[family]))
+            groups[largest].extend(without_geometry)
+        order = ["POINT", "MULTIPOINT", "POLYLINE", "POLYGON"]
+        return [(family, groups[family]) for family in order if groups.get(family)]
+
     def _pages_to_temp_fc(self, page_payloads, project_to_epsg=None):
-        """Muunna monta sivua yhdellä JSONToFeatures-kutsulla.
+        """Muunna monta sivua väliaineistoiksi mahdollisimman harvalla GP-kutsulla.
 
         Yksi GP-kutsu sivua kohti oli mittausten mukaan merkittävä osa ison
         tason latausajasta. Sivujen kokoaminen eräksi vähentää sekä
         GP-käynnistyksiä että myöhemmän Mergen syötteiden määrää.
+
+        Palauttaa listan väliaineistoja: yhden jokaista geometriatyyppiä
+        kohden. Yksityyppinen aineisto muunnetaan yhdellä kutsulla kuten
+        ennenkin; sekatyypit ja GeometryCollectionit erotellaan, koska
+        JSONToFeatures pudottaa muut tyypit tai tekee pelkän taulun.
         """
         merged = self._merge_feature_pages(page_payloads)
         if merged is None or not merged.get("features"):
-            return None, PhaseMetrics()
+            return [], PhaseMetrics()
         serialize_start = time.perf_counter()
-        raw_text = json.dumps(merged)
+        groups = self._split_features_by_geometry(merged["features"])
+        if groups is None:
+            batches = [(None, json.dumps(merged))]
+        else:
+            batches = []
+            for geometry_type, group_features in groups:
+                payload = dict(merged)
+                payload["features"] = group_features
+                batches.append((geometry_type, json.dumps(payload)))
         serialize_s = time.perf_counter() - serialize_start
-        temp_fc, timings = self._json_to_temp_fc(
-            raw_text, project_to_epsg=project_to_epsg
-        )
-        timings.add("sivujen yhdistäminen", serialize_s)
-        return temp_fc, timings
 
-    def _json_to_temp_fc(self, raw_text: str, project_to_epsg=None):
+        timings = PhaseMetrics()
+        temp_fcs = []
+        try:
+            for geometry_type, raw_text in batches:
+                temp_fc, batch_timings = self._json_to_temp_fc(
+                    raw_text, project_to_epsg=project_to_epsg,
+                    geometry_type=geometry_type,
+                )
+                for timing_name, timing_value in batch_timings.seconds.items():
+                    if isinstance(timing_value, (int, float)):
+                        timings.add(timing_name, timing_value)
+                if temp_fc:
+                    temp_fcs.append(temp_fc)
+        except Exception:
+            for temp_fc in temp_fcs:
+                self._safe_delete(temp_fc)
+            raise
+        timings.add("sivujen yhdistäminen", serialize_s)
+        return temp_fcs, timings
+
+    def _json_to_temp_fc(self, raw_text: str, project_to_epsg=None, geometry_type=None):
         timings = PhaseMetrics()
         temp_json_path = os.path.join(self._scratch_folder(), f"temp_{uuid.uuid4().hex}.json")
         write_start = time.perf_counter()
@@ -4173,8 +4298,23 @@ class VaylaWFSDownloader(object):
         timings.set("väliaikaisen JSON-tiedoston kirjoittaminen", time.perf_counter() - write_start)
         temp_fc = os.path.join(self._scratch_gdb(), f"temp_fc_{uuid.uuid4().hex}")
         gp_start = time.perf_counter()
-        arcpy.conversion.JSONToFeatures(temp_json_path, temp_fc)
+        if geometry_type:
+            arcpy.conversion.JSONToFeatures(temp_json_path, temp_fc, geometry_type)
+        else:
+            arcpy.conversion.JSONToFeatures(temp_json_path, temp_fc)
         timings.set("JSONToFeatures", time.perf_counter() - gp_start)
+        if getattr(arcpy.Describe(temp_fc), "dataType", "FeatureClass") == "Table":
+            # Kohteilla ei ollut ArcGISin tunnistamaa geometriaa: taulu ei
+            # kelpaa Clipille, joten kaada taso selkeällä viestillä.
+            self._safe_delete(temp_fc)
+            try:
+                os.remove(temp_json_path)
+            except Exception:
+                pass
+            raise Exception(
+                "Palvelun GeoJSON-kohteista ei muodostunut geometriaa "
+                "(ArcGIS Pro loi pelkän taulun)."
+            )
         if project_to_epsg:
             # OGC API Features palauttaa oletuksena CRS84-GeoJSONin ilman
             # erillistä crs-jäsenkenttää. Määritä lähde-CRS ennen Projectia
@@ -4310,13 +4450,12 @@ class VaylaWFSDownloader(object):
             # GP-kutsujen määrä ei kasva sivumäärän mukana.
             pending_pages.append(json_data)
             if len(pending_pages) >= json_batch_pages:
-                page_fc, conversion_timing = self._pages_to_temp_fc(
+                batch_fcs, conversion_timing = self._pages_to_temp_fc(
                     pending_pages, project_to_epsg=3067
                 )
                 pending_pages = []
                 _accumulate_conversion_stats(conversion_timing, page_timing)
-                if page_fc:
-                    page_fcs.append(page_fc)
+                page_fcs.extend(batch_fcs)
             got = len(features)
             total_features += got
             for phase_name, stat_name in (
@@ -4362,13 +4501,12 @@ class VaylaWFSDownloader(object):
             current_url = next_url
 
         if pending_pages:
-            page_fc, conversion_timing = self._pages_to_temp_fc(
+            batch_fcs, conversion_timing = self._pages_to_temp_fc(
                 pending_pages, project_to_epsg=3067
             )
             pending_pages = []
             _accumulate_conversion_stats(conversion_timing, None)
-            if page_fc:
-                page_fcs.append(page_fc)
+            page_fcs.extend(batch_fcs)
 
         stats["truncated"] = truncated
         if stats["truncated"]:
@@ -4443,8 +4581,8 @@ class VaylaWFSDownloader(object):
                 "properties": {"name": "EPSG:3067"},
             }
 
-        feature_class, conversion_timing = self._pages_to_temp_fc([data])
-        if not feature_class:
+        feature_classes, conversion_timing = self._pages_to_temp_fc([data])
+        if not feature_classes:
             raise Exception(
                 "{} palautti {} kohdetta, mutta ArcGIS Pro ei muodostanut niistä aineistoa.".format(
                     service_label, len(features)
@@ -4453,21 +4591,27 @@ class VaylaWFSDownloader(object):
 
         # JSONToFeaturesin tulos tarkistetaan tässä, jotta mahdollinen ArcGISin
         # GeoJSON-CRS-tulkinta ei siirrä TM35FIN-koordinaatteja väärään CRS:ään.
+        converted_count = 0
         try:
-            sr = getattr(arcpy.Describe(feature_class), "spatialReference", None)
-            sr_code = int(getattr(sr, "factoryCode", 0) or 0) if sr else 0
-            if sr_code != 3067:
-                define_start = time.perf_counter()
-                arcpy.management.DefineProjection(
-                    feature_class, arcpy.SpatialReference(3067)
-                )
-                stats["projection_s"] += time.perf_counter() - define_start
-            converted_count = int(arcpy.management.GetCount(feature_class)[0])
+            for feature_class in feature_classes:
+                sr = getattr(arcpy.Describe(feature_class), "spatialReference", None)
+                sr_code = int(getattr(sr, "factoryCode", 0) or 0) if sr else 0
+                if sr_code != 3067:
+                    define_start = time.perf_counter()
+                    arcpy.management.DefineProjection(
+                        feature_class, arcpy.SpatialReference(3067)
+                    )
+                    stats["projection_s"] += time.perf_counter() - define_start
+                converted_count += int(arcpy.management.GetCount(feature_class)[0])
         except Exception:
-            self._safe_delete(feature_class)
+            for feature_class in feature_classes:
+                self._safe_delete(feature_class)
             raise
-        if converted_count != len(features):
-            self._safe_delete(feature_class)
+        # GeometryCollectionin jako geometriatyypeittäin voi tuottaa yhdestä
+        # kohteesta useamman rivin; vähemmän rivejä tarkoittaisi hävikkiä.
+        if converted_count < len(features):
+            for feature_class in feature_classes:
+                self._safe_delete(feature_class)
             raise Exception(
                 "ArcGIS Pro muodosti Oskari-vastauksesta {} kohdetta, vaikka GeoJSONissa oli {}.".format(
                     converted_count, len(features)
@@ -4481,7 +4625,7 @@ class VaylaWFSDownloader(object):
         ):
             stats[stat_name] += conversion_timing.get(timing_name, 0.0) or 0.0
         stats["fetch_total_s"] = time.perf_counter() - fetch_start
-        return [feature_class], len(features), stats
+        return list(feature_classes), len(features), stats
 
     def _fetch_bbox_feature_chunks(self, base_wfs: str, layer_clean: str, bbox_str: str,
                                    output_formats, max_features: int, max_requests: int = 200,
@@ -4769,13 +4913,12 @@ class VaylaWFSDownloader(object):
             # sivun yli yhden GP-kutsun sijaan sivua kohti.
             pending_pages.append(json_data)
             if len(pending_pages) >= json_batch_pages:
-                page_fc, conversion_timing = self._pages_to_temp_fc(pending_pages)
+                batch_fcs, conversion_timing = self._pages_to_temp_fc(pending_pages)
                 pending_pages = []
                 for timing_name, timing_value in conversion_timing.seconds.items():
                     if isinstance(timing_value, (int, float)):
                         page_timing.add(timing_name, timing_value)
-                if page_fc:
-                    page_fcs.append(page_fc)
+                page_fcs.extend(batch_fcs)
             stats["pages"] += 1
 
             got = len(features)
@@ -4818,15 +4961,14 @@ class VaylaWFSDownloader(object):
 
         # Viimeinen vajaa erä on muunnettava myös.
         if pending_pages:
-            page_fc, conversion_timing = self._pages_to_temp_fc(pending_pages)
+            batch_fcs, conversion_timing = self._pages_to_temp_fc(pending_pages)
             pending_pages = []
             tail_timing = PhaseMetrics()
             for timing_name, timing_value in conversion_timing.seconds.items():
                 if isinstance(timing_value, (int, float)):
                     tail_timing.add(timing_name, timing_value)
             _accumulate_page_timing(tail_timing)
-            if page_fc:
-                page_fcs.append(page_fc)
+            page_fcs.extend(batch_fcs)
 
         stats["truncated"] = truncated
         if truncated:
@@ -7422,6 +7564,13 @@ class VaylaWFSDownloader(object):
                         group_fcs, group_staged_fc, boundary_fc, skip_clip,
                         dedupe, group_metrics, layer_clean,
                     )
+                    if multiple_types and not group_result["feature_count"]:
+                        # Esim. OSM-viivat osuivat vain rajauksen ulkopuolelle:
+                        # älä tallenna tyhjää _viivat-tasoa muiden rinnalle.
+                        self._safe_delete(group_staged_fc)
+                        self._release_output_name(group_output_name, workspace)
+                        group_output_name = None
+                        continue
                     layer_outputs.append({
                         "path": group_staged_fc,
                         "output_name": group_output_name,
@@ -7452,6 +7601,8 @@ class VaylaWFSDownloader(object):
                     self._release_output_name(group_output_name, workspace)
                 _record_layer_failure(layer_ui_name, ex)
                 continue
+            if not layer_outputs:
+                self._msg("  [INFO] Tasolta ei löytynyt kohteita annetulla rajauksella; vienti ohitettiin.")
             staged_outputs.extend(layer_outputs)
 
         if layer_failures:

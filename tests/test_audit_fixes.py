@@ -187,7 +187,7 @@ class PaginationCompletenessTests(unittest.TestCase):
         self.tool.heavy_chunk_sources = []
 
         def fake_pages_to_fc(pages, project_to_epsg=None):
-            return "fc", MODULE.PhaseMetrics()
+            return ["fc"], MODULE.PhaseMetrics()
 
         self.tool._pages_to_temp_fc = fake_pages_to_fc
 
@@ -257,6 +257,75 @@ class PaginationCompletenessTests(unittest.TestCase):
         )
         self.assertEqual(1, found)
         self.assertFalse(stats["truncated"])
+
+
+class GeoJsonGeometrySplitTests(unittest.TestCase):
+    """JSONToFeatures tekee GeometryCollectionista taulun ja pudottaa sekatyypit."""
+
+    SQUARE = [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]]
+
+    @staticmethod
+    def _feature(geometry, **props):
+        return {"type": "Feature", "geometry": geometry, "properties": props}
+
+    def test_single_type_uses_fast_path(self):
+        split = MODULE.VaylaWFSDownloader._split_features_by_geometry([
+            self._feature({"type": "Polygon", "coordinates": self.SQUARE}),
+            self._feature({"type": "MultiPolygon", "coordinates": [self.SQUARE]}),
+            self._feature(None),
+        ])
+        self.assertIsNone(split)
+
+    def test_polygon_geometry_collection_becomes_multipolygon(self):
+        # Traficomin avoin:tuotejako_satamakartat palauttaa tällaisia kohteita.
+        feature = self._feature({"type": "GeometryCollection", "geometries": [
+            {"type": "Polygon", "coordinates": self.SQUARE},
+            {"type": "Polygon", "coordinates": self.SQUARE},
+        ]}, name="Vaasa")
+        split = MODULE.VaylaWFSDownloader._split_features_by_geometry([feature])
+        self.assertEqual(1, len(split))
+        family, features = split[0]
+        self.assertEqual("POLYGON", family)
+        self.assertEqual("MultiPolygon", features[0]["geometry"]["type"])
+        self.assertEqual(2, len(features[0]["geometry"]["coordinates"]))
+        self.assertEqual({"name": "Vaasa"}, features[0]["properties"])
+
+    def test_mixed_collection_and_types_are_split_by_family(self):
+        split = MODULE.VaylaWFSDownloader._split_features_by_geometry([
+            self._feature({"type": "Point", "coordinates": [1, 2]}),
+            self._feature({"type": "GeometryCollection", "geometries": [
+                {"type": "LineString", "coordinates": [[0, 0], [1, 1]]},
+                {"type": "Polygon", "coordinates": self.SQUARE},
+            ]}),
+            self._feature(None),
+        ])
+        families = {family: len(features) for family, features in split}
+        # Geometriaton kohde liitetään suurimpaan ryhmään (tasatilanteessa ensimmäiseen).
+        self.assertEqual({"POINT": 2, "POLYLINE": 1, "POLYGON": 1}, families)
+
+    def test_pages_are_converted_once_per_geometry_type(self):
+        tool = _new_tool()
+        calls = []
+
+        def fake_json_to_temp_fc(raw_text, project_to_epsg=None, geometry_type=None):
+            calls.append(geometry_type)
+            return "fc_{}".format(len(calls)), MODULE.PhaseMetrics()
+
+        tool._json_to_temp_fc = fake_json_to_temp_fc
+        page = {"type": "FeatureCollection", "features": [
+            self._feature({"type": "Point", "coordinates": [1, 2]}),
+            self._feature({"type": "Polygon", "coordinates": self.SQUARE}),
+        ]}
+        fcs, _ = tool._pages_to_temp_fc([page])
+        self.assertEqual(["POINT", "POLYGON"], calls)
+        self.assertEqual(["fc_1", "fc_2"], fcs)
+
+        calls.clear()
+        fcs, _ = tool._pages_to_temp_fc([{"type": "FeatureCollection", "features": [
+            self._feature({"type": "Point", "coordinates": [1, 2]}),
+        ]}])
+        self.assertEqual([None], calls)
+        self.assertEqual(["fc_1"], fcs)
 
 
 class PageSizeTests(unittest.TestCase):
