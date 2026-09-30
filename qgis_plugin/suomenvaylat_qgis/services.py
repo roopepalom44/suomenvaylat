@@ -34,6 +34,9 @@ WFS_SOURCES = {
         "https://paikkatiedot.ymparisto.fi/geoserver/liiteri_taajamat/wfs",
     ],
     "Syke": ["https://paikkatiedot.ymparisto.fi/geoserver/inspire_ps/wfs"],
+    # Globaali GeoServer-WFS: kaikki Tilastokeskuksen työtilat yhdellä
+    # GetCapabilitiesilla (INSPIRE OGC API oli samoille alueille 10-40x hitaampi).
+    "Tilastokeskus": ["https://geo.stat.fi/geoserver/wfs"],
     "Karttapaikka": [
         "https://inspire-wfs.maanmittauslaitos.fi/inspire-wfs/au/ows",
         "https://inspire-wfs.maanmittauslaitos.fi/inspire-wfs/bu_mtk_point",
@@ -59,7 +62,11 @@ KAPSI_SERVICES = {
 # Näille lähteille ArcGIS Pro -versio käyttää CQL INTERSECTS -hakua, joka
 # palauttaa kokonaiset rajaukseen osuvat geometriat ilman leikkausta. Muut
 # vektorilähteet leikataan rajaukseen kuten ArcGIS Pron Clip-vaiheessa.
-UNCLIPPED_WFS_SOURCES = frozenset(["Väylä", "DigiRoad"])
+# Tilastokeskuksen tilastoarvot koskevat koko aluetta tai ruutua, joten
+# leikattu pala antaisi harhaanjohtavan tuloksen.
+UNCLIPPED_WFS_SOURCES = frozenset(["Väylä", "DigiRoad", "Tilastokeskus"])
+# Palvelun testityötilat, joita ei näytetä tasoluettelossa.
+EXCLUDED_WFS_PREFIXES = {"Tilastokeskus": ("testi:",)}
 SENSITIVE_HEADERS = frozenset(["authorization", "proxy-authorization", "cookie"])
 
 
@@ -114,6 +121,7 @@ def _add_project_layer(layer):
 
 
 KARTTAKUVA_WMS = "https://karttakuva.maanmittauslaitos.fi/maasto/wms"
+OVERPASS_USER_AGENT = "Suomenvaylat-QGIS (+https://github.com/roopepalom44/suomenvaylat)"
 OVERPASS_ENDPOINTS = [
     "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
     "https://overpass-api.de/api/interpreter",
@@ -215,6 +223,8 @@ def catalog(source, api_key="", password=""):
                     continue
                 children = {child.tag.split("}")[-1]: (child.text or "").strip() for child in element}
                 name = children.get("Name", "")
+                if name and name.lower().startswith(EXCLUDED_WFS_PREFIXES.get(source, ())):
+                    continue
                 if name:
                     entries.append({"source": source, "kind": "wfs", "id": name,
                                     "title": children.get("Title") or name, "endpoint": endpoint})
@@ -647,8 +657,12 @@ def _overpass_fetch(query):
     for endpoint in OVERPASS_ENDPOINTS:
         for attempt in range(2):
             try:
-                request = urllib.request.Request(endpoint, data=payload,
-                                                 headers={"Content-Type": "application/x-www-form-urlencoded"})
+                # overpass-api.de hylkää Pythonin oletus-User-Agentin (HTTP 406).
+                request = urllib.request.Request(endpoint, data=payload, headers={
+                    "Content-Type": "application/x-www-form-urlencoded",
+                    "Accept": "application/json",
+                    "User-Agent": OVERPASS_USER_AGENT,
+                })
                 with _urlopen(request, timeout=160) as response:
                     data = json.load(response)
                 if data.get("remark") and "error" in data["remark"].lower():

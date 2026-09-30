@@ -28,6 +28,7 @@ cases = [
     ("DigiRoad", "digiroad:dr_pysakki", [small, city]),
     ("Liiteri", "liiteri_taajamat:taajamat24", [small, city]),
     ("Syke", "inspire_ps:PS.ProtectedSitesLaillaRakennusperinnonSuojelemisestaSuojeltuKohde", [small, city]),
+    ("Tilastokeskus", "vaestoruutu:vaki2024_1km", [small, city]),
     ("Karttapaikka", "gn:NamedPlace", [small, city]),
     ("Kapsi", "taustakartta", [small]),
     ("Kapsi", "peruskartta", [small]),

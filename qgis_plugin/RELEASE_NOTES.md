@@ -46,3 +46,8 @@ Tässä versiossa toimivat WFS- ja OGC API Features -aineistojen haku aluerajauk
 ## Suomenväylät QGIS 0.2.8
 
 - Rajaukseen leikatusta aineistosta säilytetään vain lähdetason geometriatyyppi. Rajaa sivuavat alueet eivät enää muutu alue- ja viivaosien kokoelmiksi, joiden koordinaatistoa QGIS ei tunnistanut (esim. Liiterin taajamat eivät latautuneet 0.2.7:ssä).
+
+## Suomenväylät QGIS 0.2.9
+
+- Uusi lähde **Tilastokeskus**: kaikki Tilastokeskuksen WFS-tasot (tilastointialueet, Paavo-postinumeroalueet, väestöalueet ja -ruudut, tieliikenneonnettomuudet, oppilaitokset). Rajaukseen osuvat alueet ja ruudut tallennetaan kokonaisina, koska tilastoarvot koskevat koko aluetta.
+- OpenStreetMap-haku lähettää tunnistettavan User-Agentin. overpass-api.de hylkää nykyisin Pythonin oletustunnisteen (HTTP 406), joten OSM-haut epäonnistuivat, kun ensisijainen Overpass-palvelu oli ruuhkautunut.

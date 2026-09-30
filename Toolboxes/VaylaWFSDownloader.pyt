@@ -345,6 +345,18 @@ class WFSSourceRegistry(object):
                 ],
                 "description": "SYKE INSPIRE Protected Sites"
             },
+            "Tilastokeskus": {
+                "type": "wfs",
+                # Globaali GeoServer-WFS kattaa kaikki työtilat yhdellä
+                # GetCapabilitiesilla: tilastointialueet, postinumeroalueet,
+                # väestöalueet ja -ruudut, tieliikenneonnettomuudet ja
+                # oppilaitokset. Mitattuna 5000 kohteen GeoJSON-sivu 0,1-0,9 s;
+                # INSPIRE OGC API (/inspire/ogc/api/su) oli samoille alueille
+                # 10-40x hitaampi, joten sitä ei käytetä.
+                "endpoints": ["https://geo.stat.fi/geoserver/wfs"],
+                "exclude_prefixes": ["testi:"],
+                "description": "Tilastokeskuksen paikkatietoaineistot (WFS)"
+            },
             "Aino": {
                 "type": "aino",
                 # Sitowise Aino julkaisee samasta osoitteesta WFS 1.1.0- ja
@@ -420,6 +432,7 @@ class WFSSourceRegistry(object):
             "Kapsi",
             "Liiteri",
             "Syke",
+            "Tilastokeskus",
             "Aino",
             "Karttapaikka",
             "OpenStreetMap"
@@ -456,6 +469,7 @@ class WFSSourceRegistry(object):
 
         layers = []
         seen = set()
+        excluded = tuple(prefix.lower() for prefix in source.get("exclude_prefixes") or [])
         for endpoint in endpoints:
             try:
                 sep = "&" if "?" in endpoint else "?"
@@ -464,6 +478,8 @@ class WFSSourceRegistry(object):
                 endpoint_layers = []
             for lyr in endpoint_layers:
                 lid = lyr.get("id")
+                if lid and excluded and lid.lower().startswith(excluded):
+                    continue
                 if lid and lid not in seen:
                     seen.add(lid)
                     layers.append(lyr)
@@ -1214,6 +1230,11 @@ class VaylaWFSDownloader(object):
 
         # Lähteet joiden raskaat tasot pilkotaan kunnittain
         self.heavy_chunk_sources = ["Väylä", "DigiRoad"]
+        # Muut GeoServer-lähteet, joille CQL INTERSECTS on todettu toimivaksi.
+        # Ne palauttavat kokonaiset rajaukseen osuvat geometriat ilman Clipiä:
+        # tilastoarvo (esim. väkiluku) koskee koko aluetta tai ruutua, joten
+        # leikattu pala antaisi harhaanjohtavan tuloksen.
+        self.cql_wfs_sources = ["Tilastokeskus"]
 
         # MML:n OGC API Features- ja vector tile -palvelut
         self._mml_layer_mapping = {}
@@ -3127,7 +3148,10 @@ class VaylaWFSDownloader(object):
             self._runtime_workspace_is_folder = False
 
     def _wfs_supports_cql(self, source_name) -> bool:
-        return source_name in self.heavy_chunk_sources
+        return (
+            source_name in self.heavy_chunk_sources
+            or source_name in getattr(self, "cql_wfs_sources", ())
+        )
 
     def _boundary_extent_from_features(self, boundary_fc):
         """Compute extent from actual features, respecting definition queries on feature layers."""

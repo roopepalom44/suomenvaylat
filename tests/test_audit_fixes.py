@@ -259,6 +259,48 @@ class PaginationCompletenessTests(unittest.TestCase):
         self.assertFalse(stats["truncated"])
 
 
+class StatisticsFinlandSourceTests(unittest.TestCase):
+    def test_source_uses_global_geoserver_wfs(self):
+        registry = MODULE.WFSSourceRegistry()
+        self.assertIn("Tilastokeskus", registry.get_sources_list())
+        self.assertEqual("wfs", registry.get_type("Tilastokeskus"))
+        self.assertEqual(["https://geo.stat.fi/geoserver/wfs"], registry.get_endpoints("Tilastokeskus"))
+
+    def test_test_workspace_is_hidden_from_catalog(self):
+        registry = MODULE.WFSSourceRegistry()
+        registry._parse_capabilities = lambda url: [
+            {"id": "tilastointialueet:kunta1000k", "title": "Kunnat", "source": None, "kind": "wfs"},
+            {"id": "vaestoruutu:vaki2024_1km", "title": "Väestöruutu", "source": None, "kind": "wfs"},
+            {"id": "testi:rudolfSK", "title": "rudolfSK", "source": None, "kind": "wfs"},
+        ]
+        ids = [layer["id"] for layer in registry.get_capabilities("Tilastokeskus")]
+        self.assertEqual(["tilastointialueet:kunta1000k", "vaestoruutu:vaki2024_1km"], ids)
+
+    def test_boundary_is_sent_as_cql_intersects(self):
+        tool = _new_tool()
+        tool._http_max_attempts = 1
+        tool._page_workers = 1
+        tool._msg = lambda text: None
+        tool._warn = lambda text: None
+        tool.heavy_chunk_sources = ["Väylä", "DigiRoad"]
+        tool.cql_wfs_sources = ["Tilastokeskus"]
+        tool._discover_wfs_schema = lambda *args, **kwargs: None
+        tool._wfs_geometry_field_cache["vaestoruutu:vaki2024_1km"] = "geom"
+        tool._pages_to_temp_fc = lambda pages, project_to_epsg=None: (["fc"], MODULE.PhaseMetrics())
+        transport = fake_http.FakeTransport([fake_http.FakeResponse(fake_http.feature_page(3))])
+        tool._http_transport = transport
+        _, found, _, _, cql_ok = tool._fetch_bbox_feature_chunks(
+            "https://geo.stat.fi/geoserver/wfs", "vaestoruutu:vaki2024_1km", "1,2,3,4",
+            ["application/json"], 5000, boundary_wkt="POLYGON((1 2,3 2,3 4,1 2))",
+            source_name="Tilastokeskus", allow_bbox_fallback=False,
+        )
+        self.assertEqual(3, found)
+        self.assertTrue(cql_ok)
+        request = transport.requests[0]
+        cql = request["query"].get("CQL_FILTER") or request["form"].get("CQL_FILTER")
+        self.assertTrue(cql.startswith("INTERSECTS(geom,"), cql)
+
+
 class GeoJsonGeometrySplitTests(unittest.TestCase):
     """JSONToFeatures tekee GeometryCollectionista taulun ja pudottaa sekatyypit."""
 

@@ -242,6 +242,24 @@ WMTS-taustakarttoja ei käsitellä ladattavina vektoritasoina.
 Rajapintapolut, nykyisen tasoluettelon testaus ja ArcGIS Pro -tarkistus on
 kuvattu tiedostossa [`docs/OSKARI.md`](docs/OSKARI.md).
 
+## Tilastokeskus
+
+**Tilastokeskus** näyttää kaikki Tilastokeskuksen GeoServer-WFS:n tasot (noin
+420): tilastointialueet (kunnat, maakunnat, hyvinvointialueet, vaalipiirit
+ym. eri vuosilta ja mittakaavoista), Paavo-postinumeroalueet
+tilastoaineistoineen, väestöalueet, 1 km ja 5 km väestöruudut ja niiden
+keskipisteet, tieliikenneonnettomuudet sekä oppilaitokset. Tasoluettelo
+haetaan yhdellä GetCapabilities-pyynnöllä osoitteesta
+`https://geo.stat.fi/geoserver/wfs`.
+
+Kohteet haetaan CQL INTERSECTS -rajauksella GeoJSON-sivuina (5000 kohdetta).
+Rajaukseen osuvat alueet ja ruudut palautetaan kokonaisina ilman leikkausta,
+koska tilastoarvot (esim. väkiluku) koskevat koko aluetta tai ruutua.
+Mitattuna 5000 kohteen sivu valmistuu 0,1–0,9 sekunnissa. INSPIRE OGC API
+(`/inspire/ogc/api/su`) sisältää samat alueet INSPIRE-skeemassa, mutta oli
+10–40 kertaa hitaampi, joten työkalu käyttää WFS-rajapintaa. WMS-palvelut ovat
+samojen aineistojen karttakuvia eivätkä kuulu ladattaviin vektoritasoihin.
+
 ## OpenStreetMap POI-pisteet
 
 OpenStreetMap-tasoissa relaatiot (esim. hallinnolliset alueet sekä metsä- ja
