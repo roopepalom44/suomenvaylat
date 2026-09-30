@@ -4,6 +4,8 @@
 
 ArcGIS Pro -laajennus Suomenväylät-aineistojen lataamiseen WFS-rajapinnoista.
 
+**Käyttöohje työkavereille:** [Suomenvaylat_kayttoohje.pdf](Suomenvaylat_kayttoohje.pdf) ([Word](Suomenvaylat_kayttoohje.docx)). Ohje kattaa asennuksen ja käytön sekä ArcGIS Prossa että QGISissä.
+
 ## Lataus ja asennus
 
 1. Lataa uusin [Suomenvaylat.esriAddInX](https://github.com/roopepalom44/suomenvaylat/releases/latest/download/Suomenvaylat.esriAddInX) ([kaikki julkaisut](https://github.com/roopepalom44/suomenvaylat/releases)).
