@@ -182,6 +182,12 @@ WFS- ja rasterikäsittely tehdään ajokohtaisessa paikallisessa scratch-geodata
 - **Keskeneräiset väliaineistot siivotaan.** Kun ruudukkotaso epäonnistuu ja
   siirrytään hienompaan ruudukkoon, jo luodut scratch-feature classit
   poistetaan sen sijaan että ne jäisivät paisuttamaan scratch-GDB:tä.
+- **Clip korjaa virheelliset geometriat.** Rajapinnan GeoJSONissa voi olla
+  esimerkiksi nolla-alaisia polygoneja, joihin `Clip` kaatuu virheeseen
+  `ERROR 160196: Invalid Topology`. Virheen jälkeen aineistolle ajetaan
+  `RepairGeometry` ja `Clip` yritetään uudelleen; viimeisenä varareittinä on
+  `PairwiseClip`. Jos yhtään valittua tasoa ei saada tallennettua, ajon
+  loppuviesti kertoo sen eikä väitä ajon onnistuneen osittain.
 - `ExportFeatures` korvaa deprecated `FeatureClassToFeatureClass`-työkalun;
   vanha jää varareitiksi vanhemmille ArcGIS Pro -versioille.
 

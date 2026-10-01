@@ -6735,6 +6735,43 @@ class VaylaWFSDownloader(object):
             groups.items(), key=lambda item: (order.get(item[0].lower(), 9), item[0])
         )
 
+    def _clip_with_repair(self, in_fc, boundary_fc, out_fc, metrics, layer_clean):
+        """Rajaa aineisto; korjaa virheelliset geometriat, jos Clip kaatuu.
+
+        Rajapinnan GeoJSONissa voi olla esimerkiksi nolla-alaisia polygoneja.
+        JSONToFeatures ei korjaa niitä, ja Clip kaatuu niihin virheeseen
+        ERROR 160196 (Invalid Topology). Korjaus ajetaan vain virheen jälkeen,
+        jotta ehjä aineisto ei maksa ylimääräistä geoprosessointia.
+        """
+        try:
+            arcpy.analysis.Clip(in_fc, boundary_fc, out_fc)
+            return
+        except Exception as ex:
+            clip_error = ex
+        self._warn(
+            "[VAROITUS] Clip epäonnistui tasolla '{}' ({}). Korjataan aineiston "
+            "geometriat ja yritetään uudelleen.".format(
+                layer_clean, str(clip_error).strip().splitlines()[0] if str(clip_error).strip() else "tuntematon virhe"
+            )
+        )
+        self._safe_delete(out_fc)
+        try:
+            repair_start = time.perf_counter()
+            arcpy.management.RepairGeometry(in_fc, "DELETE_NULL")
+            metrics.add("geometrian korjaus", time.perf_counter() - repair_start)
+            arcpy.analysis.Clip(in_fc, boundary_fc, out_fc)
+            self._msg("  [INFO] Clip onnistui geometrioiden korjauksen jälkeen.")
+            return
+        except Exception:
+            self._safe_delete(out_fc)
+        try:
+            arcpy.analysis.PairwiseClip(in_fc, boundary_fc, out_fc)
+            self._msg("  [INFO] Rajaus tehtiin Pairwise Clip -työkalulla.")
+            return
+        except Exception:
+            self._safe_delete(out_fc)
+        raise clip_error
+
     def _finalize_feature_group(self, group_fcs, staged_fc, boundary_fc, skip_clip,
                                 dedupe, metrics, layer_clean):
         """Yhdistä, poista duplikaatit ja rajaa yhden geometriatyypin väliaineistot.
@@ -6773,7 +6810,7 @@ class VaylaWFSDownloader(object):
             metrics.skip("Clip", "ohitettu (CQL palauttaa kokonaiset leikkaavat geometriat)")
         else:
             clip_start = time.perf_counter()
-            arcpy.analysis.Clip(merged_fc, boundary_fc, staged_fc)
+            self._clip_with_repair(merged_fc, boundary_fc, staged_fc, metrics, layer_clean)
             result["clip_s"] = time.perf_counter() - clip_start
             metrics.add("Clip", result["clip_s"])
             metrics.skip("staging", "ei käytetty erillisenä vaiheena")
@@ -7631,10 +7668,12 @@ class VaylaWFSDownloader(object):
 
         if layer_failures:
             self._warn(
-                "[VAROITUS] {} / {} valitusta tasosta epäonnistui: {}. "
-                "Onnistuneet tasot viimeistellään normaalisti.".format(
+                "[VAROITUS] {} / {} valitusta tasosta epäonnistui: {}. {}".format(
                     len(layer_failures), total_layers,
                     ", ".join(label for label, _ in layer_failures),
+                    "Onnistuneet tasot viimeistellään normaalisti."
+                    if len(layer_failures) < total_layers
+                    else "Yhtään valittua tasoa ei voitu tallentaa.",
                 )
             )
 
@@ -7847,7 +7886,9 @@ class VaylaWFSDownloader(object):
 
         self._msg("[INFO] Lataus valmis.")
 
-        if layer_failures:
+        if layer_failures and len(layer_failures) >= total_layers:
+            self._warn("\n=== Ajo epäonnistui: yhtään valittua tasoa ei tallennettu ===")
+        elif layer_failures:
             self._msg("\n=== Ajo suoritettu osittain: onnistuneet tasot tallennettiin ===")
         else:
             self._msg("\n=== Ajo suoritettu onnistuneesti ===")

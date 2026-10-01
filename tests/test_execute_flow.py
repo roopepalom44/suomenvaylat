@@ -77,14 +77,14 @@ class ExecuteFlowTests(unittest.TestCase):
         self.copies.append((source, name))
         return workspace + "\\" + name
 
-    def _run(self, layers):
+    def _run(self, layers, clip=None, extra_management=None, extra_analysis=None):
         shapes = {"pt1": "Point", "pt2": "Point", "pt3": "Point", "pt4": "Point",
                   "poly1": "Polygon", "bad1": "Polyline"}
 
         def describe(path):
             return types.SimpleNamespace(shapeType=shapes.get(path, "Polygon"), dataType="FeatureClass")
 
-        def clip(source, boundary, output):
+        def default_clip(source, boundary, output):
             if source == "bad1":
                 raise RuntimeError("Clip failed")
 
@@ -94,6 +94,7 @@ class ExecuteFlowTests(unittest.TestCase):
             CopyFeatures=lambda source, output: None,
             Delete=lambda path: None,
             DeleteIdentical=lambda path, fields: None,
+            **(extra_management or {})
         )
         parameters = [
             _param("OpenStreetMap", [["OpenStreetMap"]]),
@@ -107,7 +108,8 @@ class ExecuteFlowTests(unittest.TestCase):
         ]
         with _ArcpyPatch(
             Describe=describe, Exists=lambda path: False, ExecuteError=RuntimeError,
-            management=management, analysis=types.SimpleNamespace(Clip=clip),
+            management=management,
+            analysis=types.SimpleNamespace(Clip=clip or default_clip, **(extra_analysis or {})),
         ):
             self.tool._execute_impl(parameters, None)
 
@@ -191,6 +193,50 @@ class ExecuteFlowTests(unittest.TestCase):
                             for warning in self.warnings))
         self.assertIn("\n=== Ajo suoritettu osittain: onnistuneet tasot tallennettiin ===",
                       self.messages)
+
+    def test_invalid_topology_is_repaired_and_clip_retried(self):
+        clip_calls, repairs = [], []
+
+        def clip(source, boundary, output):
+            clip_calls.append(source)
+            if source == "pt3" and not repairs:
+                raise RuntimeError("ERROR 160196: Invalid Topology\nFailed to execute (Clip).")
+
+        self._run(
+            ["Osoitteet - OpenStreetMap (2)"], clip=clip,
+            extra_management={"RepairGeometry": lambda fc, option: repairs.append((fc, option))},
+        )
+        self.assertEqual([("pt3", "DELETE_NULL")], repairs)
+        self.assertEqual(["pt3", "pt3"], clip_calls)
+        self.assertFalse(self.tool._run_had_layer_failures)
+        self.assertIn("Osoitteet", [name for _, name in self.copies])
+        self.assertTrue(any("ERROR 160196: Invalid Topology" in warning and "Failed to execute" not in warning
+                            for warning in self.warnings))
+        self.assertIn("\n=== Ajo suoritettu onnistuneesti ===", self.messages)
+
+    def test_pairwise_clip_is_used_when_clip_still_fails_after_repair(self):
+        pairwise = []
+
+        def clip(source, boundary, output):
+            raise RuntimeError("ERROR 160196: Invalid Topology")
+
+        self._run(
+            ["Osoitteet - OpenStreetMap (2)"], clip=clip,
+            extra_management={"RepairGeometry": lambda fc, option: None},
+            extra_analysis={"PairwiseClip": lambda source, boundary, output: pairwise.append(source)},
+        )
+        self.assertEqual(["pt3"], pairwise)
+        self.assertFalse(self.tool._run_had_layer_failures)
+        self.assertIn("Osoitteet", [name for _, name in self.copies])
+
+    def test_summary_says_failed_when_no_layer_was_saved(self):
+        self._run(["Rikki - OpenStreetMap"])
+        self.assertTrue(self.tool._run_had_layer_failures)
+        self.assertTrue(any("Yhtään valittua tasoa ei voitu tallentaa" in warning
+                            for warning in self.warnings))
+        self.assertIn("\n=== Ajo epäonnistui: yhtään valittua tasoa ei tallennettu ===", self.warnings)
+        self.assertNotIn("\n=== Ajo suoritettu osittain: onnistuneet tasot tallennettiin ===",
+                         self.messages)
 
 
 if __name__ == "__main__":
