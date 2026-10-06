@@ -11,6 +11,17 @@ ArcGIS Pro -laajennus Suomenväylät-aineistojen lataamiseen WFS-rajapinnoista.
 1. Lataa uusin [Suomenvaylat.esriAddInX](https://github.com/roopepalom44/suomenvaylat/releases/latest/download/Suomenvaylat.esriAddInX) ([kaikki julkaisut](https://github.com/roopepalom44/suomenvaylat/releases)).
 2. Sulje ArcGIS Pro ja asenna tiedosto kaksoisklikkaamalla sitä.
 
+Aineistojen nimet rajataan enintään 60 merkkiin myös väliaikaisessa scratch-GDB:ssä.
+Pitkään nimeen lisätään koko nimestä laskettu 12 merkin tunniste, jotta samoin
+alkavat aluevalinnat erottuvat. Valittujen alueiden määrä ei kasvata nimeä tämän
+rajan yli; kaikki valitut alueet säilyvät rajausaineistossa. Kansioon tallennettaessa
+shapefilen `.shp`-pääte lisätään tämän nimen perään.
+
+Pitkät CQL-rajaukset lähetetään suoraan POST-pyyntöinä, kun koko URL-koodattu
+GET-osoite ylittäisi 6 500 merkkiä. POSTia käytetään myös seuraavilla sivuilla
+ja rinnakkaisessa esihaussa. Jos lyhyt GET-pyyntö hylätään ja POST onnistuu,
+myös loput sivut haetaan POSTilla. CQL-suodatin ja tarkka aluerajaus säilyvät.
+
 ### Automaattiset GitHub-julkaisut
 
 Jokainen `main`-haaraan tehty push käynnistää työnkulun

@@ -91,7 +91,7 @@ class PhaseMetrics(object):
         return self.seconds.get(name, default)
 
 class CQLRequestRejected(Exception):
-    """CQL GET ja POST epäonnistuivat; kutsuja voi kokeilla pienempiä CQL-osia."""
+    """CQL-pyyntö epäonnistui; kutsuja voi kokeilla pienempiä CQL-osia."""
 
 
 # Uudelleenyritettävät HTTP-tilakoodit. 4xx-virheitä ei yritetä uudelleen:
@@ -99,6 +99,8 @@ class CQLRequestRejected(Exception):
 # CQL_FILTER), joiden varareitit hoidetaan ylempänä.
 RETRYABLE_HTTP_STATUS = frozenset([408, 425, 429, 500, 502, 503, 504])
 WFS_PAGE_TIMEOUT_S = 300
+# Jätä tilaa palvelimen URL-rajaan: tarkista koko koodattu GET-osoite.
+WFS_CQL_GET_MAX_URL_LENGTH = 6500
 FORMAT_INDEPENDENT_HTTP_STATUS = frozenset([401, 403, 414])
 RETRYABLE_NETWORK_ERRORS = (
     http.client.IncompleteRead,
@@ -1503,8 +1505,21 @@ class VaylaWFSDownloader(object):
             n = "_" + n
         return n
 
+    @staticmethod
+    def _bounded_table_name(name: str, max_len: int = 60) -> str:
+        """Lyhennä nimi ennen ArcPy-validointia säilyttäen erottuva tunniste."""
+        if max_len < 14:
+            raise ValueError("Aineistonimen pituusrajan on oltava vähintään 14 merkkiä.")
+        if len(name) <= max_len:
+            return name
+        digest = hashlib.sha256(name.encode("utf-8")).hexdigest()[:12]
+        return name[:max_len - 13].rstrip("_") + "_" + digest
+
     def _validated_name(self, raw_name: str, workspace: str) -> str:
-        n = self._sanitize_table_name(raw_name)
+        # Sama 60 merkin raja koskee rajauksia, tuloksia ja scratch-aineistoja.
+        # Pelkkä ValidateTableName ei takaa nimeä, jonka ExportFeatures hyväksyy.
+        # Lyhennä ennen validointia, jotta ArcPy ei katkaise erottavaa loppuosaa.
+        n = self._bounded_table_name(self._sanitize_table_name(raw_name).replace("+", "_"))
         if not self._is_filesystem_workspace(workspace):
             try:
                 # File GDB -nimisäännöt ovat samat paikallisessa ja verkko-GDB:ssä.
@@ -1516,7 +1531,7 @@ class VaylaWFSDownloader(object):
                 n = arcpy.ValidateTableName(n, validation_workspace)
             except Exception:
                 pass
-        return n
+        return self._bounded_table_name(n)
 
     def _is_remote_workspace(self, workspace: str) -> bool:
         raw_path = str(workspace or "")
@@ -1542,7 +1557,8 @@ class VaylaWFSDownloader(object):
         tasojen jälkeen, joten pelkkä Exists ei estäisi kahta saman ajon tasoa
         saamasta samaa nimeä.
         """
-        base = self._validated_name(raw_name, workspace)[:max_len]
+        max_len = min(max_len, 60)
+        base = self._bounded_table_name(self._validated_name(raw_name, workspace), max_len)
         reserved = getattr(self, "_reserved_output_names", None)
         if reserved is None:
             reserved = set()
@@ -2128,9 +2144,12 @@ class VaylaWFSDownloader(object):
         return "{} - {}".format(clean_title, source_name)
 
     def _dataset_output_path(self, workspace, out_name):
-        final_name = out_name
-        if self._is_filesystem_workspace(workspace) and not final_name.lower().endswith(".shp"):
-            final_name = final_name + ".shp"
+        is_folder = self._is_filesystem_workspace(workspace)
+        if is_folder and out_name.lower().endswith(".shp"):
+            out_name = out_name[:-4]
+        final_name = self._validated_name(out_name, workspace)
+        if is_folder:
+            final_name += ".shp"
         return os.path.join(workspace, final_name)
 
     def _copy_features_compatible(self, source_fc, workspace, out_name, metrics=None,
@@ -2174,7 +2193,10 @@ class VaylaWFSDownloader(object):
         output_path = os.path.join(raster_dir, base_name + extension)
         suffix = 1
         while os.path.exists(output_path):
-            output_path = os.path.join(raster_dir, "{}_{}{}".format(base_name, suffix, extension))
+            suffix_text = "_{}".format(suffix)
+            output_path = os.path.join(
+                raster_dir, base_name[:60 - len(suffix_text)] + suffix_text + extension
+            )
             suffix += 1
         arcpy.management.CopyRaster(source_raster, output_path)
         return output_path
@@ -2187,7 +2209,10 @@ class VaylaWFSDownloader(object):
         output_path = os.path.join(raster_dir, base_name + ".jpg")
         suffix = 1
         while os.path.exists(output_path):
-            output_path = os.path.join(raster_dir, "{}_{}.jpg".format(base_name, suffix))
+            suffix_text = "_{}".format(suffix)
+            output_path = os.path.join(
+                raster_dir, base_name[:60 - len(suffix_text)] + suffix_text + ".jpg"
+            )
             suffix += 1
 
         source_root = os.path.splitext(source_raster)[0]
@@ -2248,7 +2273,7 @@ class VaylaWFSDownloader(object):
         ``ExportFeatures`` on sen nopeampi seuraaja. Vanha työkalu jää
         varareitiksi, jotta laajennus toimii myös vanhemmassa Prossa.
         """
-        out_path = os.path.join(workspace, out_name)
+        out_path = self._dataset_output_path(workspace, out_name)
         export_features = getattr(arcpy.conversion, "ExportFeatures", None)
         if export_features is not None:
             try:
@@ -2257,7 +2282,7 @@ class VaylaWFSDownloader(object):
             except AttributeError:
                 pass
         arcpy.conversion.FeatureClassToFeatureClass(
-            source_fc, workspace, out_name, where_clause
+            source_fc, workspace, os.path.basename(out_path), where_clause
         )
         return out_path
 
@@ -2273,7 +2298,7 @@ class VaylaWFSDownloader(object):
             finally:
                 self._safe_delete(temp_fc)
 
-        out_path = os.path.join(workspace, out_name)
+        out_path = self._dataset_output_path(workspace, out_name)
         self._safe_delete(out_path)
         self._export_features_compat(
             source_fc, workspace, out_name, where_clause
@@ -3384,11 +3409,8 @@ class VaylaWFSDownloader(object):
         shape_type = desc.shapeType if hasattr(desc, "shapeType") else "POLYGON"
         sr = desc.spatialReference if hasattr(desc, "spatialReference") else None
 
-        final_name = out_name
-        if self._is_filesystem_workspace(workspace) and not final_name.lower().endswith(".shp"):
-            final_name = final_name + ".shp"
-
-        out_fc = os.path.join(workspace, final_name)
+        out_fc = self._dataset_output_path(workspace, out_name)
+        final_name = os.path.basename(out_fc)
         self._safe_delete(out_fc)
         arcpy.management.CreateFeatureclass(workspace, final_name, shape_type, spatial_reference=sr)
         with arcpy.da.SearchCursor(source_fc, ["SHAPE@"]) as s_cur:
@@ -3932,6 +3954,16 @@ class VaylaWFSDownloader(object):
             url += f"&bbox={bbox_str},EPSG:3067"
         return url
 
+    def _wfs_cql_prefers_post(self, base_wfs, layer_clean, max_features, start_index,
+                              output_format, cql_filter, geometry_only=False):
+        if not cql_filter:
+            return False
+        request_url = self._build_wfs_getfeature_url(
+            base_wfs, layer_clean, max_features, start_index, output_format,
+            cql_filter=cql_filter, geometry_only=geometry_only,
+        )
+        return len(request_url) > WFS_CQL_GET_MAX_URL_LENGTH
+
     def _wfs_getfeature_form(self, layer_clean, max_features, start_index, output_format,
                              bbox_str=None, cql_filter=None, geometry_only=True,
                              wfs_version="2.0.0"):
@@ -4102,7 +4134,11 @@ class VaylaWFSDownloader(object):
             )
 
         for fmt in formats_to_try:
-            attempts = [True] if prefer_post else ([False] if cql_filter else [False, True])
+            post_only = prefer_post or self._wfs_cql_prefers_post(
+                base_wfs, layer_clean, max_features, start_index, fmt,
+                cql_filter, geometry_only,
+            )
+            attempts = [True] if post_only else ([False] if cql_filter else [False, True])
             format_independent_failure = False
             for use_post in attempts:
                 json_data, raw_text, status, ctype = _try_request(fmt, use_post)
@@ -4705,7 +4741,15 @@ class VaylaWFSDownloader(object):
         # sivutus on todistetusti käynnissä, seuraavat sivut haetaan
         # rinnakkain — WFS:n startIndex tekee niistä toisistaan riippumattomia.
         prefetch_buffer = []
-        prefetch_post = False
+        first_format = getattr(self, "_wfs_output_format_cache", {}).get(base_wfs)
+        first_format = first_format or next(iter(output_formats), "application/json")
+        prefetch_post = self._wfs_cql_prefers_post(
+            base_wfs, layer_clean, max_features, 0, first_format, cql_filter,
+        )
+        if prefetch_post:
+            stats["mode"] = "CQL_POST"
+            if getattr(self, "_verbose_diagnostics", False):
+                self._msg("  [INFO] Pitkä CQL-suodatin lähetetään suoraan POST-pyyntönä.")
         reported_total = None
 
         def _fetch_page_at(index, use_post):
@@ -4768,7 +4812,7 @@ class VaylaWFSDownloader(object):
                 break
             page_start = time.perf_counter()
             active_cql = cql_filter if (use_cql and not cql_disabled) else None
-            cql_post_tried = False
+            cql_post_tried = prefetch_post
             json_data = None
             raw_text = ""
             status = None
@@ -4797,6 +4841,7 @@ class VaylaWFSDownloader(object):
                     output_formats=output_formats,
                     extra_headers=extra_headers,
                     cql_filter=active_cql,
+                    prefer_post=prefetch_post,
                     geometry_only=False,
                     timings=page_timing,
                 )
@@ -4829,7 +4874,7 @@ class VaylaWFSDownloader(object):
                 )
                 if json_data is not None:
                     stats["mode"] = "CQL_POST"
-                    # Esihaku käyttää jatkossa samaa POST-muotoa.
+                    # Sekä sarjallinen sivutus että esihaku jatkavat POSTilla.
                     prefetch_post = True
 
             if json_data is None:
@@ -4846,7 +4891,7 @@ class VaylaWFSDownloader(object):
                             self._safe_delete(fc)
                         _accumulate_page_timing(page_timing)
                         stats["fetch_total_s"] = time.perf_counter() - fetch_start
-                        rejected = CQLRequestRejected("CQL GET ja POST hylättiin")
+                        rejected = CQLRequestRejected("CQL-pyyntö hylättiin")
                         rejected.stats = stats
                         raise rejected
                     self._warn(

@@ -194,3 +194,38 @@ Yhdistetyn JSONin tai suoran feature class -kirjoituksen toteutusta ei pidä ott
 9. **Rinnakkainen sivutus.** Aja monisivuinen WFS-taso (esim. DigiRoad
    `Linkki` maakuntarajauksella). Mahdolliset uudelleenyritysviestit näkyvät
    lokissa normaalisti, eikä ArcGIS Pro kaadu tai jäädy.
+
+## Pitkien aineistonimien regressiotesti (5.10.2026)
+
+Versioon 1.0.18 tehty korjaus perustuu uusimpaan lähdekoodiin `7cf7371`
+(julkaisu 1.0.17.21). Aluevalinnoista muodostetut aineistonimet rajataan
+60 merkkiin ennen ArcPy-validointia; pitkän nimen lopussa on koko nimestä
+laskettu tunniste. Sama polkukäsittely koskee vientiä, kopiointia ja
+geometrioiden vientiä ilman ominaisuustietoja.
+
+`tests/smoke_boundary_names_arcgispro.py --output-dir <uusi testikansio>`
+ajetaan ArcGIS Pron Pythonilla. Testi vie ilmoitetun 17 maakunnan valinnan,
+kaikki 19 maakuntaa, kaikki 308 kuntaa, kaikki 10 elinvoimakeskusta ja kaikki
+23 hyvinvointialuetta scratch-GDB:hen, tulos-GDB:hen ja shapefileiksi.
+Se tarkistaa nimien pituuden, kohdemäärät ja EPSG:3067-koordinaatiston.
+Lisäksi tarkistetaan pitkän nimen geometrioiden vienti GDB:hen ja shapefileksi.
+Kaikki valitut alueet säilyvät myös 2 668 merkin kuntaluettelolla.
+
+## Pitkien CQL-pyyntöjen POST-optimointi (6.10.2026)
+
+Versio 1.0.19 valitsee POSTin etukäteen, jos koko koodattu GET-osoite olisi
+yli 6 500 merkkiä. Sama lähetystapa säilyy sarjallisessa sivutuksessa ja
+rinnakkaisessa esihaussa myös silloin, kun palvelin ensin hylkää lyhyen GETin.
+Hylättyä pitkää POSTia ei lähetetä uudestaan ennen CQL-pilkkomista tai sallittua
+BBOX-varareittiä. Tarkka CQL-geometria säilyy muuttumattomana.
+
+Kaikki 154 yksikkötestiä sekä pyflakes- ja syntaksitarkistukset läpäistiin.
+`tests/test_cql_post.py` kattaa pituusrajan, koodatun kokonaisosoitteen,
+lyhyet GETit, pitkät POSTit, molemmat sivutustavat ja hylättyjen pyyntöjen varareitit.
+
+Väylän `digiroad:dr_eurooppatienro`-tasoa vasten tarkistettiin oikeat pyynnöt:
+8 361 merkin GET-osoitetta vastaava CQL lähetettiin suoraan POSTina (HTTP 200)
+sekä ensimmäisellä että toisella sivulla. Lyhyt saman alueen GET palautti
+samat kohdetunnisteet kuin ensimmäinen POST. Tyhjän alueen pitkä CQL palautti
+POSTilla nolla kohdetta, joten palvelin käytti suodatinta. Verkkotestissä
+ei tullut yhtään pitkää GET-yritystä.
