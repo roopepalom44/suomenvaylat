@@ -24,6 +24,7 @@ from qgis.core import (
 from qgis.PyQt.QtCore import QVariant
 
 from .osm_geometry import element_geometry
+from .service_styles import StyleClient, MAX_STYLE_BYTES, localize_graphics, save_sld, StyleError
 
 WFS_SOURCES = {
     "Väylä": ["https://avoinapi.vaylapilvi.fi/vaylatiedot/ows"],
@@ -418,7 +419,12 @@ def download(entry, mask, mask_crs, destination, key="", progress=None, add_laye
     ``add_layer`` lisää valmiin tason projektiin. Taustatehtävä antaa oman
     funktionsa, joka siirtää tason pääsäikeeseen lisättäväksi.
     """
-    add_layer = add_layer or _add_project_layer
+    project_add = add_layer or _add_project_layer
+
+    def add_layer(layer):
+        if isinstance(layer, QgsVectorLayer):
+            _apply_provider_style(layer, entry, destination)
+        project_add(layer)
     if entry["kind"] == "kapsi_wms":
         return _download_kapsi(entry, mask, mask_crs, destination, progress, add_layer)
     if entry["kind"] == "osm":
@@ -473,6 +479,46 @@ def download(entry, mask, mask_crs, destination, key="", progress=None, add_laye
     layer = _open_remote_layer(entry)
     return _download_vector_layer(entry, layer, mask, mask_crs, destination, progress, add_layer,
                                   clip=entry.get("source") not in UNCLIPPED_WFS_SOURCES)
+
+
+def _style_fetch(url):
+    with _urlopen(urllib.request.Request(url), timeout=15) as response:
+        data = response.read(MAX_STYLE_BYTES + 1)
+    if len(data) > MAX_STYLE_BYTES:
+        raise StyleError("Tyylivastaus on liian suuri")
+    return data
+
+
+def _apply_provider_style(layer, entry, destination):
+    """Style before handing a background-created layer to the main thread."""
+    from qgis.core import QgsMessageLog, Qgis
+    path = Path(destination).with_suffix(".sld")
+    try:
+        result = StyleClient(_style_fetch).get(entry)
+        if result is None:
+            return
+        root, endpoint = result
+        # Keep the provider definition even when its icon is a server-local
+        # file or otherwise unavailable to a desktop client.
+        save_sld(root, path)
+        localize_graphics(root, endpoint, path, _style_fetch)
+        save_sld(root, path)
+        message, ok = layer.loadSldStyle(str(path))
+        if not ok:
+            raise StyleError("QGIS ei voinut ottaa SLD-symboliikkaa käyttöön")
+        layer.setCustomProperty("suomenvaylat/style_status", "Rajapinnan symboliikka")
+        # GeoPackage stores the native renderer and labels, so reopening the
+        # downloaded dataset also restores the style without a network request.
+        message = layer.saveStyleToDatabase("Suomenväylät", "Rajapinnan oletustyyli", True, "")
+        layer.saveNamedStyle(str(Path(destination).with_suffix(".qml")))
+        if message:
+            QgsMessageLog.logMessage("Tyylin GeoPackage-tallennus: " + message, "Suomenväylät", Qgis.Warning)
+    except Exception as exc:
+        # Raw HTTP exception URLs can contain an Aino token. Persist only the
+        # curated error, never a service response or authenticated request URL.
+        message = str(exc) if isinstance(exc, StyleError) else "Rajapinnan symboliikan käyttöönotto epäonnistui"
+        layer.setCustomProperty("suomenvaylat/style_status", message)
+        QgsMessageLog.logMessage(layer.name() + ": " + message, "Suomenväylät", Qgis.Warning)
 
 
 def _download_vector_layer(entry, layer, mask, mask_crs, destination, progress=None,

@@ -127,6 +127,8 @@ Yhdistetyn JSONin tai suoran feature class -kirjoituksen toteutusta ei pidä ott
 7. Valitse `taustakartat`-nimiavaruuden `(WMS)`-taso. Sen pitää tulla aktiivisen
    kartan **Taustakartta**-ryhmään live-WMS-palveluna. Vain valittu alitaso saa
    olla näkyvissä; tasoa ei saa kopioida geodatabaseen eikä leikata rajauksella.
+   Tarkista myös kartassa, jossa ArcGIS Pron oletuspohjakartta on päällä, että
+   ryhmä on pohjakartan yläpuolella ja WMS-kuva näkyy sen päällä.
 8. Valitse jokin muu `(WMS)`-taso. Sen pitää tulla **Aino WMS** -ryhmään ja
    säilyttää palvelimen oma piirtoasu. Panoroi ja zoomaa niin, että ArcGIS tekee
    uusia GetMap-pyyntöjä. Token ei saa näkyä työkalun lokissa tai tason URL:ssa.

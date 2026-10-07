@@ -4,6 +4,13 @@
 
 ArcGIS Pro -laajennus Suomenväylät-aineistojen lataamiseen WFS-rajapinnoista.
 
+**Rajapintojen symboliikka (1.0.20 / QGIS 0.2.10):** WFS-vektoritasojen
+SLD-oletustyylit ladataan automaattisesti saman palvelun WMS-rajapinnasta.
+ArcGIS Prossa tuetut tyylit muunnetaan CIM-symboliikaksi ja tallennetaan
+uudelleen avattaviksi `.lyrx`-tasoiksi; QGISissä tyyli säilyy myös GeoPackagen
+sisällä. MML:n vektoritiilit käyttävät palvelun Mapbox-tyylejä.
+[Lähdekohtainen selvitys, tallennuspaikat ja muunnoksen rajoitukset](docs/SYMBOLIIKKA.md).
+
 **Käyttöohje työkavereille:** [Suomenvaylat_kayttoohje.pdf](Suomenvaylat_kayttoohje.pdf) ([Word](Suomenvaylat_kayttoohje.docx)). Ohje kattaa asennuksen ja käytön sekä ArcGIS Prossa että QGISissä.
 
 ## Lataus ja asennus
@@ -234,8 +241,9 @@ HTTP Basic -tunnistautumisessa. Avainta ei lisätä OGC API -osoitteeseen eikä
 lokiviesteihin.
 
 **Taustakartat (MML/Kapsi)** -työkalun MML-valinnat **Taustakartta**,
-**Maastokartta** ja **Kiinteistojaotus** lisätään nykyisistä MML TileJSON-
-vektoritiilipalveluista suoraan aktiiviseen karttaan. MML:n vector tile -tasot
+**Maastokartta** ja **Kiinteistojaotus** lisätään MML:n vektoritiilipalveluista
+suoraan aktiiviseen karttaan käyttäen palvelun Style JSON -esitystyylejä.
+MML:n vector tile -tasot
 ovat live-palveluja, joten ne noudattavat karttanäkymää eivätkä tuota paikallista
 rasterikopiota; alue- ja tallennuskohdeparametrit koskevat tässä työkalussa vain
 Kapsin rasterilatausta. MML:n kiinteistöjaotuksen TileJSON on:
@@ -335,7 +343,8 @@ WMS-valinta lisätään ArcGIS Pron aktiiviseen karttaan oikeana live-WMS-
 palvelutasona, ei feature classina eikä ladattuna kuvana. Työkalu välittää
 tokenin ArcGIS Pron erillisenä palveluparametrina, kytkee näkyviin vain valitun
 WMS-alitason ja sijoittaa `taustakartat`-nimiavaruuden tason
-**Taustakartta**-ryhmään karttatasopinon alimmaiseksi. Muut WMS-tasot
+**Taustakartta**-ryhmään aineistotasojen alle mutta ArcGIS Pron peittävän
+pohjakartan yläpuolelle. Muut WMS-tasot
 sijoitetaan **Aino WMS** -ryhmään.
 
 Versiosta 1.0.16 alkaen WMS-palvelun CIM-puusta poistetaan muut kuin valittu

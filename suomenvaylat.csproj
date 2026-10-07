@@ -44,5 +44,8 @@
     <Content Include="Toolboxes\Resources\hallinnolliset_aluejaot.gpkg">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
+    <Content Include="qgis_plugin\suomenvaylat_qgis\service_styles.py" Link="Toolboxes\service_styles.py">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
   </ItemGroup>
 </Project>

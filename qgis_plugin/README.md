@@ -1,4 +1,4 @@
-# Suomenväylät QGIS (esijulkaisu 0.2.9)
+# Suomenväylät QGIS (esijulkaisu 0.2.10)
 
 QGIS 3.44:lle tehty erillinen, natiivi Python-lisäosa. ArcGIS Pro -laajennus pysyy samassa projektissa.
 
@@ -9,6 +9,9 @@ QGIS 3.44:lle tehty erillinen, natiivi Python-lisäosa. ArcGIS Pro -laajennus py
 **QGISin oma asennus:** Lataa samasta julkaisusta `Suomenvaylat-QGIS-<versio>.zip` ja valitse QGISissä **Lisäosat → Hallitse ja asenna lisäosia → Asenna ZIP-tiedostosta**. Jos vanhan projektin asetuksissa lukee **Ei koordinaattijärjestelmää**, valitse projektin CRS:ksi **EPSG:3067**. Tämä sijoittaa jo ladatut EPSG:3067-tasot oikein ilman uutta latausta.
 
 ## Toimii tässä versiossa
+
+- Rajapinnan SLD-symboliikan automaattinen lataus WFS- ja Oskari-vektoritasoille. Valittu oletustyyli tuodaan QGISiin ja tallennetaan GeoPackagen oletustyyliksi sekä `.sld`- ja `.qml`-tiedostoina. Luokittelut, viivanleveydet, värit ja mittakaavarajat tulevat palvelun tyylistä. Tyylinhaun virhe ei estä aineiston tallennusta. [Rajapintakohtainen selvitys ja rajoitukset](../docs/SYMBOLIIKKA.md).
+- MML:n vektoritiilien esitystyyli ladataan erikseen: Taustakartta ja Maastokartta käyttävät eri Mapbox-tyylejä, Kiinteistöjaotus QGISiin sopivaa pelkistettyä tyyliä.
 
 - Väylän, DigiRoadin, Liiterin, SYKEn, Tilastokeskuksen, Karttapaikan ja Ainon WFS-tasojen haku suoraan palveluiden tasoluetteloista. Useita lähteitä voi valita samaan ajoon.
 - MML:n kiinteistöaineistojen ja Karttapaikan maastotietojen OGC API Features -sivutus sekä API-avain HTTP Basic -otsakkeessa.

@@ -1,0 +1,5717 @@
+{
+  "date": "2026-10-07",
+  "baseline_commit": "6e6302f",
+  "method": "WMS GetCapabilities; per-layer GetStyles; select default UserStyle; require Rule",
+  "total_wms_layers": 926,
+  "sld_with_rules": 924,
+  "services": [
+    {
+      "service": "vayla",
+      "endpoint": "https://avoinapi.vaylapilvi.fi/vaylatiedot/ows",
+      "layers": 332,
+      "styled_layers": 332,
+      "capability_root": "WMS_Capabilities",
+      "error_type": null
+    },
+    {
+      "service": "digiroad",
+      "endpoint": "https://avoinapi.vaylapilvi.fi/vaylatiedot/digiroad/ows",
+      "layers": 52,
+      "styled_layers": 52,
+      "capability_root": "WMS_Capabilities",
+      "error_type": null
+    },
+    {
+      "service": "liiteri_asuinalueet",
+      "endpoint": "https://paikkatiedot.ymparisto.fi/geoserver/liiteri_asuinalueet/wms",
+      "layers": 24,
+      "styled_layers": 24,
+      "capability_root": "WMS_Capabilities",
+      "error_type": null
+    },
+    {
+      "service": "liiteri_etaisyysvyohykkeet",
+      "endpoint": "https://paikkatiedot.ymparisto.fi/geoserver/liiteri_etaisyysvyohykkeet/wms",
+      "layers": 6,
+      "styled_layers": 6,
+      "capability_root": "WMS_Capabilities",
+      "error_type": null
+    },
+    {
+      "service": "liiteri_taajamat",
+      "endpoint": "https://paikkatiedot.ymparisto.fi/geoserver/liiteri_taajamat/wms",
+      "layers": 8,
+      "styled_layers": 8,
+      "capability_root": "WMS_Capabilities",
+      "error_type": null
+    },
+    {
+      "service": "syke",
+      "endpoint": "https://paikkatiedot.ymparisto.fi/geoserver/inspire_ps/wms",
+      "layers": 12,
+      "styled_layers": 12,
+      "capability_root": "WMS_Capabilities",
+      "error_type": null
+    },
+    {
+      "service": "tilastokeskus",
+      "endpoint": "https://geo.stat.fi/geoserver/wms",
+      "layers": 420,
+      "styled_layers": 420,
+      "capability_root": "WMS_Capabilities",
+      "error_type": null
+    },
+    {
+      "service": "traficom_avoin",
+      "endpoint": "https://julkinen.traficom.fi/inspirepalvelu/avoin/wms",
+      "layers": 34,
+      "styled_layers": 33,
+      "capability_root": "WMS_Capabilities",
+      "error_type": null
+    },
+    {
+      "service": "traficom_rajoitettu",
+      "endpoint": "https://julkinen.traficom.fi/inspirepalvelu/rajoitettu/wms",
+      "layers": 14,
+      "styled_layers": 14,
+      "capability_root": "WMS_Capabilities",
+      "error_type": null
+    },
+    {
+      "service": "traficom_ilmaliikenne",
+      "endpoint": "https://julkinen.traficom.fi/inspirepalvelu/ilmaliikenne/wms",
+      "layers": 13,
+      "styled_layers": 13,
+      "capability_root": "WMS_Capabilities",
+      "error_type": null
+    },
+    {
+      "service": "aino",
+      "endpoint": "https://aino.sitowise.com/ows",
+      "layers": null,
+      "styled_layers": 0,
+      "capability_root": null,
+      "error_type": "HTTP403"
+    },
+    {
+      "service": "kapsi",
+      "endpoint": "https://tiles.kartat.kapsi.fi/peruskartta",
+      "layers": 10,
+      "styled_layers": 0,
+      "capability_root": "WMS_Capabilities",
+      "error_type": null
+    },
+    {
+      "service": "mml_au",
+      "endpoint": "https://inspire-wfs.maanmittauslaitos.fi/inspire-wfs/au/ows",
+      "layers": 9,
+      "styled_layers": 8,
+      "capability_root": "WMS_Capabilities",
+      "error_type": null
+    },
+    {
+      "service": "mml_bu_mtk_point",
+      "endpoint": "https://inspire-wfs.maanmittauslaitos.fi/inspire-wfs/bu_mtk_point",
+      "layers": 0,
+      "styled_layers": 0,
+      "capability_root": "WFS_Capabilities",
+      "error_type": null
+    },
+    {
+      "service": "mml_bu_mtk_polygon",
+      "endpoint": "https://inspire-wfs.maanmittauslaitos.fi/inspire-wfs/bu_mtk_polygon",
+      "layers": 0,
+      "styled_layers": 0,
+      "capability_root": "WFS_Capabilities",
+      "error_type": null
+    },
+    {
+      "service": "mml_cp",
+      "endpoint": "https://inspire-wfs.maanmittauslaitos.fi/inspire-wfs/cp/ows",
+      "layers": 2,
+      "styled_layers": 2,
+      "capability_root": "WMS_Capabilities",
+      "error_type": null
+    },
+    {
+      "service": "mml_gn",
+      "endpoint": "https://inspire-wfs.maanmittauslaitos.fi/inspire-wfs/gn",
+      "layers": 0,
+      "styled_layers": 0,
+      "capability_root": "WFS_Capabilities",
+      "error_type": null
+    },
+    {
+      "service": "mml_hy",
+      "endpoint": "https://inspire-wfs.maanmittauslaitos.fi/inspire-wfs/hy",
+      "layers": 0,
+      "styled_layers": 0,
+      "capability_root": "WFS_Capabilities",
+      "error_type": null
+    },
+    {
+      "service": "mml_mu",
+      "endpoint": "https://inspire-wfs.maanmittauslaitos.fi/inspire-wfs/mu/ows",
+      "layers": 0,
+      "styled_layers": 0,
+      "capability_root": "WMS_Capabilities",
+      "error_type": null
+    }
+  ],
+  "layers": [
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:aidat",
+      "style": "Aidat_velho",
+      "rules": 6
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:aidat_toimenpiteet_vauriot",
+      "style": "varusteen_toimenpiteet_vauriot",
+      "rules": 23
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:alikulkupaikat",
+      "style": "Alikulkupaikat_Velho",
+      "rules": 6
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:asema_maankayton_rakenteessa",
+      "style": "Asema_maankayton_rakenteessa_Velho",
+      "rules": 6
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:asukastiheys",
+      "style": "Asukastiheys_Velho",
+      "rules": 7
+    },
+    {
+      "service": "vayla",
+      "id": "ratatiedot:contact_line",
+      "style": "ratko_generic",
+      "rules": 3
+    },
+    {
+      "service": "vayla",
+      "id": "digiroad:dr_ajoneuvokoht_rajoitus",
+      "style": "dr_ajoneuvokoht_rajoitus",
+      "rules": 19
+    },
+    {
+      "service": "vayla",
+      "id": "digiroad:dr_ajoneuvokoht_rajoitus_yt",
+      "style": "DR_Ajoneuvokohtainenrajoitus_YT",
+      "rules": 19
+    },
+    {
+      "service": "vayla",
+      "id": "digiroad:dr_esterakennelma",
+      "style": "dr_esterakennelma",
+      "rules": 4
+    },
+    {
+      "service": "vayla",
+      "id": "digiroad:dr_eurooppatienro",
+      "style": "dr_eurooppatienro",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "digiroad:dr_hoitoluokat",
+      "style": "dr_hoitoluokat",
+      "rules": 18
+    },
+    {
+      "service": "vayla",
+      "id": "digiroad:dr_joukkoliikennekaista",
+      "style": "dr_joukkoliikennekaista",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "digiroad:dr_kaantraj_linkki",
+      "style": "dr_kaantymisrajoitus",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "digiroad:dr_kaantymisrajoitus",
+      "style": "dr_kaantymisrajoitus",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "digiroad:dr_kaistojen_lukumaara",
+      "style": "dr_kaistojen_lukumaara",
+      "rules": 5
+    },
+    {
+      "service": "vayla",
+      "id": "digiroad:dr_kelirikko",
+      "style": "dr_kelirikko",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "digiroad:dr_kelirikko_yt",
+      "style": "dr_kelirikko",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "digiroad:dr_leveys",
+      "style": "dr_leveys",
+      "rules": 4
+    },
+    {
+      "service": "vayla",
+      "id": "digiroad:dr_liikennemaara",
+      "style": "dr_liikennemaara",
+      "rules": 6
+    },
+    {
+      "service": "vayla",
+      "id": "digiroad:dr_liikennemerkit",
+      "style": "dr_liikennemerkit",
+      "rules": 4
+    },
+    {
+      "service": "vayla",
+      "id": "digiroad:dr_liikennemerkit_ajantasaisuus",
+      "style": "dr_liikennemerkit_ajantasaisuus",
+      "rules": 6
+    },
+    {
+      "service": "vayla",
+      "id": "digiroad:dr_liikennemerkit_kattavuus",
+      "style": "dr_liikennemerkit_kattavuus",
+      "rules": 6
+    },
+    {
+      "service": "vayla",
+      "id": "digiroad:dr_liikennemerkit_yt",
+      "style": "DR_LIIKENNEMERKIT_YT",
+      "rules": 4
+    },
+    {
+      "service": "vayla",
+      "id": "digiroad:dr_liikennevalo",
+      "style": "dr_liikennevalo",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "digiroad:dr_liittymanro",
+      "style": "dr_liittymanumero",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "digiroad:dr_max_akselimassa",
+      "style": "dr_suurin_sallittu_akselimassa",
+      "rules": 3
+    },
+    {
+      "service": "vayla",
+      "id": "digiroad:dr_max_korkeus",
+      "style": "dr_suurin_sallittu_korkeus",
+      "rules": 11
+    },
+    {
+      "service": "vayla",
+      "id": "digiroad:dr_max_leveys",
+      "style": "dr_suurin_sallittu_leveys",
+      "rules": 5
+    },
+    {
+      "service": "vayla",
+      "id": "digiroad:dr_max_massa",
+      "style": "dr_suurin_sallittu_massa",
+      "rules": 7
+    },
+    {
+      "service": "vayla",
+      "id": "digiroad:dr_max_massa_yt",
+      "style": "DR_Max_massa_YT",
+      "rules": 7
+    },
+    {
+      "service": "vayla",
+      "id": "digiroad:dr_max_pituus",
+      "style": "dr_suurin_sallittu_pituus",
+      "rules": 4
+    },
+    {
+      "service": "vayla",
+      "id": "digiroad:dr_max_telimassa",
+      "style": "dr_suurin_sallittu_telimassa",
+      "rules": 4
+    },
+    {
+      "service": "vayla",
+      "id": "digiroad:dr_nopeusrajoitus",
+      "style": "dr_nopeusrajoitus",
+      "rules": 20
+    },
+    {
+      "service": "vayla",
+      "id": "digiroad:dr_nopeusrajoitus_ajantasaisuus",
+      "style": "dr_nopeusrajoitus_ajantasaisuus",
+      "rules": 6
+    },
+    {
+      "service": "vayla",
+      "id": "digiroad:dr_nopeusrajoitus_kattavuus",
+      "style": "dr_nopeusrajoitus_kattavuus",
+      "rules": 6
+    },
+    {
+      "service": "vayla",
+      "id": "digiroad:dr_nopeusrajoitus_yt",
+      "style": "DR_Nopeusrajoitus_YT",
+      "rules": 10
+    },
+    {
+      "service": "vayla",
+      "id": "digiroad:dr_opastustaulu",
+      "style": "dr_opastaulu",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "digiroad:dr_paallystetty_tie",
+      "style": "dr_paallystetty_tie",
+      "rules": 10
+    },
+    {
+      "service": "vayla",
+      "id": "digiroad:dr_palvelu",
+      "style": "dr_palvelu",
+      "rules": 16
+    },
+    {
+      "service": "vayla",
+      "id": "digiroad:dr_pysakki",
+      "style": "dr_pysakki",
+      "rules": 8
+    },
+    {
+      "service": "vayla",
+      "id": "digiroad:dr_pysakointikielto",
+      "style": "dr_pysakointikielto",
+      "rules": 2
+    },
+    {
+      "service": "vayla",
+      "id": "digiroad:dr_rautatien_tasoristeys",
+      "style": "dr_rautatien_tasoristeys",
+      "rules": 5
+    },
+    {
+      "service": "vayla",
+      "id": "digiroad:dr_suojatie",
+      "style": "dr_suojatie",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "digiroad:dr_taajama_alueet",
+      "style": "dr_taajama_alueet",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "digiroad:dr_talvinopeusrajoitus",
+      "style": "dr_talvinopeusrajoitus",
+      "rules": 10
+    },
+    {
+      "service": "vayla",
+      "id": "digiroad:dr_tielinkki_hall_lk",
+      "style": "DR_Tielinkki_hallinnollinen_luokka",
+      "rules": 4
+    },
+    {
+      "service": "vayla",
+      "id": "digiroad:dr_tielinkki_silta_alikulku_tunneli",
+      "style": "DR_Silta_alikulku_tunneli",
+      "rules": 9
+    },
+    {
+      "service": "vayla",
+      "id": "digiroad:dr_tielinkki_tielinkin_tyyppi",
+      "style": "DR_Tielinkin_tyyppi",
+      "rules": 14
+    },
+    {
+      "service": "vayla",
+      "id": "digiroad:dr_tielinkki_toim_lk",
+      "style": "generic",
+      "rules": 4
+    },
+    {
+      "service": "vayla",
+      "id": "digiroad:dr_tietyot",
+      "style": "generic",
+      "rules": 4
+    },
+    {
+      "service": "vayla",
+      "id": "digiroad:dr_tuntematon_nopeusrajoitus",
+      "style": "dr_tuntematon_nopeusrajoitus",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "digiroad:dr_vak_rajoitus",
+      "style": "dr_vak",
+      "rules": 2
+    },
+    {
+      "service": "vayla",
+      "id": "digiroad:dr_valaistu_tie",
+      "style": "dr_valaistu_tie",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "digiroad:dr_yhdistelman_max_massa",
+      "style": "dr_suurin_sallittu_yhdistelman_massa",
+      "rules": 5
+    },
+    {
+      "service": "vayla",
+      "id": "digiroad:dr_ytilmoitus_yt",
+      "style": "DR_Yksityistietieto_YT",
+      "rules": 3
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:elainvaroitukset",
+      "style": "Elainvaroitus_velho",
+      "rules": 4
+    },
+    {
+      "service": "vayla",
+      "id": "rajaus_aineistot:elinvoimakeskusalueet_10k",
+      "style": "elinvoimakeskusalueet",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "rajaus_aineistot:elyrajat_infra",
+      "style": "polygon_rajat",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:eritasoliittymat",
+      "style": "eritasoliittymat",
+      "rules": 3
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:erotusalueet",
+      "style": "Erotusalueet_velho",
+      "rules": 10
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:etuajo-oikeutetut_seutu_ja_yhdystiet",
+      "style": "Etuajo-oikeutetut tiet",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:eurooppatiet",
+      "style": "Eurooppatiet_velho",
+      "rules": 2
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:eurovelot",
+      "style": "pyorailyverkosto_eurovelot",
+      "rules": 4
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:hoitosopimus",
+      "style": "Hoitosopimus_Velho",
+      "rules": 4
+    },
+    {
+      "service": "vayla",
+      "id": "hanketiedot:inkoo_turvalaitteet_view",
+      "style": "turvalaitteet_merivaylahankkeet",
+      "rules": 35
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:inventointitapahtuma",
+      "style": "Inventointitapahtuma_velho",
+      "rules": 8
+    },
+    {
+      "service": "vayla",
+      "id": "ratatiedot:isannointialueet",
+      "style": "Raide_isannointialueet",
+      "rules": 4
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:kaarteet",
+      "style": "Kaarteet_Velho",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:kadunpitopaatokset",
+      "style": "kadunpitopaatokset_velho",
+      "rules": 3
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:kaistat",
+      "style": "Kaistat_velho",
+      "rules": 14
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:kaiteet",
+      "style": "Kaiteet_Velho",
+      "rules": 8
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:kantavat_kerrokset",
+      "style": "Kantavat_kerrokset_Velho",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:kasvillisuusrakenteet",
+      "style": "Kasvillisuusrakenteet_velho",
+      "rules": 5
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:katu_ja_yksityistieliittymaluvat",
+      "style": "Katu_ja_yksityistieliittymaluvat_Velho",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:katu_ja_yksityistieliittymat",
+      "style": "Katu_ja_yksityistieliittymat_Velho",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:kavelyn_ja_pyorailyn_vayla",
+      "style": "kavelyn_ja_pyorailyn_vayla_velho",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:kelirikkorajoitukset",
+      "style": "Kelirikkorajoitukset_Velho",
+      "rules": 2
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:keskialueet",
+      "style": "Keskialueet_velho",
+      "rules": 5
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:korjaussopimus",
+      "style": "Korjaussopimus_Velho",
+      "rules": 4
+    },
+    {
+      "service": "vayla",
+      "id": "korjausvelka:korjausvelka_maantie_pintakunto_2021",
+      "style": "sv_korjausvelka_maantiet_2021",
+      "rules": 2
+    },
+    {
+      "service": "vayla",
+      "id": "korjausvelka:korjausvelka_maantie_pintakunto_2022",
+      "style": "sv_korjausvelka_maantiet_2022",
+      "rules": 2
+    },
+    {
+      "service": "vayla",
+      "id": "korjausvelka:korjausvelka_maantie_pintakunto_2023",
+      "style": "sv_korjausvelka_maantiet_2023",
+      "rules": 2
+    },
+    {
+      "service": "vayla",
+      "id": "korjausvelka:korjausvelka_maantie_pintakunto_2024",
+      "style": "sv_korjausvelka_maantiet_2024",
+      "rules": 2
+    },
+    {
+      "service": "vayla",
+      "id": "korjausvelka:korjausvelka_maantie_pintakunto_2025",
+      "style": "sv_korjausvelka_maantiet_2025",
+      "rules": 2
+    },
+    {
+      "service": "vayla",
+      "id": "korjausvelka:korjausvelka_maantie_pintakunto_2026",
+      "style": "sv_korjausvelka_maantiet_2026",
+      "rules": 2
+    },
+    {
+      "service": "vayla",
+      "id": "korjausvelka:korjausvelka_rataosuudet_2021",
+      "style": "sv_korjausvelka_rataosuudet_2021",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "korjausvelka:korjausvelka_rataosuudet_2022",
+      "style": "sv_korjausvelka_rataosuudet_2022",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "korjausvelka:korjausvelka_rataosuudet_2023",
+      "style": "sv_korjausvelka_rataosuudet_2023",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "korjausvelka:korjausvelka_rataosuudet_2024",
+      "style": "sv_korjausvelka_rataosuudet_2024",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "korjausvelka:korjausvelka_rataosuudet_2025",
+      "style": "sv_korjausvelka_rataosuudet_2025",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:korkeusrajoitukset",
+      "style": "Korkeusrajoitus_velho",
+      "rules": 7
+    },
+    {
+      "service": "vayla",
+      "id": "hanketiedot:koverhar_turvalaitteet_view",
+      "style": "turvalaitteet_merivaylahankkeet",
+      "rules": 35
+    },
+    {
+      "service": "vayla",
+      "id": "ratatiedot:kunnossapitoalueet_ja_tiliratosat",
+      "style": "Raide_kunnossapitoalueet",
+      "rules": 13
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:ladottavat_pintarakenteet",
+      "style": "Ladottavat_pintarakenteet_velho",
+      "rules": 3
+    },
+    {
+      "service": "vayla",
+      "id": "taitorakenteet:laituri",
+      "style": "laituri",
+      "rules": 2
+    },
+    {
+      "service": "vayla",
+      "id": "vesivaylatiedot:lajitysalueet_uusi",
+      "style": "Lajitysalueet",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:laskentamenetelmat",
+      "style": "Laskentamenetelmat_velho",
+      "rules": 11
+    },
+    {
+      "service": "vayla",
+      "id": "ratatiedot:level_crossing",
+      "style": "ratko_point",
+      "rules": 3
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:leveysrajoitukset",
+      "style": "Leveysrajoitukset_Velho",
+      "rules": 10
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:levikkeet",
+      "style": "Levikkeet_Velho",
+      "rules": 9
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:liikennemaarat",
+      "style": "Liikennemaarat_velho",
+      "rules": 12
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:liikennemaarat_2012",
+      "style": "Liikennemaarat_velho",
+      "rules": 12
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:liikennemaarat_2013",
+      "style": "Liikennemaarat_velho",
+      "rules": 12
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:liikennemaarat_2014",
+      "style": "Liikennemaarat_velho",
+      "rules": 12
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:liikennemaarat_2015",
+      "style": "Liikennemaarat_velho",
+      "rules": 12
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:liikennemaarat_2016",
+      "style": "Liikennemaarat_velho",
+      "rules": 12
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:liikennemaarat_2017",
+      "style": "Liikennemaarat_velho",
+      "rules": 12
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:liikennemaarat_2018",
+      "style": "Liikennemaarat_velho",
+      "rules": 12
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:liikennemaarat_2019",
+      "style": "Liikennemaarat_velho",
+      "rules": 12
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:liikennemaarat_2020",
+      "style": "Liikennemaarat_velho",
+      "rules": 12
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:liikennemaarat_2021",
+      "style": "Liikennemaarat_velho",
+      "rules": 12
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:liikennemaarat_2022",
+      "style": "Liikennemaarat_velho",
+      "rules": 12
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:liikennemaarat_2023",
+      "style": "Liikennemaarat_velho",
+      "rules": 12
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:liikennemaarat_2024",
+      "style": "Liikennemaarat_velho",
+      "rules": 12
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:liikennemerkit",
+      "style": "Liikennemerkit_Velho",
+      "rules": 11
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:liikennesaarekkeet",
+      "style": "Liikennesaarekkeet_velho",
+      "rules": 4
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:liittymakiellot",
+      "style": "Liittymakiellot_Velho",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "ratatiedot:locationtracks",
+      "style": "ratko_line",
+      "rules": 2
+    },
+    {
+      "service": "vayla",
+      "id": "ratatiedot:locationtracks_simplified",
+      "style": "SV_Rataverkko_yleiskartta",
+      "rules": 2
+    },
+    {
+      "service": "vayla",
+      "id": "vesivaylatiedot:loistot_uusi",
+      "style": "Loistot",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:luiskat",
+      "style": "Luiskat_Velho",
+      "rules": 6
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:maanteiden_hoitourakat_011025",
+      "style": "hoitoluokka_maanteiden_hoitourakan_tiet",
+      "rules": 85
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:maanteiden_hoitourakat_011026",
+      "style": "hoitoluokka_maanteiden_hoitourakan_tiet",
+      "rules": 85
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:maanteiden_hoitourakat_011027",
+      "style": "hoitoluokka_maanteiden_hoitourakan_tiet",
+      "rules": 85
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:maanteiden_hoitourakka",
+      "style": "Maanteiden_hoitourakat_velho",
+      "rules": 83
+    },
+    {
+      "service": "vayla",
+      "id": "reittitiedot:maanteiden_puuvirrat",
+      "style": "Maanteiden_puuvirrat_lkm",
+      "rules": 5
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:maet",
+      "style": "Maet_Velho",
+      "rules": 2
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:matkailutiet",
+      "style": "Matkailutiet_Velho",
+      "rules": 12
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:melu_paiva_maankad_17_pilk",
+      "style": "meluaineisto",
+      "rules": 8
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:melu_paiva_maankad_22",
+      "style": "meluaineisto",
+      "rules": 8
+    },
+    {
+      "service": "vayla",
+      "id": "ratatiedot:melu_paiva_rauta_17_pilk",
+      "style": "meluaineisto",
+      "rules": 8
+    },
+    {
+      "service": "vayla",
+      "id": "ratatiedot:melu_paiva_rautatiet_22",
+      "style": "meluaineisto",
+      "rules": 8
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:melu_yo_maankad_17_pilk",
+      "style": "meluaineisto",
+      "rules": 8
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:melu_yo_maankad_22",
+      "style": "meluaineisto",
+      "rules": 8
+    },
+    {
+      "service": "vayla",
+      "id": "ratatiedot:melu_yo_rauta_17_pilk",
+      "style": "meluaineisto",
+      "rules": 8
+    },
+    {
+      "service": "vayla",
+      "id": "ratatiedot:melu_yo_rautatiet_22",
+      "style": "meluaineisto",
+      "rules": 8
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:mittaradat",
+      "style": "line",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:museotiet",
+      "style": "Museotiet_Velho",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:muu_urakka",
+      "style": "Muu_urakka_velho",
+      "rules": 9
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:muut_pintarakenteet",
+      "style": "Muut_pintarakenteet_velho",
+      "rules": 7
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:nakemapituudet",
+      "style": "Nakemapituudet_velho",
+      "rules": 2
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:nakemaprosentit",
+      "style": "Nakemaprosentit_Velho",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "vesivaylatiedot:navigointilinjat_muut_vaylanpitajat",
+      "style": "navigointilinjat_muut_vaylanpitajat",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "vesivaylatiedot:navigointilinjat_uusi",
+      "style": "Navigointilinjat",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "vesivaylatiedot:navigointilinjat_vaylavirasto",
+      "style": "navigointilinjat_vaylavirasto",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:nollapisteet",
+      "style": "nollapisteet",
+      "rules": 2
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:nollapisteiden_reitit",
+      "style": "reitit_nollapisteisiin",
+      "rules": 2
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:nopeusrajoitukset",
+      "style": "Nopeusrajoitukset_Velho",
+      "rules": 30
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:nopeusrajoituspaatokset",
+      "style": "Nopeusrajoituspaatokset_Velho",
+      "rules": 30
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:ojan_pohjat",
+      "style": "Velho_ojanpohjat",
+      "rules": 15
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:onnettomuudet",
+      "style": "Onnettomuudet_velho",
+      "rules": 4
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:opasteet",
+      "style": "Opasteet_velho",
+      "rules": 4
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:paallysrakenteen_lujitteet",
+      "style": "Paallysrakenteen_lujitteet_velho",
+      "rules": 5
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:paallysteen_korjausluokka",
+      "style": "Paallysteen_korjausluokkat_Velho",
+      "rules": 3
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:paallysteiden_kunto",
+      "style": "SV_Paallysteiden_kunto",
+      "rules": 52
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:paallystepaksuus",
+      "style": "Paallystepaksuus",
+      "rules": 21
+    },
+    {
+      "service": "vayla",
+      "id": "hanketiedot:paallystetty_tie_soratieksi_2025",
+      "style": "hanketiedot_paallyste_soratieksi",
+      "rules": 2
+    },
+    {
+      "service": "vayla",
+      "id": "hanketiedot:paallystetty_tie_soratieksi_nykyinen_vuosi",
+      "style": "hanketiedot_paallyste_soratieksi",
+      "rules": 2
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:paallystevauriokartoitus",
+      "style": "Paallystevauriokartoitus",
+      "rules": 9
+    },
+    {
+      "service": "vayla",
+      "id": "hanketiedot:paallystystyot_kavelyn_ja_pyorailyn_vaylat_2024",
+      "style": "hanketiedot_kevyenliikenteen_paallystys",
+      "rules": 2
+    },
+    {
+      "service": "vayla",
+      "id": "hanketiedot:paallystystyot_kavelyn_ja_pyorailyn_vaylat_2025",
+      "style": "hanketiedot_kevyenliikenteen_paallystys",
+      "rules": 2
+    },
+    {
+      "service": "vayla",
+      "id": "hanketiedot:paallystystyot_kavelyn_ja_pyorailyn_vaylat_nykyinen_vuosi",
+      "style": "hanketiedot_kevyenliikenteen_paallystys",
+      "rules": 2
+    },
+    {
+      "service": "vayla",
+      "id": "hanketiedot:paallystystyot_tiet_2024",
+      "style": "hanketiedot_paallystystyot_luokiteltu",
+      "rules": 7
+    },
+    {
+      "service": "vayla",
+      "id": "hanketiedot:paallystystyot_tiet_2025",
+      "style": "hanketiedot_paallystystyot_luokiteltu",
+      "rules": 7
+    },
+    {
+      "service": "vayla",
+      "id": "hanketiedot:paallystystyot_tiet_nykyinen_vuosi",
+      "style": "hanketiedot_paallystystyot_luokiteltu",
+      "rules": 7
+    },
+    {
+      "service": "vayla",
+      "id": "hanketiedot:paattyneet_hankkeet",
+      "style": "hanketiedot_paattyneet_hankkeet",
+      "rules": 9
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:paavaylat",
+      "style": "Paavaylat_Velho",
+      "rules": 2
+    },
+    {
+      "service": "vayla",
+      "id": "vesivaylatiedot:paivatunnukset_uusi",
+      "style": "Paivatunnukset",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:palvelualueet",
+      "style": "Palvelualueet_Velho",
+      "rules": 5
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:palvelusopimus",
+      "style": "palvelusopimus_velho",
+      "rules": 26
+    },
+    {
+      "service": "vayla",
+      "id": "ratatiedot:passenger_platform",
+      "style": "ratko_line",
+      "rules": 2
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:pienmerkinnat",
+      "style": "velho_pienmerkinnat",
+      "rules": 11
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:pientareet",
+      "style": "Pientareet_Velho",
+      "rules": 6
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:pintaukset",
+      "style": "Pintaukset_velho",
+      "rules": 2
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:pistemaiset_puutteet",
+      "style": "Pistemaiset_puutteet_velho",
+      "rules": 2
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:pistemaiset_tiealueen_poikkileikkausvauriot",
+      "style": "Pistemaiset_tiealuuen_poikkileikkausvauriot_Velho",
+      "rules": 16
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:pituussuuntaiset_merkinnat",
+      "style": "velho_pituussuuntaiset_merkinnat",
+      "rules": 56
+    },
+    {
+      "service": "vayla",
+      "id": "ratatiedot:platform_part",
+      "style": "ratko_line",
+      "rules": 2
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:pohjavesialueet",
+      "style": "Pohjavesialueet_velho",
+      "rules": 8
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:portaalit",
+      "style": "Portaalit_velho",
+      "rules": 3
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:portaat",
+      "style": "Portaat_velho",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:portit",
+      "style": "Portit_velho",
+      "rules": 4
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:ptm_100m",
+      "style": "ptm_100m_velho",
+      "rules": 21
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:puomit_sulkulaitteet_pollarit",
+      "style": "Puomit_sulkulaitteet_pollarit_Velho",
+      "rules": 7
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:pylvaat",
+      "style": "Pylvaat_Velho",
+      "rules": 4
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:pyoratien_jatkeet",
+      "style": "Velho_pyoratien_jatkeet",
+      "rules": 3
+    },
+    {
+      "service": "vayla",
+      "id": "ratatiedot:railway_traffic_operating_point",
+      "style": "ratko_point",
+      "rules": 3
+    },
+    {
+      "service": "vayla",
+      "id": "vesivaylatiedot:rajoitusalue_a_uusi",
+      "style": "rajoitusalueet_luokiteltu_V2",
+      "rules": 24
+    },
+    {
+      "service": "vayla",
+      "id": "hanketiedot:ratahankkeet",
+      "style": "hanketiedot_ratahankkeet_ver2",
+      "rules": 4
+    },
+    {
+      "service": "vayla",
+      "id": "hanketiedot:ratasuunnitelmat",
+      "style": "hanketiedot_ratasuunnitelmat_ver2",
+      "rules": 4
+    },
+    {
+      "service": "vayla",
+      "id": "taitorakenteet:rautatierumpu",
+      "style": "rautatierumpu",
+      "rules": 2
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:reuna_alueet",
+      "style": "Reuna_alue_velho",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:reunapaalut",
+      "style": "Reunapaalut_velho",
+      "rules": 4
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:reunatuet",
+      "style": "Reunatuet_velho",
+      "rules": 13
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:reunatuet_toimenpiteet_vauriot",
+      "style": "varusteen_toimenpiteet_vauriot",
+      "rules": 23
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:rumpuputket",
+      "style": "Rumpuputket_velho",
+      "rules": 3
+    },
+    {
+      "service": "vayla",
+      "id": "vesivaylatiedot:ruoppausalueet_uusi",
+      "style": "Ruoppausalueet",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:seudulliset_pyoratieverkot",
+      "style": "pyorailyverkosto_seudulliset_pyoratieverkot",
+      "rules": 4
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:sidotut_paallysrakenteet",
+      "style": "Sidotut_paallysrakenteet_Velho",
+      "rules": 22
+    },
+    {
+      "service": "vayla",
+      "id": "taitorakenteet:silta",
+      "style": "sillat",
+      "rules": 2
+    },
+    {
+      "service": "vayla",
+      "id": "taitorakenteet:siltakorjauskohteet",
+      "style": "SV_Siltakohteet",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:sitomattomat_pintarakenteet",
+      "style": "Sitomattomat_pintarakenteet_velho",
+      "rules": 4
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:solmujen_liittymat",
+      "style": "liittymat",
+      "rules": 3
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:solmut",
+      "style": "solmut",
+      "rules": 30
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:sorateiden_kelirikko",
+      "style": "Sorateiden_runkokelirikko",
+      "rules": 5
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:soratieluokat_011025",
+      "style": "Soratieluokka_velho",
+      "rules": 6
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:soratieluokat_011026",
+      "style": "Soratieluokka_velho",
+      "rules": 6
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:soratieluokat_011027",
+      "style": "Soratieluokka_velho",
+      "rules": 6
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:soratieluokka",
+      "style": "Soratieluokka_velho",
+      "rules": 6
+    },
+    {
+      "service": "vayla",
+      "id": "vesivaylatiedot:sulkukanavat_avattavat_sillat",
+      "style": "sulkukanavat_avattavat_sillat",
+      "rules": 2
+    },
+    {
+      "service": "vayla",
+      "id": "vesivaylatiedot:sulkukanavat_sulut",
+      "style": "sulkukanavat_sulut",
+      "rules": 2
+    },
+    {
+      "service": "vayla",
+      "id": "vesivaylatiedot:sulkukanavat_uusi",
+      "style": "sulkukanavat",
+      "rules": 2
+    },
+    {
+      "service": "vayla",
+      "id": "taitorakenteet:sulut",
+      "style": "sulut",
+      "rules": 2
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:suoja_alueet",
+      "style": "Suoja_alueet_Velho",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:suoja_aluerakentaminen",
+      "style": "Suoja_aluerakentaminen_velho",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:suojatiet",
+      "style": "Suojatiet_velho",
+      "rules": 11
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:suojaukset_ja_eristykset",
+      "style": "Suojaukset_ja_eristykset_Velho",
+      "rules": 8
+    },
+    {
+      "service": "vayla",
+      "id": "ratatiedot:sv_ei_kaytossa_olevat_tasoristeykset",
+      "style": "SV_suljettujen_rataosien_tasoristeys",
+      "rules": 2
+    },
+    {
+      "service": "vayla",
+      "id": "ratatiedot:sv_laituripolut_ja_huoltotiet",
+      "style": "SV_laituripolut_ja_huoltotiet",
+      "rules": 2
+    },
+    {
+      "service": "vayla",
+      "id": "ratatiedot:sv_paaraiteen_tasoristeykset",
+      "style": "SV_tasoristeystiedot",
+      "rules": 6
+    },
+    {
+      "service": "vayla",
+      "id": "ratatiedot:sv_poistetut_tasoristeykset",
+      "style": "SV_poistetut_tasoristeykset",
+      "rules": 2
+    },
+    {
+      "service": "vayla",
+      "id": "ratatiedot:sv_sivuraiteen_tasoristeykset",
+      "style": "SV_tasoristeystiedot",
+      "rules": 6
+    },
+    {
+      "service": "vayla",
+      "id": "ratatiedot:sv_tasoristeysohjelma_hanko_hyvinkaa",
+      "style": "sv_tasoristeysohjelma_tyyli",
+      "rules": 2
+    },
+    {
+      "service": "vayla",
+      "id": "ratatiedot:sv_tasoristeysohjelma_kaikki",
+      "style": "SV_tasoristeysohjelma_poisto_ja_parantamishanke",
+      "rules": 10
+    },
+    {
+      "service": "vayla",
+      "id": "ratatiedot:sv_tasoristeysohjelma_naantali_raisio",
+      "style": "sv_tasoristeysohjelma_tyyli",
+      "rules": 2
+    },
+    {
+      "service": "vayla",
+      "id": "ratatiedot:sv_tasoristeysohjelma_oulu_laurila",
+      "style": "sv_tasoristeysohjelma_tyyli",
+      "rules": 2
+    },
+    {
+      "service": "vayla",
+      "id": "ratatiedot:sv_tasoristeysohjelma_pori_mantyluoto_tahkoluoto",
+      "style": "sv_tasoristeysohjelma_tyyli",
+      "rules": 2
+    },
+    {
+      "service": "vayla",
+      "id": "ratatiedot:sv_tasoristeysohjelma_tampere_pori",
+      "style": "sv_tasoristeysohjelma_tyyli",
+      "rules": 2
+    },
+    {
+      "service": "vayla",
+      "id": "ratatiedot:sv_tasoristeysohjelma_turku_uusikaupunki",
+      "style": "sv_tasoristeysohjelma_tyyli",
+      "rules": 2
+    },
+    {
+      "service": "vayla",
+      "id": "ratatiedot:sv_tasoristeystiedot",
+      "style": "SV_tasoristeystiedot",
+      "rules": 6
+    },
+    {
+      "service": "vayla",
+      "id": "digiroad:taajamamerkkihuomiot_kadut",
+      "style": "dr_taajamamerkit_katu",
+      "rules": 4
+    },
+    {
+      "service": "vayla",
+      "id": "digiroad:taajamamerkkihuomiot_maantie",
+      "style": "dr_taajamamerkit_maantie",
+      "rules": 4
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:talvi_ja_kesanopeusrajoitukset",
+      "style": "Teema_Talvinopeusrajoitukset",
+      "rules": 18
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:talvihoitoluokat_011025",
+      "style": "Talvihoitoluokka_velho_teemakartta",
+      "rules": 26
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:talvihoitoluokat_011026",
+      "style": "Talvihoitoluokka_velho_teemakartta",
+      "rules": 26
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:talvihoitoluokat_011027",
+      "style": "hoitoluokka_talvihoitoluokka_tiet",
+      "rules": 21
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:talvihoitoluokka",
+      "style": "talvihoitoluokka_velho",
+      "rules": 26
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:talvinopeusrajoitukset",
+      "style": "Talvinopeusrajoitukset_Velho",
+      "rules": 30
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:talvinopeusrajoituspaatokset",
+      "style": "Talvinopeusrajoituspaatokset_Velho",
+      "rules": 30
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:taristavat_jyrsinnat",
+      "style": "velho_taristavat_jyrsinnat",
+      "rules": 23
+    },
+    {
+      "service": "vayla",
+      "id": "ratatiedot:tasoristeysonnettomuudet",
+      "style": "sv_tasoristeysonnettomuudet",
+      "rules": 3
+    },
+    {
+      "service": "vayla",
+      "id": "vesivaylatiedot:taululinjat_uusi",
+      "style": "Taululinjat",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:tekninen_toimenpide",
+      "style": "Tekninen_toimenpide_Velho",
+      "rules": 5
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:ten_t_tieverkko",
+      "style": "TEN-T-tieverkko_Velho",
+      "rules": 2
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:tie_hoitourakat",
+      "style": "maanteiden_hoitourakka-alueet",
+      "rules": 88
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:tie_hoitourakat_mennyt",
+      "style": "maanteiden_hoitourakka-alueet",
+      "rules": 88
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:tie_hoitourakat_tuleva",
+      "style": "maanteiden_hoitourakka-alueet",
+      "rules": 88
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:tiealueen_poikkileikkauksen_leveystiedot",
+      "style": "tiealueen_poikkileikkauksen_leveystiedot_velho",
+      "rules": 4
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:tiealueen_poikkileikkaustoimenpiteet",
+      "style": "tiealueen_poikkileikkaustoimenpiteet_velho",
+      "rules": 3
+    },
+    {
+      "service": "vayla",
+      "id": "hanketiedot:tiehankkeet",
+      "style": "hanketiedot_tiehankkeet_ver2",
+      "rules": 5
+    },
+    {
+      "service": "vayla",
+      "id": "digiroad:tiekunnalliset_yksityistiet",
+      "style": "dr_yksityistietieto",
+      "rules": 3
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:tienrakennetoimenpiteet",
+      "style": "Tienrakennetoimenpiteet_Velho",
+      "rules": 41
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:tienvarsikalusteet",
+      "style": "Tienvarsikalusteet_Velho",
+      "rules": 26
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:tienvarsimainokset",
+      "style": "Tienvarsimainokset_velho",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:tienvarsimainosilmoitukset",
+      "style": "Tienvarsimainosilmoitukset_Velho",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:tieosoiteverkko",
+      "style": "line",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:tieosoiteverkko_2009",
+      "style": "tieosoiteverkko_historia",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:tieosoiteverkko_2010",
+      "style": "tieosoiteverkko_historia",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:tieosoiteverkko_2011",
+      "style": "tieosoiteverkko_historia",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:tieosoiteverkko_2012",
+      "style": "tieosoiteverkko_historia",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:tieosoiteverkko_2013",
+      "style": "tieosoiteverkko_historia",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:tieosoiteverkko_2014",
+      "style": "tieosoiteverkko_historia",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:tieosoiteverkko_2015",
+      "style": "tieosoiteverkko_historia",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:tieosoiteverkko_2016",
+      "style": "tieosoiteverkko_historia",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:tieosoiteverkko_2017",
+      "style": "tieosoiteverkko_historia",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:tieosoiteverkko_2018",
+      "style": "tieosoiteverkko_historia",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:tieosoiteverkko_2019",
+      "style": "tieosoiteverkko_historia",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:tieosoiteverkko_2020",
+      "style": "tieosoiteverkko_historia",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:tieosoiteverkko_2021",
+      "style": "tieosoiteverkko_historia",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:tieosoiteverkko_2022",
+      "style": "tieosoiteverkko_historia",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:tieosoiteverkko_2023",
+      "style": "tieosoiteverkko_historia",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:tieosoiteverkko_2024",
+      "style": "tieosoiteverkko_historia",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:tieosoiteverkko_3d",
+      "style": "SV_tienumerot_yleiskartta",
+      "rules": 4
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:tieosoiteverkko_3d_ely",
+      "style": "SV_tienumerot_yleiskartta",
+      "rules": 4
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:tieosoiteverkko_ely_31_12_2025",
+      "style": "line",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:tieosoiteverkko_hall_lk",
+      "style": "Tienumerokartta_hall_lk",
+      "rules": 19
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:tieosoiteverkko_hall_lk_ely",
+      "style": "Tienumerokartta_hall_lk",
+      "rules": 19
+    },
+    {
+      "service": "vayla",
+      "id": "hanketiedot:tiesuunnitelmat",
+      "style": "hanketiedot_tiesuunnitelmat_ver2",
+      "rules": 4
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:tieturvallisuustarkastettavat_tiet",
+      "style": "tiestoturvallisuus_velho",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:toiminnallinen_luokka",
+      "style": "Toiminnallinen_luokka_velho",
+      "rules": 4
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:tormaysvaimennin_jalkaisin",
+      "style": "tormaysvaimennin_jalkaisin",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:tormaysvaimennin_muut_tyot",
+      "style": "tormaysvaimennin_muut_tyot",
+      "rules": 2
+    },
+    {
+      "service": "vayla",
+      "id": "hanketiedot:tornio_turvalaitteet_view",
+      "style": "turvalaitteet_merivaylahankkeet",
+      "rules": 35
+    },
+    {
+      "service": "vayla",
+      "id": "ratatiedot:track_kilometers",
+      "style": "sv_ratakilometrit",
+      "rules": 2
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:tulvakohteet",
+      "style": "Tulvakohteet_Velho",
+      "rules": 9
+    },
+    {
+      "service": "vayla",
+      "id": "taitorakenteet:tunneli",
+      "style": "tunneli",
+      "rules": 2
+    },
+    {
+      "service": "vayla",
+      "id": "vesivaylatiedot:turvalaitteet_muut_vaylanpitajat",
+      "style": "merenkulun_turvalaitteet_muut_vaylanpitajat",
+      "rules": 9
+    },
+    {
+      "service": "vayla",
+      "id": "vesivaylatiedot:turvalaitteet_uusi",
+      "style": "merenkulun_turvalaitteet_v3",
+      "rules": 17
+    },
+    {
+      "service": "vayla",
+      "id": "vesivaylatiedot:turvalaitteet_vaylavirasto",
+      "style": "merenkulun_turvalaitteet_vaylavirasto",
+      "rules": 9
+    },
+    {
+      "service": "vayla",
+      "id": "vesivaylatiedot:tutkamajakat_uusi",
+      "style": "Tutkamajakat",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:valaistukset",
+      "style": "Valaistukset_velho",
+      "rules": 4
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:valaistukset_toimenpiteet_vauriot",
+      "style": "varusteen_toimenpiteet_vauriot",
+      "rules": 23
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:valimaiset_puutteet",
+      "style": "Valimaiset_puutteet_velho",
+      "rules": 3
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:valimaiset_tiealueen_poikkileikkausvauriot",
+      "style": "valimaiset_tiealuuen_poikkileikkausvauriot_Velho",
+      "rules": 16
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:valimaiset_varustetoimenpiteet",
+      "style": "valimaiset_varustetoimepiteet_velho",
+      "rules": 3
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:valimaiset_varustevauriot",
+      "style": "Valimaiset_varustevauriot_velho",
+      "rules": 14
+    },
+    {
+      "service": "vayla",
+      "id": "vesivaylatiedot:valosektorit_uusi",
+      "style": "Valosektorit",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:valtakunnallinen_pyorailyverkko",
+      "style": "pyorailyverkosto_valtakunnallinen_pyorailyverkko",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:varasto_ja_kuormausalueet",
+      "style": "Varasto_ja_kuormausalueet_Velho",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "vesivaylatiedot:vaylaalueet_muut_vaylanpitajat",
+      "style": "vaylaalueet_muut_vaylanpitajat",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "vesivaylatiedot:vaylaalueet_uusi",
+      "style": "Vaylaalueet",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "vesivaylatiedot:vaylaalueet_vaylavirasto",
+      "style": "vaylaalueet_vaylavirasto",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:vaylan_luonne",
+      "style": "Vaylan_luonne_Velho",
+      "rules": 12
+    },
+    {
+      "service": "vayla",
+      "id": "vesivaylatiedot:vaylat_uusi",
+      "style": "Vaylat_uusi",
+      "rules": 7
+    },
+    {
+      "service": "vayla",
+      "id": "asiakirjat:vaylaviraston_julkaisut_rata",
+      "style": "sv_julkaisut_rata",
+      "rules": 2
+    },
+    {
+      "service": "vayla",
+      "id": "asiakirjat:vaylaviraston_julkaisut_tie",
+      "style": "sv_julkaisut_tie",
+      "rules": 2
+    },
+    {
+      "service": "vayla",
+      "id": "asiakirjat:vaylaviraston_julkaisut_vesi",
+      "style": "sv_julkaisut_vesi",
+      "rules": 2
+    },
+    {
+      "service": "vayla",
+      "id": "ratatiedot:verkkoselostus_kalustokohtainen_nopeus",
+      "style": "generic",
+      "rules": 4
+    },
+    {
+      "service": "vayla",
+      "id": "ratatiedot:verkkoselostus_matkustajalaiturit",
+      "style": "SV_Matkustajalaiturit",
+      "rules": 2
+    },
+    {
+      "service": "vayla",
+      "id": "vesivaylatiedot:vesiliikennemerkit_uusi",
+      "style": "vesiliikennemerkit_kuva_v3",
+      "rules": 11
+    },
+    {
+      "service": "vayla",
+      "id": "hanketiedot:vesivaylahankkeet",
+      "style": "hanketiedot_vesivaylahankkeet_ver2",
+      "rules": 4
+    },
+    {
+      "service": "vayla",
+      "id": "hanketiedot:vesivaylasuunnitelmat",
+      "style": "hanketiedot_vesivaylasuunnitelmat_ver2",
+      "rules": 4
+    },
+    {
+      "service": "vayla",
+      "id": "vesivaylatiedot:vesivaylat_vl1",
+      "style": "vaylat_lk1_uusi",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "vesivaylatiedot:vesivaylat_vl2",
+      "style": "vaylat_lk2_uusi",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "vesivaylatiedot:vesivaylat_vl3",
+      "style": "vaylat_lk3_uusi",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "vesivaylatiedot:vesivaylat_vl4",
+      "style": "vaylat_lk4_uusi",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "vesivaylatiedot:vesivaylat_vl5",
+      "style": "vaylat_lk5_uusi",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "vesivaylatiedot:vesivaylat_vl6",
+      "style": "vaylat_lk6_uusi",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "vesivaylatiedot:vesivaylien_muut_rajoitusalueet",
+      "style": "rajoitusalueet_muut_kiellot_ja_rajoitukset",
+      "rules": 9
+    },
+    {
+      "service": "vayla",
+      "id": "vesivaylatiedot:vesivaylien_nopeusrajoitusalueet",
+      "style": "rajoitusalueet_nopeusrajoitukset_v3",
+      "rules": 6
+    },
+    {
+      "service": "vayla",
+      "id": "vesivaylatiedot:vesivaylien_turvalaiteviat_kauppamerenkulku",
+      "style": "turvalaiteviat_kauppamerenkulku",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "vesivaylatiedot:vesivaylien_turvalaiteviat_matalavaylat",
+      "style": "turvalaiteviat_matalavaylat",
+      "rules": 1
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:viherhoitoalue",
+      "style": "Viherhoitoalue_velho",
+      "rules": 5
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:viherhoitoalueet_011026",
+      "style": "Viherhoitoalue_velho",
+      "rules": 5
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:viherhoitoalueet_011027",
+      "style": "Viherhoitoalue_velho",
+      "rules": 5
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:viherhoitokuvio",
+      "style": "Viherhoitokuviot_Velho_numero",
+      "rules": 27
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:viherhoitokuviot_011026",
+      "style": "Viherhoitokuviot_Velho_numero",
+      "rules": 27
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:viherhoitokuviot_011027",
+      "style": "Viherhoitokuviot_Velho_numero",
+      "rules": 27
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:viherhoitoluokat_011025",
+      "style": "Viherhoitoluokka_velho",
+      "rules": 13
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:viherhoitoluokat_011026",
+      "style": "Viherhoitoluokka_velho",
+      "rules": 13
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:viherhoitoluokat_011027",
+      "style": "Viherhoitoluokka_velho",
+      "rules": 13
+    },
+    {
+      "service": "vayla",
+      "id": "tiestotiedot:viherhoitoluokka",
+      "style": "Viherhoitoluokka_velho",
+      "rules": 13
+    },
+    {
+      "service": "digiroad",
+      "id": "dr_ajoneuvokoht_rajoitus",
+      "style": "dr_ajoneuvokoht_rajoitus",
+      "rules": 19
+    },
+    {
+      "service": "digiroad",
+      "id": "dr_ajoneuvokoht_rajoitus_yt",
+      "style": "DR_Ajoneuvokohtainenrajoitus_YT",
+      "rules": 19
+    },
+    {
+      "service": "digiroad",
+      "id": "dr_esterakennelma",
+      "style": "dr_esterakennelma",
+      "rules": 4
+    },
+    {
+      "service": "digiroad",
+      "id": "dr_eurooppatienro",
+      "style": "dr_eurooppatienro",
+      "rules": 1
+    },
+    {
+      "service": "digiroad",
+      "id": "dr_hoitoluokat",
+      "style": "dr_hoitoluokat",
+      "rules": 18
+    },
+    {
+      "service": "digiroad",
+      "id": "dr_joukkoliikennekaista",
+      "style": "dr_joukkoliikennekaista",
+      "rules": 1
+    },
+    {
+      "service": "digiroad",
+      "id": "dr_kaantraj_linkki",
+      "style": "dr_kaantymisrajoitus",
+      "rules": 1
+    },
+    {
+      "service": "digiroad",
+      "id": "dr_kaantymisrajoitus",
+      "style": "dr_kaantymisrajoitus",
+      "rules": 1
+    },
+    {
+      "service": "digiroad",
+      "id": "dr_kaistojen_lukumaara",
+      "style": "dr_kaistojen_lukumaara",
+      "rules": 5
+    },
+    {
+      "service": "digiroad",
+      "id": "dr_kelirikko",
+      "style": "dr_kelirikko",
+      "rules": 1
+    },
+    {
+      "service": "digiroad",
+      "id": "dr_kelirikko_yt",
+      "style": "dr_kelirikko",
+      "rules": 1
+    },
+    {
+      "service": "digiroad",
+      "id": "dr_leveys",
+      "style": "dr_leveys",
+      "rules": 4
+    },
+    {
+      "service": "digiroad",
+      "id": "dr_liikennemaara",
+      "style": "dr_liikennemaara",
+      "rules": 6
+    },
+    {
+      "service": "digiroad",
+      "id": "dr_liikennemerkit",
+      "style": "dr_liikennemerkit",
+      "rules": 4
+    },
+    {
+      "service": "digiroad",
+      "id": "dr_liikennemerkit_ajantasaisuus",
+      "style": "dr_liikennemerkit_ajantasaisuus",
+      "rules": 6
+    },
+    {
+      "service": "digiroad",
+      "id": "dr_liikennemerkit_kattavuus",
+      "style": "dr_liikennemerkit_kattavuus",
+      "rules": 6
+    },
+    {
+      "service": "digiroad",
+      "id": "dr_liikennemerkit_yt",
+      "style": "DR_LIIKENNEMERKIT_YT",
+      "rules": 4
+    },
+    {
+      "service": "digiroad",
+      "id": "dr_liikennevalo",
+      "style": "dr_liikennevalo",
+      "rules": 1
+    },
+    {
+      "service": "digiroad",
+      "id": "dr_liittymanro",
+      "style": "dr_liittymanumero",
+      "rules": 1
+    },
+    {
+      "service": "digiroad",
+      "id": "dr_max_akselimassa",
+      "style": "dr_suurin_sallittu_akselimassa",
+      "rules": 3
+    },
+    {
+      "service": "digiroad",
+      "id": "dr_max_korkeus",
+      "style": "dr_suurin_sallittu_korkeus",
+      "rules": 11
+    },
+    {
+      "service": "digiroad",
+      "id": "dr_max_leveys",
+      "style": "dr_suurin_sallittu_leveys",
+      "rules": 5
+    },
+    {
+      "service": "digiroad",
+      "id": "dr_max_massa",
+      "style": "dr_suurin_sallittu_massa",
+      "rules": 7
+    },
+    {
+      "service": "digiroad",
+      "id": "dr_max_massa_yt",
+      "style": "DR_Max_massa_YT",
+      "rules": 7
+    },
+    {
+      "service": "digiroad",
+      "id": "dr_max_pituus",
+      "style": "dr_suurin_sallittu_pituus",
+      "rules": 4
+    },
+    {
+      "service": "digiroad",
+      "id": "dr_max_telimassa",
+      "style": "dr_suurin_sallittu_telimassa",
+      "rules": 4
+    },
+    {
+      "service": "digiroad",
+      "id": "dr_nopeusrajoitus",
+      "style": "dr_nopeusrajoitus",
+      "rules": 20
+    },
+    {
+      "service": "digiroad",
+      "id": "dr_nopeusrajoitus_ajantasaisuus",
+      "style": "dr_nopeusrajoitus_ajantasaisuus",
+      "rules": 6
+    },
+    {
+      "service": "digiroad",
+      "id": "dr_nopeusrajoitus_kattavuus",
+      "style": "dr_nopeusrajoitus_kattavuus",
+      "rules": 6
+    },
+    {
+      "service": "digiroad",
+      "id": "dr_nopeusrajoitus_yt",
+      "style": "DR_Nopeusrajoitus_YT",
+      "rules": 10
+    },
+    {
+      "service": "digiroad",
+      "id": "dr_opastustaulu",
+      "style": "dr_opastaulu",
+      "rules": 1
+    },
+    {
+      "service": "digiroad",
+      "id": "dr_paallystetty_tie",
+      "style": "dr_paallystetty_tie",
+      "rules": 10
+    },
+    {
+      "service": "digiroad",
+      "id": "dr_palvelu",
+      "style": "dr_palvelu",
+      "rules": 16
+    },
+    {
+      "service": "digiroad",
+      "id": "dr_pysakki",
+      "style": "dr_pysakki",
+      "rules": 8
+    },
+    {
+      "service": "digiroad",
+      "id": "dr_pysakointikielto",
+      "style": "dr_pysakointikielto",
+      "rules": 2
+    },
+    {
+      "service": "digiroad",
+      "id": "dr_rautatien_tasoristeys",
+      "style": "dr_rautatien_tasoristeys",
+      "rules": 5
+    },
+    {
+      "service": "digiroad",
+      "id": "dr_suojatie",
+      "style": "dr_suojatie",
+      "rules": 1
+    },
+    {
+      "service": "digiroad",
+      "id": "dr_taajama_alueet",
+      "style": "dr_taajama_alueet",
+      "rules": 1
+    },
+    {
+      "service": "digiroad",
+      "id": "dr_talvinopeusrajoitus",
+      "style": "dr_talvinopeusrajoitus",
+      "rules": 10
+    },
+    {
+      "service": "digiroad",
+      "id": "dr_tielinkki_hall_lk",
+      "style": "DR_Tielinkki_hallinnollinen_luokka",
+      "rules": 4
+    },
+    {
+      "service": "digiroad",
+      "id": "dr_tielinkki_silta_alikulku_tunneli",
+      "style": "DR_Silta_alikulku_tunneli",
+      "rules": 9
+    },
+    {
+      "service": "digiroad",
+      "id": "dr_tielinkki_tielinkin_tyyppi",
+      "style": "DR_Tielinkin_tyyppi",
+      "rules": 14
+    },
+    {
+      "service": "digiroad",
+      "id": "dr_tielinkki_toim_lk",
+      "style": "generic",
+      "rules": 4
+    },
+    {
+      "service": "digiroad",
+      "id": "dr_tietyot",
+      "style": "generic",
+      "rules": 4
+    },
+    {
+      "service": "digiroad",
+      "id": "dr_tuntematon_nopeusrajoitus",
+      "style": "dr_tuntematon_nopeusrajoitus",
+      "rules": 1
+    },
+    {
+      "service": "digiroad",
+      "id": "dr_vak_rajoitus",
+      "style": "dr_vak",
+      "rules": 2
+    },
+    {
+      "service": "digiroad",
+      "id": "dr_valaistu_tie",
+      "style": "dr_valaistu_tie",
+      "rules": 1
+    },
+    {
+      "service": "digiroad",
+      "id": "dr_yhdistelman_max_massa",
+      "style": "dr_suurin_sallittu_yhdistelman_massa",
+      "rules": 5
+    },
+    {
+      "service": "digiroad",
+      "id": "dr_ytilmoitus_yt",
+      "style": "DR_Yksityistietieto_YT",
+      "rules": 3
+    },
+    {
+      "service": "digiroad",
+      "id": "taajamamerkkihuomiot_kadut",
+      "style": "dr_taajamamerkit_katu",
+      "rules": 4
+    },
+    {
+      "service": "digiroad",
+      "id": "taajamamerkkihuomiot_maantie",
+      "style": "dr_taajamamerkit_maantie",
+      "rules": 4
+    },
+    {
+      "service": "digiroad",
+      "id": "tiekunnalliset_yksityistiet",
+      "style": "dr_yksityistietieto",
+      "rules": 3
+    },
+    {
+      "service": "liiteri_asuinalueet",
+      "id": "harvapientaloalue25",
+      "style": "Harva_pientaloasutus",
+      "rules": 1
+    },
+    {
+      "service": "liiteri_asuinalueet",
+      "id": "harvapientaloasutus00",
+      "style": "Harva_pientaloasutus",
+      "rules": 1
+    },
+    {
+      "service": "liiteri_asuinalueet",
+      "id": "harvapientaloasutus05",
+      "style": "Harva_pientaloasutus",
+      "rules": 1
+    },
+    {
+      "service": "liiteri_asuinalueet",
+      "id": "harvapientaloasutus10",
+      "style": "Harva_pientaloasutus",
+      "rules": 1
+    },
+    {
+      "service": "liiteri_asuinalueet",
+      "id": "harvapientaloasutus15",
+      "style": "Harva_pientaloasutus",
+      "rules": 1
+    },
+    {
+      "service": "liiteri_asuinalueet",
+      "id": "harvapientaloasutus20",
+      "style": "Harva_pientaloasutus",
+      "rules": 1
+    },
+    {
+      "service": "liiteri_asuinalueet",
+      "id": "harvapientaloasutus90",
+      "style": "Harva_pientaloasutus",
+      "rules": 1
+    },
+    {
+      "service": "liiteri_asuinalueet",
+      "id": "harvapientaloasutus95",
+      "style": "Harva_pientaloasutus",
+      "rules": 1
+    },
+    {
+      "service": "liiteri_asuinalueet",
+      "id": "kerrostaloalue00",
+      "style": "Kerrostaloalueet",
+      "rules": 1
+    },
+    {
+      "service": "liiteri_asuinalueet",
+      "id": "kerrostaloalue05",
+      "style": "Kerrostaloalueet",
+      "rules": 1
+    },
+    {
+      "service": "liiteri_asuinalueet",
+      "id": "kerrostaloalue10",
+      "style": "Kerrostaloalueet",
+      "rules": 1
+    },
+    {
+      "service": "liiteri_asuinalueet",
+      "id": "kerrostaloalue15",
+      "style": "Kerrostaloalueet",
+      "rules": 1
+    },
+    {
+      "service": "liiteri_asuinalueet",
+      "id": "kerrostaloalue20",
+      "style": "Kerrostaloalueet",
+      "rules": 1
+    },
+    {
+      "service": "liiteri_asuinalueet",
+      "id": "kerrostaloalue25",
+      "style": "Kerrostaloalueet",
+      "rules": 1
+    },
+    {
+      "service": "liiteri_asuinalueet",
+      "id": "kerrostaloalue90",
+      "style": "Kerrostaloalueet",
+      "rules": 1
+    },
+    {
+      "service": "liiteri_asuinalueet",
+      "id": "kerrostaloalue95",
+      "style": "Kerrostaloalueet",
+      "rules": 1
+    },
+    {
+      "service": "liiteri_asuinalueet",
+      "id": "pientaloalue00",
+      "style": "Pientaloalueet",
+      "rules": 1
+    },
+    {
+      "service": "liiteri_asuinalueet",
+      "id": "pientaloalue05",
+      "style": "Pientaloalueet",
+      "rules": 1
+    },
+    {
+      "service": "liiteri_asuinalueet",
+      "id": "pientaloalue10",
+      "style": "Pientaloalueet",
+      "rules": 1
+    },
+    {
+      "service": "liiteri_asuinalueet",
+      "id": "pientaloalue15",
+      "style": "Pientaloalueet",
+      "rules": 1
+    },
+    {
+      "service": "liiteri_asuinalueet",
+      "id": "pientaloalue20",
+      "style": "Pientaloalueet",
+      "rules": 1
+    },
+    {
+      "service": "liiteri_asuinalueet",
+      "id": "pientaloalue25",
+      "style": "Pientaloalueet",
+      "rules": 1
+    },
+    {
+      "service": "liiteri_asuinalueet",
+      "id": "pientaloalue90",
+      "style": "Pientaloalueet",
+      "rules": 1
+    },
+    {
+      "service": "liiteri_asuinalueet",
+      "id": "pientaloalue95",
+      "style": "Pientaloalueet",
+      "rules": 1
+    },
+    {
+      "service": "liiteri_etaisyysvyohykkeet",
+      "id": "etaisyysvyoh_ala_asteet",
+      "style": "ala_asteet_buffer",
+      "rules": 6
+    },
+    {
+      "service": "liiteri_etaisyysvyohykkeet",
+      "id": "etaisyysvyoh_asemakaava",
+      "style": "Asemakaavoitetun_alueen_lievealue",
+      "rules": 1
+    },
+    {
+      "service": "liiteri_etaisyysvyohykkeet",
+      "id": "etaisyysvyoh_lukiot",
+      "style": "lukiot_buffer",
+      "rules": 6
+    },
+    {
+      "service": "liiteri_etaisyysvyohykkeet",
+      "id": "etaisyysvyoh_ptkaupat",
+      "style": "ptkaupat_buffer",
+      "rules": 6
+    },
+    {
+      "service": "liiteri_etaisyysvyohykkeet",
+      "id": "etaisyysvyoh_taajama",
+      "style": "Taajaman_lievealue",
+      "rules": 1
+    },
+    {
+      "service": "liiteri_etaisyysvyohykkeet",
+      "id": "etaisyysvyoh_yla_asteet",
+      "style": "yla_asteet_buffer",
+      "rules": 6
+    },
+    {
+      "service": "liiteri_taajamat",
+      "id": "taajamat00",
+      "style": "taajamat",
+      "rules": 1
+    },
+    {
+      "service": "liiteri_taajamat",
+      "id": "taajamat05",
+      "style": "taajamat",
+      "rules": 1
+    },
+    {
+      "service": "liiteri_taajamat",
+      "id": "taajamat10",
+      "style": "taajamat",
+      "rules": 1
+    },
+    {
+      "service": "liiteri_taajamat",
+      "id": "taajamat15",
+      "style": "taajamat",
+      "rules": 1
+    },
+    {
+      "service": "liiteri_taajamat",
+      "id": "taajamat20",
+      "style": "taajamat",
+      "rules": 1
+    },
+    {
+      "service": "liiteri_taajamat",
+      "id": "taajamat25",
+      "style": "taajamat",
+      "rules": 1
+    },
+    {
+      "service": "liiteri_taajamat",
+      "id": "taajamat90",
+      "style": "taajamat",
+      "rules": 1
+    },
+    {
+      "service": "liiteri_taajamat",
+      "id": "taajamat95",
+      "style": "taajamat",
+      "rules": 1
+    },
+    {
+      "service": "syke",
+      "id": "PS.ProtectedSitesAsetusValtionOmistamienRakennustenSuojelusta",
+      "style": "PS.ProtectedSitePoint.Default",
+      "rules": 1
+    },
+    {
+      "service": "syke",
+      "id": "PS.ProtectedSitesAsetusValtionOmistamienRakennustenSuojelustaPolygons",
+      "style": "PS.ProtectedSite.Default",
+      "rules": 1
+    },
+    {
+      "service": "syke",
+      "id": "PS.ProtectedSitesEramaaAlue",
+      "style": "PS.ProtectedSite.Default",
+      "rules": 1
+    },
+    {
+      "service": "syke",
+      "id": "PS.ProtectedSitesKirkkolaillaSuojellutKohteet",
+      "style": "PS.ProtectedSitePoint.Default",
+      "rules": 1
+    },
+    {
+      "service": "syke",
+      "id": "PS.ProtectedSitesLaillaOrtodoksisestaKirkoistaSuojellutKohteet",
+      "style": "PS.ProtectedSitePoint.Default",
+      "rules": 1
+    },
+    {
+      "service": "syke",
+      "id": "PS.ProtectedSitesLaillaRakennusperinnonSuojelemisestaSuojeltuKohde",
+      "style": "PS.ProtectedSitePoint.Default",
+      "rules": 1
+    },
+    {
+      "service": "syke",
+      "id": "PS.ProtectedSitesLaillaRakennusperinnonSuojelemisestaSuojeltuKohdePolygons",
+      "style": "PS.ProtectedSite.Default",
+      "rules": 1
+    },
+    {
+      "service": "syke",
+      "id": "PS.ProtectedSitesProposedSiteOfCommunityImportance",
+      "style": "PS.ProtectedSite.Default",
+      "rules": 1
+    },
+    {
+      "service": "syke",
+      "id": "PS.ProtectedSitesSpecialAreaOfConservation",
+      "style": "PS.ProtectedSite.Default",
+      "rules": 1
+    },
+    {
+      "service": "syke",
+      "id": "PS.ProtectedSitesSpecialProtectionArea",
+      "style": "PS.ProtectedSite.Default",
+      "rules": 1
+    },
+    {
+      "service": "syke",
+      "id": "PS.ProtectedSitesValtionOmistamaLuonnonsuojelualue",
+      "style": "PS.ProtectedSite.Default",
+      "rules": 1
+    },
+    {
+      "service": "syke",
+      "id": "PS.ProtectedSitesYksityistenMaillaOlevaLuonnonsuojelualue",
+      "style": "PS.ProtectedSite.Default",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:avi1000k",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:avi1000k_2013",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:avi1000k_2014",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:avi1000k_2015",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:avi1000k_2016",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:avi1000k_2017",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:avi1000k_2018",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:avi1000k_2019",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:avi1000k_2020",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:avi1000k_2021",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:avi1000k_2022",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:avi1000k_2023",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:avi1000k_2024",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:avi1000k_2025",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:avi4500k",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:avi4500k_2013",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:avi4500k_2014",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:avi4500k_2015",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:avi4500k_2016",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:avi4500k_2017",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:avi4500k_2018",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:avi4500k_2019",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:avi4500k_2020",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:avi4500k_2021",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:avi4500k_2022",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:avi4500k_2023",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:avi4500k_2024",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:avi4500k_2025",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:avi_vaki2011",
+      "style": "aluevaki_avi",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:avi_vaki2012",
+      "style": "aluevaki_avi",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:avi_vaki2013",
+      "style": "aluevaki_avi",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:avi_vaki2014",
+      "style": "aluevaki_avi",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:avi_vaki2015",
+      "style": "aluevaki_avi",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:avi_vaki2016",
+      "style": "aluevaki_avi",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:avi_vaki2017",
+      "style": "aluevaki_avi",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:avi_vaki2018",
+      "style": "aluevaki_avi",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:avi_vaki2019",
+      "style": "aluevaki_avi",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:avi_vaki2020",
+      "style": "aluevaki_avi",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:avi_vaki2021",
+      "style": "aluevaki_avi",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:avi_vaki2022",
+      "style": "aluevaki_avi",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:avi_vaki2023",
+      "style": "aluevaki_avi",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:avi_vaki2024",
+      "style": "aluevaki_avi",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:elinvoimakeskus1000k",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:elinvoimakeskus1000k_2026",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:elinvoimakeskus4500k",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:elinvoimakeskus4500k_2026",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:ely1000k",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:ely1000k_2013",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:ely1000k_2014",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:ely1000k_2015",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:ely1000k_2016",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:ely1000k_2017",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:ely1000k_2018",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:ely1000k_2019",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:ely1000k_2020",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:ely1000k_2021",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:ely1000k_2022",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:ely1000k_2023",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:ely1000k_2024",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:ely1000k_2025",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:ely4500k",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:ely4500k_2013",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:ely4500k_2014",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:ely4500k_2015",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:ely4500k_2016",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:ely4500k_2017",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:ely4500k_2018",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:ely4500k_2019",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:ely4500k_2020",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:ely4500k_2021",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:ely4500k_2022",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:ely4500k_2023",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:ely4500k_2024",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:ely4500k_2025",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:ely_vaki2011",
+      "style": "aluevaki_ely",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:ely_vaki2012",
+      "style": "aluevaki_ely",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:ely_vaki2013",
+      "style": "aluevaki_ely",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:ely_vaki2014",
+      "style": "aluevaki_ely",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:ely_vaki2015",
+      "style": "aluevaki_ely",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:ely_vaki2016",
+      "style": "aluevaki_ely",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:ely_vaki2017",
+      "style": "aluevaki_ely",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:ely_vaki2018",
+      "style": "aluevaki_ely",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:ely_vaki2019",
+      "style": "aluevaki_ely",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:ely_vaki2020",
+      "style": "aluevaki_ely",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:ely_vaki2021",
+      "style": "aluevaki_ely",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:ely_vaki2022",
+      "style": "aluevaki_ely",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:ely_vaki2023",
+      "style": "aluevaki_ely",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:ely_vaki2024",
+      "style": "aluevaki_ely",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:hila1km",
+      "style": "hila_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:hila5km",
+      "style": "hila_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:hyvinvointialue1000k",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:hyvinvointialue1000k_2022",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:hyvinvointialue1000k_2023",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:hyvinvointialue1000k_2024",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:hyvinvointialue1000k_2025",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:hyvinvointialue1000k_2026",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:hyvinvointialue4500k",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:hyvinvointialue4500k_2022",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:hyvinvointialue4500k_2023",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:hyvinvointialue4500k_2024",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:hyvinvointialue4500k_2025",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:hyvinvointialue4500k_2026",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:kunta1000k",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:kunta1000k_2013",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:kunta1000k_2014",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:kunta1000k_2015",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:kunta1000k_2016",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:kunta1000k_2017",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:kunta1000k_2018",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:kunta1000k_2019",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:kunta1000k_2020",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:kunta1000k_2021",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:kunta1000k_2022",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:kunta1000k_2023",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:kunta1000k_2024",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:kunta1000k_2025",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:kunta1000k_2026",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:kunta4500k",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:kunta4500k_2013",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:kunta4500k_2014",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:kunta4500k_2015",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:kunta4500k_2016",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:kunta4500k_2017",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:kunta4500k_2018",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:kunta4500k_2019",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:kunta4500k_2020",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:kunta4500k_2021",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:kunta4500k_2022",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:kunta4500k_2023",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:kunta4500k_2024",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:kunta4500k_2025",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:kunta4500k_2026",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:kunta_vaki2011",
+      "style": "aluevaki_kunta",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:kunta_vaki2012",
+      "style": "aluevaki_kunta",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:kunta_vaki2013",
+      "style": "aluevaki_kunta",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:kunta_vaki2014",
+      "style": "aluevaki_kunta",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:kunta_vaki2015",
+      "style": "aluevaki_kunta",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:kunta_vaki2016",
+      "style": "aluevaki_kunta",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:kunta_vaki2017",
+      "style": "aluevaki_kunta",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:kunta_vaki2018",
+      "style": "aluevaki_kunta",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:kunta_vaki2019",
+      "style": "aluevaki_kunta",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:kunta_vaki2020",
+      "style": "aluevaki_kunta",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:kunta_vaki2021",
+      "style": "aluevaki_kunta",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:kunta_vaki2022",
+      "style": "aluevaki_kunta",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:kunta_vaki2023",
+      "style": "aluevaki_kunta",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:kunta_vaki2024",
+      "style": "aluevaki_kunta",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:kunta_vaki2025",
+      "style": "aluevaki_kunta",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "laearuutu:laea_1km_2011",
+      "style": "laea_grid",
+      "rules": 7
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:maakunta1000k",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:maakunta1000k_2013",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:maakunta1000k_2014",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:maakunta1000k_2015",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:maakunta1000k_2016",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:maakunta1000k_2017",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:maakunta1000k_2018",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:maakunta1000k_2019",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:maakunta1000k_2020",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:maakunta1000k_2021",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:maakunta1000k_2022",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:maakunta1000k_2023",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:maakunta1000k_2024",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:maakunta1000k_2025",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:maakunta1000k_2026",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:maakunta4500k",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:maakunta4500k_2013",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:maakunta4500k_2014",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:maakunta4500k_2015",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:maakunta4500k_2016",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:maakunta4500k_2017",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:maakunta4500k_2018",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:maakunta4500k_2019",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:maakunta4500k_2020",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:maakunta4500k_2021",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:maakunta4500k_2022",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:maakunta4500k_2023",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:maakunta4500k_2024",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:maakunta4500k_2025",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:maakunta4500k_2026",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:maakunta_vaki2011",
+      "style": "aluevaki_maakunta",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:maakunta_vaki2012",
+      "style": "aluevaki_maakunta",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:maakunta_vaki2013",
+      "style": "aluevaki_maakunta",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:maakunta_vaki2014",
+      "style": "aluevaki_maakunta",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:maakunta_vaki2015",
+      "style": "aluevaki_maakunta",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:maakunta_vaki2016",
+      "style": "aluevaki_maakunta",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:maakunta_vaki2017",
+      "style": "aluevaki_maakunta",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:maakunta_vaki2018",
+      "style": "aluevaki_maakunta",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:maakunta_vaki2019",
+      "style": "aluevaki_maakunta",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:maakunta_vaki2020",
+      "style": "aluevaki_maakunta",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:maakunta_vaki2021",
+      "style": "aluevaki_maakunta",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:maakunta_vaki2022",
+      "style": "aluevaki_maakunta",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:maakunta_vaki2023",
+      "style": "aluevaki_maakunta",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:maakunta_vaki2024",
+      "style": "aluevaki_maakunta",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:maakunta_vaki2025",
+      "style": "aluevaki_maakunta",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "oppilaitokset:oppilaitokset",
+      "style": "oppilaitos_luokittelu",
+      "rules": 5
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "postialue:pno",
+      "style": "postialue_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "postialue:pno_2015",
+      "style": "postialue_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "postialue:pno_2016",
+      "style": "postialue_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "postialue:pno_2017",
+      "style": "postialue_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "postialue:pno_2018",
+      "style": "postialue_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "postialue:pno_2019",
+      "style": "postialue_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "postialue:pno_2020",
+      "style": "postialue_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "postialue:pno_2021",
+      "style": "postialue_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "postialue:pno_2022",
+      "style": "postialue_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "postialue:pno_2023",
+      "style": "postialue_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "postialue:pno_2024",
+      "style": "postialue_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "postialue:pno_2025",
+      "style": "postialue_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "postialue:pno_2026",
+      "style": "postialue_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "postialue:pno_meri",
+      "style": "postialue_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "postialue:pno_meri_2015",
+      "style": "postialue_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "postialue:pno_meri_2016",
+      "style": "postialue_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "postialue:pno_meri_2017",
+      "style": "postialue_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "postialue:pno_meri_2018",
+      "style": "postialue_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "postialue:pno_meri_2019",
+      "style": "postialue_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "postialue:pno_meri_2020",
+      "style": "postialue_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "postialue:pno_meri_2021",
+      "style": "postialue_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "postialue:pno_meri_2022",
+      "style": "postialue_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "postialue:pno_meri_2023",
+      "style": "postialue_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "postialue:pno_meri_2024",
+      "style": "postialue_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "postialue:pno_meri_2025",
+      "style": "postialue_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "postialue:pno_meri_2026",
+      "style": "postialue_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "postialue:pno_tilasto",
+      "style": "postialue_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "postialue:pno_tilasto_2015",
+      "style": "postialue_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "postialue:pno_tilasto_2016",
+      "style": "postialue_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "postialue:pno_tilasto_2017",
+      "style": "postialue_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "postialue:pno_tilasto_2018",
+      "style": "postialue_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "postialue:pno_tilasto_2019",
+      "style": "postialue_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "postialue:pno_tilasto_2020",
+      "style": "postialue_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "postialue:pno_tilasto_2021",
+      "style": "postialue_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "postialue:pno_tilasto_2022",
+      "style": "postialue_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "postialue:pno_tilasto_2023",
+      "style": "postialue_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "postialue:pno_tilasto_2024",
+      "style": "postialue_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "postialue:pno_tilasto_2025",
+      "style": "postialue_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "postialue:pno_tilasto_2026",
+      "style": "postialue_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "testi:rudolfSK",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:seutukunta1000k",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:seutukunta1000k_2013",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:seutukunta1000k_2014",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:seutukunta1000k_2015",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:seutukunta1000k_2016",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:seutukunta1000k_2017",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:seutukunta1000k_2018",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:seutukunta1000k_2019",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:seutukunta1000k_2020",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:seutukunta1000k_2021",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:seutukunta1000k_2022",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:seutukunta1000k_2023",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:seutukunta1000k_2024",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:seutukunta1000k_2025",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:seutukunta1000k_2026",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:seutukunta4500k",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:seutukunta4500k_2013",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:seutukunta4500k_2014",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:seutukunta4500k_2015",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:seutukunta4500k_2016",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:seutukunta4500k_2017",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:seutukunta4500k_2018",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:seutukunta4500k_2019",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:seutukunta4500k_2020",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:seutukunta4500k_2021",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:seutukunta4500k_2022",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:seutukunta4500k_2023",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:seutukunta4500k_2024",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:seutukunta4500k_2025",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:seutukunta4500k_2026",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:seutukunta_vaki2011",
+      "style": "aluevaki_seutukunta",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:seutukunta_vaki2012",
+      "style": "aluevaki_seutukunta",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:seutukunta_vaki2013",
+      "style": "aluevaki_seutukunta",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:seutukunta_vaki2014",
+      "style": "aluevaki_seutukunta",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:seutukunta_vaki2015",
+      "style": "aluevaki_seutukunta",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:seutukunta_vaki2016",
+      "style": "aluevaki_seutukunta",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:seutukunta_vaki2017",
+      "style": "aluevaki_seutukunta",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:seutukunta_vaki2018",
+      "style": "aluevaki_seutukunta",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:seutukunta_vaki2019",
+      "style": "aluevaki_seutukunta",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:seutukunta_vaki2020",
+      "style": "aluevaki_seutukunta",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:seutukunta_vaki2021",
+      "style": "aluevaki_seutukunta",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:seutukunta_vaki2022",
+      "style": "aluevaki_seutukunta",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:seutukunta_vaki2023",
+      "style": "aluevaki_seutukunta",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:seutukunta_vaki2024",
+      "style": "aluevaki_seutukunta",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:seutukunta_vaki2025",
+      "style": "aluevaki_seutukunta",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:suuralue1000k",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:suuralue1000k_2013",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:suuralue1000k_2014",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:suuralue1000k_2015",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:suuralue1000k_2016",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:suuralue1000k_2017",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:suuralue1000k_2018",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:suuralue1000k_2019",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:suuralue1000k_2020",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:suuralue1000k_2021",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:suuralue1000k_2022",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:suuralue1000k_2023",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:suuralue1000k_2024",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:suuralue1000k_2025",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:suuralue1000k_2026",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:suuralue4500k",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:suuralue4500k_2013",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:suuralue4500k_2014",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:suuralue4500k_2015",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:suuralue4500k_2016",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:suuralue4500k_2017",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:suuralue4500k_2018",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:suuralue4500k_2019",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:suuralue4500k_2020",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:suuralue4500k_2021",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:suuralue4500k_2022",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:suuralue4500k_2023",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:suuralue4500k_2024",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:suuralue4500k_2025",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:suuralue4500k_2026",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:suuralue_vaki2011",
+      "style": "aluevaki_suuralue",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:suuralue_vaki2012",
+      "style": "aluevaki_suuralue",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:suuralue_vaki2013",
+      "style": "aluevaki_suuralue",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:suuralue_vaki2014",
+      "style": "aluevaki_suuralue",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:suuralue_vaki2015",
+      "style": "aluevaki_suuralue",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:suuralue_vaki2016",
+      "style": "aluevaki_suuralue",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:suuralue_vaki2017",
+      "style": "aluevaki_suuralue",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:suuralue_vaki2018",
+      "style": "aluevaki_suuralue",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:suuralue_vaki2019",
+      "style": "aluevaki_suuralue",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:suuralue_vaki2020",
+      "style": "aluevaki_suuralue",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:suuralue_vaki2021",
+      "style": "aluevaki_suuralue",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:suuralue_vaki2022",
+      "style": "aluevaki_suuralue",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:suuralue_vaki2023",
+      "style": "aluevaki_suuralue",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:suuralue_vaki2024",
+      "style": "aluevaki_suuralue",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoalue:suuralue_vaki2025",
+      "style": "aluevaki_suuralue",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tieliikenne:tieliikenne_2011",
+      "style": "tieliikenne_style",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tieliikenne:tieliikenne_2012",
+      "style": "tieliikenne_style",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tieliikenne:tieliikenne_2013",
+      "style": "tieliikenne_style",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tieliikenne:tieliikenne_2014",
+      "style": "tieliikenne_style",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tieliikenne:tieliikenne_2015",
+      "style": "tieliikenne_style",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tieliikenne:tieliikenne_2016",
+      "style": "tieliikenne_style",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tieliikenne:tieliikenne_2017",
+      "style": "tieliikenne_style",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tieliikenne:tieliikenne_2018",
+      "style": "tieliikenne_style",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tieliikenne:tieliikenne_2019",
+      "style": "tieliikenne_style",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tieliikenne:tieliikenne_2020",
+      "style": "tieliikenne_style",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tieliikenne:tieliikenne_2021",
+      "style": "tieliikenne_style",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tieliikenne:tieliikenne_2022",
+      "style": "tieliikenne_style",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tieliikenne:tieliikenne_2023",
+      "style": "tieliikenne_style",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tieliikenne:tieliikenne_2024",
+      "style": "tieliikenne_style",
+      "rules": 4
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "ttlaitokset:toimipaikat",
+      "style": "toimipaikat_luokittelu",
+      "rules": 7
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:tyossakayntialue1000k",
+      "style": "tkalue",
+      "rules": 2
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:tyossakayntialue1000k_2020",
+      "style": "tkalue",
+      "rules": 2
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:tyossakayntialue1000k_2021",
+      "style": "tkalue",
+      "rules": 2
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:tyossakayntialue1000k_2022",
+      "style": "tkalue",
+      "rules": 2
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:tyossakayntialue1000k_2023",
+      "style": "tkalue",
+      "rules": 2
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:tyossakayntialue4500k",
+      "style": "tkalue",
+      "rules": 2
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:tyossakayntialue4500k_2020",
+      "style": "tkalue",
+      "rules": 2
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:tyossakayntialue4500k_2021",
+      "style": "tkalue",
+      "rules": 2
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:tyossakayntialue4500k_2022",
+      "style": "tkalue",
+      "rules": 2
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:tyossakayntialue4500k_2023",
+      "style": "tkalue",
+      "rules": 2
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:tyossakayntialue_1000k_2019",
+      "style": "tkalue",
+      "rules": 2
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:tyossakayntialue_4500k_2019",
+      "style": "tkalue",
+      "rules": 2
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:vaalipiiri1000k",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:vaalipiiri1000k_2019",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:vaalipiiri1000k_2020",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:vaalipiiri1000k_2021",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:vaalipiiri1000k_2022",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:vaalipiiri1000k_2023",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:vaalipiiri1000k_2024",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:vaalipiiri1000k_2025",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:vaalipiiri1000k_2026",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:vaalipiiri4500k",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:vaalipiiri4500k_2019",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:vaalipiiri4500k_2020",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:vaalipiiri4500k_2021",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:vaalipiiri4500k_2022",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:vaalipiiri4500k_2023",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:vaalipiiri4500k_2024",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:vaalipiiri4500k_2025",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "tilastointialueet:vaalipiiri4500k_2026",
+      "style": "luokitukset_polygon",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoruutu:vaki2005_1km",
+      "style": "ruutu_luokittelu",
+      "rules": 7
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoruutu:vaki2005_1km_kp",
+      "style": "piste_musta",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoruutu:vaki2005_5km",
+      "style": "ruutu_luokittelu",
+      "rules": 7
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoruutu:vaki2010_1km",
+      "style": "ruutu_luokittelu",
+      "rules": 7
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoruutu:vaki2010_1km_kp",
+      "style": "piste_musta",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoruutu:vaki2010_5km",
+      "style": "ruutu_luokittelu",
+      "rules": 7
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoruutu:vaki2011_1km",
+      "style": "ruutu_luokittelu",
+      "rules": 7
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoruutu:vaki2011_1km_kp",
+      "style": "piste_musta",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoruutu:vaki2011_5km",
+      "style": "ruutu_luokittelu",
+      "rules": 7
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoruutu:vaki2012_1km",
+      "style": "ruutu_luokittelu",
+      "rules": 7
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoruutu:vaki2012_1km_kp",
+      "style": "piste_musta",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoruutu:vaki2012_5km",
+      "style": "ruutu_luokittelu",
+      "rules": 7
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoruutu:vaki2013_1km",
+      "style": "ruutu_luokittelu",
+      "rules": 7
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoruutu:vaki2013_1km_kp",
+      "style": "piste_musta",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoruutu:vaki2013_5km",
+      "style": "ruutu_luokittelu",
+      "rules": 7
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoruutu:vaki2014_1km",
+      "style": "ruutu_luokittelu",
+      "rules": 7
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoruutu:vaki2014_1km_kp",
+      "style": "piste_musta",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoruutu:vaki2014_5km",
+      "style": "ruutu_luokittelu",
+      "rules": 7
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoruutu:vaki2015_1km",
+      "style": "ruutu_luokittelu",
+      "rules": 7
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoruutu:vaki2015_1km_kp",
+      "style": "piste_musta",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoruutu:vaki2015_5km",
+      "style": "ruutu_luokittelu",
+      "rules": 7
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoruutu:vaki2016_1km",
+      "style": "ruutu_luokittelu",
+      "rules": 7
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoruutu:vaki2016_1km_kp",
+      "style": "piste_musta",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoruutu:vaki2016_5km",
+      "style": "ruutu_luokittelu",
+      "rules": 7
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoruutu:vaki2017_1km",
+      "style": "ruutu_luokittelu",
+      "rules": 7
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoruutu:vaki2017_1km_kp",
+      "style": "piste_musta",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoruutu:vaki2017_5km",
+      "style": "ruutu_luokittelu",
+      "rules": 7
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoruutu:vaki2018_1km",
+      "style": "ruutu_luokittelu",
+      "rules": 7
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoruutu:vaki2018_1km_kp",
+      "style": "piste_musta",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoruutu:vaki2018_5km",
+      "style": "ruutu_luokittelu",
+      "rules": 7
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoruutu:vaki2019_1km",
+      "style": "ruutu_luokittelu",
+      "rules": 7
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoruutu:vaki2019_1km_kp",
+      "style": "piste_musta",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoruutu:vaki2019_5km",
+      "style": "ruutu_luokittelu",
+      "rules": 7
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoruutu:vaki2020_1km",
+      "style": "ruutu_luokittelu",
+      "rules": 7
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoruutu:vaki2020_1km_kp",
+      "style": "piste_musta",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoruutu:vaki2020_5km",
+      "style": "ruutu_luokittelu",
+      "rules": 7
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoruutu:vaki2021_1km",
+      "style": "ruutu_luokittelu",
+      "rules": 7
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoruutu:vaki2021_1km_kp",
+      "style": "piste_musta",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoruutu:vaki2021_5km",
+      "style": "ruutu_luokittelu",
+      "rules": 7
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoruutu:vaki2022_1km",
+      "style": "ruutu_luokittelu",
+      "rules": 7
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoruutu:vaki2022_1km_kp",
+      "style": "piste_musta",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoruutu:vaki2022_5km",
+      "style": "ruutu_luokittelu",
+      "rules": 7
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoruutu:vaki2023_1km",
+      "style": "ruutu_luokittelu",
+      "rules": 7
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoruutu:vaki2023_1km_kp",
+      "style": "piste_musta",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoruutu:vaki2023_5km",
+      "style": "ruutu_luokittelu",
+      "rules": 7
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoruutu:vaki2024_1km",
+      "style": "ruutu_luokittelu",
+      "rules": 7
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoruutu:vaki2024_1km_kp",
+      "style": "piste_musta",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoruutu:vaki2024_5km",
+      "style": "ruutu_luokittelu",
+      "rules": 7
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoruutu:vaki2025_1km",
+      "style": "ruutu_luokittelu",
+      "rules": 7
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoruutu:vaki2025_1km_kp",
+      "style": "piste_musta",
+      "rules": 1
+    },
+    {
+      "service": "tilastokeskus",
+      "id": "vaestoruutu:vaki2025_5km",
+      "style": "ruutu_luokittelu",
+      "rules": 7
+    },
+    {
+      "service": "traficom_avoin",
+      "id": "navigational_warnings",
+      "error": "Palvelulla ei ole ladattavaa symboliikkaa tälle tasolle"
+    },
+    {
+      "service": "traficom_avoin",
+      "id": "Ahti_Limit_L",
+      "style": "valtakunnan_raja_v",
+      "rules": 1
+    },
+    {
+      "service": "traficom_avoin",
+      "id": "Berths_L",
+      "style": "line",
+      "rules": 1
+    },
+    {
+      "service": "traficom_avoin",
+      "id": "Dam_A",
+      "style": "sulut_a",
+      "rules": 2
+    },
+    {
+      "service": "traficom_avoin",
+      "id": "Dam_L",
+      "style": "sulut_v",
+      "rules": 2
+    },
+    {
+      "service": "traficom_avoin",
+      "id": "ExclusiveEconomicZone_A",
+      "style": "talousvyohyke_a",
+      "rules": 1
+    },
+    {
+      "service": "traficom_avoin",
+      "id": "ExclusiveEconomicZone_L",
+      "style": "talousvyohyke_v",
+      "rules": 1
+    },
+    {
+      "service": "traficom_avoin",
+      "id": "Gate_L",
+      "style": "line",
+      "rules": 1
+    },
+    {
+      "service": "traficom_avoin",
+      "id": "PilotBoardingPlace_P",
+      "style": "generic",
+      "rules": 4
+    },
+    {
+      "service": "traficom_avoin",
+      "id": "Pontoon_A",
+      "style": "polygon_raja",
+      "rules": 1
+    },
+    {
+      "service": "traficom_avoin",
+      "id": "Pontoon_L",
+      "style": "rantarakenteet",
+      "rules": 1
+    },
+    {
+      "service": "traficom_avoin",
+      "id": "Rdocal_L",
+      "style": "Rdocal_L",
+      "rules": 1
+    },
+    {
+      "service": "traficom_avoin",
+      "id": "Rdocal_P",
+      "style": "Rdocal_P",
+      "rules": 1
+    },
+    {
+      "service": "traficom_avoin",
+      "id": "ShorelineConstruction_L",
+      "style": "line",
+      "rules": 1
+    },
+    {
+      "service": "traficom_avoin",
+      "id": "ShorelineConstruction_P",
+      "style": "point",
+      "rules": 1
+    },
+    {
+      "service": "traficom_avoin",
+      "id": "StraightTerritorialSeaBaseline_L",
+      "style": "sisavesi_raja_v",
+      "rules": 1
+    },
+    {
+      "service": "traficom_avoin",
+      "id": "TerritorialSeaArea_A",
+      "style": "aluemeri_raja_a",
+      "rules": 1
+    },
+    {
+      "service": "traficom_avoin",
+      "id": "TerritorialSeaArea_L",
+      "style": "aluemeri_raja_v",
+      "rules": 1
+    },
+    {
+      "service": "traficom_avoin",
+      "id": "VTSArea_A",
+      "style": "VTS_AREA_A",
+      "rules": 1
+    },
+    {
+      "service": "traficom_avoin",
+      "id": "d_alueet",
+      "style": "line",
+      "rules": 1
+    },
+    {
+      "service": "traficom_avoin",
+      "id": "kohtaamis_ja_ohittamiskieltoalueet",
+      "style": "kohtaamis_ja_ohittamiskieltoalueet",
+      "rules": 1
+    },
+    {
+      "service": "traficom_avoin",
+      "id": "sisavesien_vertaustasot",
+      "style": "polygon",
+      "rules": 1
+    },
+    {
+      "service": "traficom_avoin",
+      "id": "tuotejako_enc_approach",
+      "style": "tuotejako",
+      "rules": 1
+    },
+    {
+      "service": "traficom_avoin",
+      "id": "tuotejako_enc_berthing",
+      "style": "tuotejako",
+      "rules": 1
+    },
+    {
+      "service": "traficom_avoin",
+      "id": "tuotejako_enc_coastal",
+      "style": "tuotejako",
+      "rules": 1
+    },
+    {
+      "service": "traficom_avoin",
+      "id": "tuotejako_enc_general",
+      "style": "tuotejako",
+      "rules": 1
+    },
+    {
+      "service": "traficom_avoin",
+      "id": "tuotejako_enc_harbour",
+      "style": "tuotejako",
+      "rules": 1
+    },
+    {
+      "service": "traficom_avoin",
+      "id": "tuotejako_kaikki",
+      "style": "tuotejako",
+      "rules": 1
+    },
+    {
+      "service": "traficom_avoin",
+      "id": "tuotejako_merikarttasarjat",
+      "style": "tuotejako",
+      "rules": 1
+    },
+    {
+      "service": "traficom_avoin",
+      "id": "tuotejako_rannikkokartat",
+      "style": "tuotejako",
+      "rules": 1
+    },
+    {
+      "service": "traficom_avoin",
+      "id": "tuotejako_satamakartat",
+      "style": "tuotejako",
+      "rules": 1
+    },
+    {
+      "service": "traficom_avoin",
+      "id": "tuotejako_sisavesikartat",
+      "style": "tuotejako",
+      "rules": 1
+    },
+    {
+      "service": "traficom_avoin",
+      "id": "tuotejako_veneilykartat",
+      "style": "tuotejako",
+      "rules": 1
+    },
+    {
+      "service": "traficom_avoin",
+      "id": "tuotejako_yleiskartat",
+      "style": "tuotejako",
+      "rules": 1
+    },
+    {
+      "service": "traficom_rajoitettu",
+      "id": "DeepWaterRoutePart_A",
+      "style": "reittijakojarjestelma_a",
+      "rules": 6
+    },
+    {
+      "service": "traficom_rajoitettu",
+      "id": "DepthArea_A",
+      "style": "syvyysalue_a",
+      "rules": 4
+    },
+    {
+      "service": "traficom_rajoitettu",
+      "id": "DepthContour_L",
+      "style": "syvyyskayra",
+      "rules": 1
+    },
+    {
+      "service": "traficom_rajoitettu",
+      "id": "DredgedArea_A",
+      "style": "polygon_raja",
+      "rules": 1
+    },
+    {
+      "service": "traficom_rajoitettu",
+      "id": "PrecautionaryArea_A",
+      "style": "rantarakenteet",
+      "rules": 1
+    },
+    {
+      "service": "traficom_rajoitettu",
+      "id": "Sounding_P",
+      "style": "Syvyyspiste_point",
+      "rules": 2
+    },
+    {
+      "service": "traficom_rajoitettu",
+      "id": "TrafficSeaparationLine_L",
+      "style": "line",
+      "rules": 1
+    },
+    {
+      "service": "traficom_rajoitettu",
+      "id": "TrafficSeaparationZone_A",
+      "style": "polygon_raja",
+      "rules": 1
+    },
+    {
+      "service": "traficom_rajoitettu",
+      "id": "TrafficSeparationLine_L",
+      "style": "line",
+      "rules": 1
+    },
+    {
+      "service": "traficom_rajoitettu",
+      "id": "TrafficSeparationSchemeBoundary_L",
+      "style": "line",
+      "rules": 1
+    },
+    {
+      "service": "traficom_rajoitettu",
+      "id": "TrafficSeparationSchemeLanePart_A",
+      "style": "polygon_raja",
+      "rules": 1
+    },
+    {
+      "service": "traficom_rajoitettu",
+      "id": "TrafficSeparationZone_A",
+      "style": "polygon_raja",
+      "rules": 1
+    },
+    {
+      "service": "traficom_rajoitettu",
+      "id": "TwoWayRoutePart_A",
+      "style": "polygon_raja",
+      "rules": 1
+    },
+    {
+      "service": "traficom_rajoitettu",
+      "id": "UnsurveyedArea_A",
+      "style": "polygon_raja",
+      "rules": 1
+    },
+    {
+      "service": "traficom_ilmaliikenne",
+      "id": "CTR_ALUE",
+      "style": "generic",
+      "rules": 4
+    },
+    {
+      "service": "traficom_ilmaliikenne",
+      "id": "TN_AERODROMENODE",
+      "style": "point",
+      "rules": 1
+    },
+    {
+      "service": "traficom_ilmaliikenne",
+      "id": "TN_AIRROUTELINK",
+      "style": "line",
+      "rules": 1
+    },
+    {
+      "service": "traficom_ilmaliikenne",
+      "id": "TN_AIRSPACEAREA",
+      "style": "polygon_raja",
+      "rules": 1
+    },
+    {
+      "service": "traficom_ilmaliikenne",
+      "id": "TN_DESIGNATEDPOINT",
+      "style": "point",
+      "rules": 1
+    },
+    {
+      "service": "traficom_ilmaliikenne",
+      "id": "TN_INSTRUMENTAPPROACHPROCEDURE",
+      "style": "line",
+      "rules": 1
+    },
+    {
+      "service": "traficom_ilmaliikenne",
+      "id": "TN_NAVAID",
+      "style": "point",
+      "rules": 1
+    },
+    {
+      "service": "traficom_ilmaliikenne",
+      "id": "TN_PROCEDURELINK",
+      "style": "line",
+      "rules": 1
+    },
+    {
+      "service": "traficom_ilmaliikenne",
+      "id": "TN_RUNWAYAREA",
+      "style": "polygon_raja",
+      "rules": 1
+    },
+    {
+      "service": "traficom_ilmaliikenne",
+      "id": "TN_RUNWAYCENTERLINEPOINT",
+      "style": "point",
+      "rules": 1
+    },
+    {
+      "service": "traficom_ilmaliikenne",
+      "id": "TN_STANDARDINSTRUMENTARRIVAL",
+      "style": "line",
+      "rules": 1
+    },
+    {
+      "service": "traficom_ilmaliikenne",
+      "id": "TN_STANDARDINSTRUMENTDEPARTURE",
+      "style": "line",
+      "rules": 1
+    },
+    {
+      "service": "traficom_ilmaliikenne",
+      "id": "TN_SURFACECOMPOSITION",
+      "style": "line",
+      "rules": 1
+    },
+    {
+      "service": "mml_au",
+      "id": "AU.MaritimeBoundary",
+      "error": "Palvelulla ei ole ladattavaa symboliikkaa tälle tasolle"
+    },
+    {
+      "service": "mml_au",
+      "id": "AU.MaritimeBoundary.TerritorialSea",
+      "style": "AU.MaritimeBoundary.Default",
+      "rules": 3
+    },
+    {
+      "service": "mml_au",
+      "id": "AU.MaritimeBoundary.ExclusiveEconomicZone",
+      "style": "AU.MaritimeBoundary.Default",
+      "rules": 3
+    },
+    {
+      "service": "mml_au",
+      "id": "AU.MaritimeBoundary.InternalWaters",
+      "style": "AU.MaritimeBoundary.Default",
+      "rules": 3
+    },
+    {
+      "service": "mml_au",
+      "id": "AU.AdministrativeBoundary",
+      "style": "AU.AdministrativeBoundary.Default",
+      "rules": 1
+    },
+    {
+      "service": "mml_au",
+      "id": "AU.AdministrativeUnit",
+      "style": "AU.AdministrativeUnit.Default",
+      "rules": 1
+    },
+    {
+      "service": "mml_au",
+      "id": "AU.Baseline",
+      "style": "AU.Baseline.Default",
+      "rules": 1
+    },
+    {
+      "service": "mml_au",
+      "id": "AU.ExclusiveEconomicZone",
+      "style": "AU.ExclusiveEconomicZone.Default",
+      "rules": 1
+    },
+    {
+      "service": "mml_au",
+      "id": "AU.TerritorialSea",
+      "style": "AU.TerritorialSea.Default",
+      "rules": 1
+    },
+    {
+      "service": "mml_cp",
+      "id": "CP.CadastralBoundary",
+      "style": "CP.CadastralBoundary.Default",
+      "rules": 1
+    },
+    {
+      "service": "mml_cp",
+      "id": "CP.CadastralParcel",
+      "style": "CP.CadastralParcel.Default",
+      "rules": 2
+    }
+  ]
+}

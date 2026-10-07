@@ -61,6 +61,7 @@ class ExecuteFlowTests(unittest.TestCase):
         tool._copy_features_compatible = self._copy
         tool._remove_local_output = lambda path: None
         tool._add_to_map = lambda path: (True, None)
+        tool._prepare_output_style = lambda path, info: None
         tool._layer_mapping = {
             "Osoitteet - OpenStreetMap": {"source": "OpenStreetMap", "id": "osm_addresses", "kind": "osm"},
             "Osoitteet - OpenStreetMap (2)": {"source": "OpenStreetMap", "id": "osm_schools", "kind": "osm"},

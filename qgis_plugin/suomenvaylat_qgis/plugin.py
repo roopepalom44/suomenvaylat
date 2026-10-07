@@ -16,6 +16,7 @@ from qgis.core import (QgsApplication, QgsAuthMethodConfig, QgsDataSourceUri,
 
 from .services import (WFS_SOURCES, OGC_SOURCES, _add_project_layer, _geometry_type_value,
                        _request_json, area_choices, catalog, download, selection_geometry)
+from .service_styles import mml_tile_style
 
 MML_TILEJSON = {
     # QGIS's XYZ vector tile provider uses the Web Mercator tile matrix.
@@ -571,10 +572,15 @@ class SuomenvaylatDialog(QDialog):
                 task.status_text = entry["title"]
                 task.setProgress(100.0 * index / len(plan))
                 try:
+                    first_layer = len(result["layers"])
                     count = download(entry, mask, crs, path, keys.get(entry["source"], ""),
                                      update_count, add_layer=collect)
                     unit = "rasteri" if entry["kind"] in RASTER_KINDS else "kohdetta"
                     result["successes"].append(f"{entry['title']}: {count} {unit}")
+                    for loaded in result["layers"][first_layer:]:
+                        style_status = loaded.customProperty("suomenvaylat/style_status", "")
+                        if style_status:
+                            result["successes"].append(f"  Symboliikka: {style_status}")
                 except DownloadCanceled:
                     path.unlink(missing_ok=True)
                     result["canceled"] = True
@@ -660,10 +666,14 @@ class SuomenvaylatDialog(QDialog):
             uri = QgsDataSourceUri()
             uri.setParam("type", "xyz")
             uri.setParam("url", tiles[0])
+            uri.setParam("styleUrl", mml_tile_style(map_name))
             uri.setAuthConfigId(authcfg)
             layer = QgsVectorTileLayer(bytes(uri.encodedUri()).decode("utf-8"), f"MML — {map_name}")
             if not layer.isValid():
                 raise RuntimeError("QGIS ei voinut avata MML-vektoritiilitasoa")
+            message, ok = layer.loadDefaultStyle()
+            if not ok:
+                raise RuntimeError("MML:n vektoritiilien symboliikka ei avaudu")
             _add_project_layer(layer)
             QMessageBox.information(self, "Suomenväylät", f"Lisättiin: MML — {map_name}")
         except Exception as exc:

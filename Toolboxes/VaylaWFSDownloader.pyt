@@ -22,6 +22,23 @@ import threading
 import concurrent.futures
 import ctypes
 from ctypes import wintypes
+import importlib.util
+
+
+def _load_service_styles():
+    # Installed add-in: beside this toolbox. Source checkout: canonical module
+    # in the QGIS package. Both packages contain the very same implementation.
+    here = os.path.dirname(os.path.abspath(__file__))
+    module_path = os.path.join(here, "service_styles.py")
+    if not os.path.isfile(module_path):
+        module_path = os.path.join(os.path.dirname(here), "qgis_plugin", "suomenvaylat_qgis", "service_styles.py")
+    spec = importlib.util.spec_from_file_location("suomenvaylat_service_styles", module_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+service_styles = _load_service_styles()
 
 
 # MML:n nykyiset avoimet rajapinnat. Kiinteistöaineistot haetaan OGC API
@@ -47,9 +64,7 @@ MML_PROPERTY_COLLECTION_LABELS = {
 }
 MML_VECTOR_TILE_LAYER_IDS = {
     "Taustakartta": MML_TOPO_VECTOR_TILE_TILEJSON,
-    # MML julkaisee taustakartan ja maastokartan nykyisessä avoimessa
-    # vektoritiilipalvelussa saman TileJSON-lähteen kautta. Eri karttatyylit
-    # voidaan vaihtaa ArcGIS Pron vektoritiilikerroksen tyylieditorilla.
+    # Sama tiiliaineisto, mutta valittu esitystyyli haetaan stylejson-palvelusta.
     "Maastokartta": MML_TOPO_VECTOR_TILE_TILEJSON,
     "Kiinteistojaotus": MML_PROPERTY_VECTOR_TILE_TILEJSON,
 }
@@ -1622,13 +1637,97 @@ class VaylaWFSDownloader(object):
                 self._runtime_map_loaded = True
             m = self._runtime_map
             if m:
-                m.addDataFromPath(dataset_path)
+                m.addDataFromPath(getattr(self, "_output_layer_files", {}).get(dataset_path) or dataset_path)
                 return True, None
             return False, "aktiivista karttaa ei ole"
         except Exception as ex:
             if "CURRENT" in str(ex):
                 return False, "CURRENT"
             return False, str(ex)
+
+    def _style_fetch(self, url):
+        status, headers, data, elapsed = self._transport().request(url, timeout=15)
+        if status != 200 or len(data) > service_styles.MAX_STYLE_BYTES:
+            raise service_styles.StyleError("Tyylipyyntö epäonnistui")
+        return data
+
+    def _prepare_output_style(self, dataset_path, info):
+        if not service_styles.style_endpoints(info):
+            return
+        temporary_layer = None
+        try:
+            # Prepare persistent style files even when CURRENT/activeMap is
+            # unavailable (batch runs and standalone ArcGIS Python).
+            temporary_layer = arcpy.management.MakeFeatureLayer(
+                dataset_path, "suomenvaylat_style_" + uuid.uuid4().hex[:10]
+            ).getOutput(0)
+            temporary_layer.name = info.get("title") or os.path.basename(dataset_path)
+            path = self._apply_provider_style(temporary_layer, dataset_path, info)
+            if path:
+                if not hasattr(self, "_output_layer_files"):
+                    self._output_layer_files = {}
+                self._output_layer_files[dataset_path] = path
+        except Exception:
+            self._warn("[VAROITUS] Symboliikan valmistelu epäonnistui; aineisto on tallennettu.")
+        finally:
+            if temporary_layer is not None:
+                try:
+                    arcpy.management.Delete(temporary_layer)
+                except Exception:
+                    pass
+
+    def _apply_provider_style(self, layer, dataset_path, info):
+        """Import SLD into CIM, keeping source SLD and a reusable LYRX."""
+        try:
+            if not hasattr(self, "_style_client"):
+                self._style_client = service_styles.StyleClient(self._style_fetch)
+            entry = dict(info)
+            entry["endpoint"] = self._source_endpoint_with_credentials(info.get("source"), info.get("endpoint"))
+            result = self._style_client.get(entry)
+            if result is None:
+                return
+            root, endpoint = result
+            if str(os.path.dirname(dataset_path)).lower().endswith(".gdb"):
+                base = os.path.join(os.path.dirname(os.path.dirname(dataset_path)), "Suomenvaylat_tyylit",
+                                    os.path.basename(os.path.dirname(dataset_path)) + "_" + os.path.basename(dataset_path))
+            else:
+                base = os.path.splitext(dataset_path)[0]
+            sld_path = base + ".sld"
+            # Save original even when an ArcGIS-specific conversion is unsupported.
+            service_styles.save_sld(root, sld_path)
+            service_styles.localize_graphics(root, endpoint, sld_path, self._style_fetch)
+            service_styles.save_sld(root, sld_path)
+            geometry = arcpy.Describe(dataset_path).shapeType
+            rules, warnings = service_styles.arc_rules(root, geometry)
+            needed = set().union(*(service_styles.filter_fields(rule["filter"]) for rule in rules))
+            available = arcpy.ListFields(dataset_path)
+            fields = {}
+            for name in needed:
+                exact = [f for f in available if f.name.casefold() == name.casefold()]
+                aliases = [f for f in available if str(f.aliasName).casefold() == name.casefold()]
+                match = exact or aliases
+                if len(match) != 1:
+                    raise service_styles.StyleError("Tyylin luokittelukenttää ei tunnistettu: " + name)
+                fields[name] = (match[0].name, match[0].type)
+            names = sorted(needed)
+            if names:
+                # Read only the fields used by the style, never geometry.
+                with arcpy.da.SearchCursor(dataset_path, [fields[name][0] for name in names]) as cursor:
+                    rows = (dict(zip(names, row)) for row in cursor)
+                    renderer = service_styles.arc_renderer(rules, geometry, fields, rows)
+            else:
+                renderer = service_styles.arc_renderer(rules, geometry, fields, [{}])
+            definition = layer.getDefinition("V3")
+            definition.renderer = service_styles.cim_object(arcpy, renderer)
+            layer.setDefinition(definition)
+            layer.saveACopy(base + ".lyrx")
+            self._msg("[INFO] Rajapinnan symboliikka asetettu: {} (SLD ja LYRX tallennettu).".format(layer.name))
+            for warning in warnings:
+                self._warn("[VAROITUS] {}: {}".format(layer.name, warning))
+            return base + ".lyrx"
+        except Exception as ex:
+            text = str(ex) if isinstance(ex, service_styles.StyleError) else "Rajapinnan symboliikan käyttöönotto epäonnistui"
+            self._warn("[VAROITUS] {}: {}. Aineisto on tallennettu.".format(layer.name, text))
 
     def _active_map_for_background(self):
         if not self._runtime_map_loaded:
@@ -1651,8 +1750,8 @@ class VaylaWFSDownloader(object):
         return None
 
     @staticmethod
-    def _move_group_to_map_bottom(active_map, group_layer):
-        """Siirrä taustakarttaryhmä kartan pinon alimmaiseksi, jos mahdollista."""
+    def _place_background_group(active_map, group_layer):
+        """Pidä taustakartta aineistotasojen alla mutta ArcGISin pohjakartan päällä."""
         if group_layer is None:
             return
         move_layer = getattr(active_map, "moveLayer", None)
@@ -1669,8 +1768,18 @@ class VaylaWFSDownloader(object):
                 # yhteensopivuuden vuoksi.
                 if not long_name or "\\" not in long_name:
                     top_level.append(layer)
-            if top_level:
-                move_layer(top_level[-1], group_layer, "AFTER")
+            basemaps = [
+                layer for layer in top_level
+                if getattr(layer, "isBasemapLayer", False)
+            ]
+            if basemaps:
+                # ArcGIS Pron oletuspohjakartta on peittävä. Sen alle siirretty
+                # Aino-WMS jää Contents-paneeliin mutta ei piirry karttaan.
+                move_layer(basemaps[0], group_layer, "BEFORE")
+            else:
+                other_layers = [layer for layer in top_level if layer is not group_layer]
+                if other_layers:
+                    move_layer(other_layers[-1], group_layer, "AFTER")
         except Exception:
             # Piirtojärjestys ei saa estää palvelutason lisäämistä.
             pass
@@ -1740,10 +1849,13 @@ class VaylaWFSDownloader(object):
                 display_name, self._sanitize_url(tilejson_url)
             )
         )
-        # ArcGIS Pro tukee TileJSON-osoitetta VECTOR_TILE-tyyppinä ja välittää
-        # custom_parameters-sanakirjan tiilipyyntöihin.
+        matrix = "WGS84_Pseudo-Mercator" if "WGS84_Pseudo-Mercator" in tilejson_url else "ETRS-TM35FIN"
+        style_url = service_styles.mml_tile_style(display_name, matrix)
+        # A bare TileJSON contains vector geometries but no cartography.
+        # Pro's VECTOR_TILE provider also accepts Mapbox style JSON, including
+        # source URLs, colours, labels and sprite resources.
         layers = active_map.addDataFromPath(
-            tilejson_url,
+            style_url,
             "VECTOR_TILE",
             {"api-key": key},
         )
@@ -1943,7 +2055,7 @@ class VaylaWFSDownloader(object):
         group_name = "Taustakartta" if is_background else "Aino WMS"
         group_layer = self._find_or_create_group_layer(active_map, group_name)
         if is_background:
-            self._move_group_to_map_bottom(active_map, group_layer)
+            self._place_background_group(active_map, group_layer)
         if group_layer is not None:
             try:
                 group_layer.visible = True
@@ -6652,6 +6764,8 @@ class VaylaWFSDownloader(object):
         self._run_had_layer_failures = False
         self._tool_run_start = time.perf_counter()
         self._reserved_output_names = set()
+        self._output_layer_files = {}
+        self._style_client = service_styles.StyleClient(self._style_fetch)
         self._begin_message_owner()
         original_overwrite = arcpy.env.overwriteOutput
         try:
@@ -7678,6 +7792,7 @@ class VaylaWFSDownloader(object):
                         group_output_name = None
                         continue
                     layer_outputs.append({
+                        "style_info": dict(layer_info),
                         "path": group_staged_fc,
                         "output_name": group_output_name,
                         "output_name_is_final": True,
@@ -7868,6 +7983,8 @@ class VaylaWFSDownloader(object):
                 continue
             map_start = time.perf_counter()
             if p:
+                if output.get("style_info"):
+                    self._prepare_output_style(p, output["style_info"])
                 added, add_error = self._add_to_map(p)
                 if added:
                     output["map_s"] = time.perf_counter() - map_start

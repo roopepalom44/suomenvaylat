@@ -895,7 +895,7 @@ class ToolboxHelperTests(unittest.TestCase):
         self.assertTrue(result["vector_tile"].visible)
         self.assertIn(
             (
-                MODULE.MML_PROPERTY_VECTOR_TILE_TILEJSON,
+                MODULE.service_styles.mml_tile_style("Kiinteistojaotus", "ETRS-TM35FIN"),
                 "VECTOR_TILE",
                 {"api-key": "Secret-Key"},
             ),
@@ -1076,8 +1076,32 @@ class ToolboxHelperTests(unittest.TestCase):
                 self.calls.append((reference_layer, move_layer, position))
 
         active_map = Map()
-        self.tool._move_group_to_map_bottom(active_map, background)
+        self.tool._place_background_group(active_map, background)
         self.assertEqual([(roads, background, "AFTER")], active_map.calls)
+
+    def test_aino_background_group_stays_above_opaque_arcgis_basemap(self):
+        roads = types.SimpleNamespace(name="Tiet", longName="Tiet", isBasemapLayer=False)
+        background = types.SimpleNamespace(
+            name="Taustakartta", longName="Taustakartta", isBasemapLayer=False
+        )
+        basemap = types.SimpleNamespace(
+            name="Topographic", longName="Topographic", isBasemapLayer=True
+        )
+
+        class Map:
+            def __init__(self):
+                self.calls = []
+
+            @staticmethod
+            def listLayers():
+                return [roads, background, basemap]
+
+            def moveLayer(self, reference_layer, move_layer, position):
+                self.calls.append((reference_layer, move_layer, position))
+
+        active_map = Map()
+        self.tool._place_background_group(active_map, background)
+        self.assertEqual([(basemap, background, "BEFORE")], active_map.calls)
 
     def test_kapsi_uses_selected_scale_dependent_layer(self):
         self.assertEqual(
