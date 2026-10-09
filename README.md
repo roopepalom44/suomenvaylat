@@ -4,6 +4,11 @@
 
 ArcGIS Pro -laajennus Suomenväylät-aineistojen lataamiseen WFS-rajapinnoista.
 
+**Korjaus 1.0.21:** Väylän ja muiden WFS-lähteiden symboliikka käyttää
+lähderekisterin palveluosoitetta, jos tasoluettelosta puuttuu osoite.
+Symboliikan valmisteluvirhe antaa varoituksen; tallennetut aineistot lisätään
+edelleen kartalle ja lataus valmistuu.
+
 **Rajapintojen symboliikka (1.0.20 / QGIS 0.2.10):** WFS-vektoritasojen
 SLD-oletustyylit ladataan automaattisesti saman palvelun WMS-rajapinnasta.
 ArcGIS Prossa tuetut tyylit muunnetaan CIM-symboliikaksi ja tallennetaan

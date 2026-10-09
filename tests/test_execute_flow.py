@@ -4,6 +4,7 @@ import pathlib
 import sys
 import types
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
@@ -127,6 +128,55 @@ class ExecuteFlowTests(unittest.TestCase):
         )
         self.assertEqual(len(names), len(set(name.casefold() for name in names)))
         self.assertFalse(self.tool._run_had_layer_failures)
+
+    def _run_wfs_with_styles(self):
+        tool = self.tool
+        # Exercise the real style preparation used after final output copies.
+        del tool._prepare_output_style
+        tool._layer_mapping = {
+            "Rataverkko - Väylä": {"source": "Väylä", "id": "rataverkko",
+                                   "kind": "wfs", "endpoint": None},
+            "Rautatieliikennepaikat - Väylä": {
+                "source": "Väylä", "id": "liikennepaikat", "kind": "wfs",
+                "endpoint": "https://example.test/scoped/wfs"},
+        }
+        tool._discover_wfs_schema = lambda *args, **kwargs: None
+        tool._fetch_bbox_feature_chunks = lambda **kwargs: (
+            ["pt1"], 5, 1, {}, True
+        )
+        applied, added = [], []
+        tool._apply_provider_style = lambda layer, path, info: (
+            applied.append((path, dict(info))) or path + ".lyrx"
+        )
+        tool._add_to_map = lambda path: (added.append(path) or True, None)
+        self._run(list(tool._layer_mapping), extra_management={
+            "MakeFeatureLayer": lambda path, name: types.SimpleNamespace(
+                getOutput=lambda index: types.SimpleNamespace(name=name)
+            ),
+        })
+        return applied, added
+
+    def test_wfs_null_endpoint_is_resolved_and_all_outputs_reach_map(self):
+        applied, added = self._run_wfs_with_styles()
+        self.assertEqual(2, len(applied))
+        self.assertEqual(self.tool.wfs_registry.get_endpoint("Väylä"), applied[0][1]["endpoint"])
+        self.assertEqual("https://example.test/scoped/wfs", applied[1][1]["endpoint"])
+        self.assertIsNone(self.tool._layer_mapping["Rataverkko - Väylä"]["endpoint"])
+        self.assertEqual(3, len(self.copies))
+        self.assertEqual(3, len(added))
+        self.assertEqual(2, len(self.tool._output_layer_files))
+        self.assertFalse(self.warnings)
+        self.assertIn("\n=== Ajo suoritettu onnistuneesti ===", self.messages)
+
+    def test_style_discovery_failure_keeps_saved_outputs_and_map_additions(self):
+        with patch.object(MODULE.service_styles, "style_endpoints", side_effect=ValueError("invalid style URL")):
+            applied, added = self._run_wfs_with_styles()
+        self.assertFalse(applied)
+        self.assertEqual(3, len(self.copies))
+        self.assertEqual(3, len(added))
+        self.assertEqual(2, sum("Symboliikan valmistelu epäonnistui" in warning for warning in self.warnings))
+        self.assertFalse(self.tool._run_had_layer_failures)
+        self.assertIn("\n=== Ajo suoritettu onnistuneesti ===", self.messages)
 
     def _run_heavy(self, truncated_kunta):
         tool = self.tool

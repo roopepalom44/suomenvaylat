@@ -1652,17 +1652,23 @@ class VaylaWFSDownloader(object):
         return data
 
     def _prepare_output_style(self, dataset_path, info):
-        if not service_styles.style_endpoints(info):
-            return
         temporary_layer = None
         try:
+            entry = dict(info)
+            # Ordinary WFS catalogs (including cached Väylä entries) omit the
+            # endpoint. Resolve it just as the download does, keeping any
+            # layer-specific service address supplied by the catalog.
+            if entry.get("kind") == "wfs" and not entry.get("endpoint"):
+                entry["endpoint"] = self.wfs_registry.get_endpoint(entry.get("source"))
+            if not service_styles.style_endpoints(entry):
+                return
             # Prepare persistent style files even when CURRENT/activeMap is
             # unavailable (batch runs and standalone ArcGIS Python).
             temporary_layer = arcpy.management.MakeFeatureLayer(
                 dataset_path, "suomenvaylat_style_" + uuid.uuid4().hex[:10]
             ).getOutput(0)
             temporary_layer.name = info.get("title") or os.path.basename(dataset_path)
-            path = self._apply_provider_style(temporary_layer, dataset_path, info)
+            path = self._apply_provider_style(temporary_layer, dataset_path, entry)
             if path:
                 if not hasattr(self, "_output_layer_files"):
                     self._output_layer_files = {}

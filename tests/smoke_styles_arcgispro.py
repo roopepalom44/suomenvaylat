@@ -58,7 +58,11 @@ for index, (fixture, geometry, layer_id, fields, rows) in enumerate(cases):
                     cursor.updateRow(row)
     tool._runtime_map = map_view
     tool._runtime_map_loaded = True
-    tool._prepare_output_style(path, {"kind": "wfs", "id": layer_id, "title": fixture, "endpoint": "https://example.test/ows"})
+    # Väylä catalogs leave endpoint null; styles must resolve the registry URL.
+    tool._prepare_output_style(path, {
+        "kind": "wfs", "id": layer_id, "title": fixture, "source": "Väylä",
+        "endpoint": None if fixture == "vayla_0" else "https://example.test/ows",
+    })
     assert path in tool._output_layer_files, warnings
     assert tool._add_to_map(path)[0]
     layer = next(item for item in map_view.listLayers() if item.name == fixture)

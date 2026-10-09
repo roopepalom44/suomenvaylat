@@ -25,6 +25,15 @@ class StyleDiscoveryTests(unittest.TestCase):
         self.assertEqual([], ss.style_endpoints({"kind": "ogc", "endpoint": "https://example.test/features"}))
         self.assertEqual([], ss.style_endpoints({"kind": "wfs", "endpoint": "https://inspire-wfs.maanmittauslaitos.fi/inspire-wfs/gn"}))
 
+    def test_missing_wfs_endpoint_has_no_style_or_network_request(self):
+        for entry in ({"kind": "wfs"}, {"kind": "wfs", "endpoint": None},
+                      {"kind": "wfs", "endpoint": ""}):
+            with self.subTest(entry=entry):
+                self.assertEqual([], ss.style_endpoints(entry))
+                requests = []
+                self.assertIsNone(ss.StyleClient(lambda url: requests.append(url)).get(entry))
+                self.assertFalse(requests)
+
     def test_oskari_uses_layer_name_and_selected_style_and_tries_public_services(self):
         requests = []
         def fetch(url):

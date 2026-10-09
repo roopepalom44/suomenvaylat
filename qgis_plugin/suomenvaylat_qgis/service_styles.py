@@ -62,9 +62,11 @@ def style_endpoints(entry):
     """
     if entry.get("kind") not in ("wfs", "oskari_wfs"):
         return []
-    endpoint = entry.get("endpoint", "")
     if entry.get("kind") == "oskari_wfs":
         return list(TRAFICOM_WMS)
+    endpoint = entry.get("endpoint") or ""
+    if not endpoint:
+        return []
     parsed = urllib.parse.urlsplit(endpoint)
     path = parsed.path.rstrip("/")
     if path.endswith("/wfs"):
@@ -73,7 +75,7 @@ def style_endpoints(entry):
     # capabilities as if they were a WMS service.
     if parsed.hostname == "inspire-wfs.maanmittauslaitos.fi" and not path.endswith("/ows"):
         return []
-    return [urllib.parse.urlunsplit(parsed._replace(path=path))] if endpoint else []
+    return [urllib.parse.urlunsplit(parsed._replace(path=path))]
 
 
 def parse_xml(data):
