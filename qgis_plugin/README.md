@@ -1,4 +1,4 @@
-# Suomenväylät QGIS (esijulkaisu 0.2.10)
+# Suomenväylät QGIS (esijulkaisu 0.2.11)
 
 QGIS 3.44:lle tehty erillinen, natiivi Python-lisäosa. ArcGIS Pro -laajennus pysyy samassa projektissa.
 
@@ -14,6 +14,7 @@ QGIS 3.44:lle tehty erillinen, natiivi Python-lisäosa. ArcGIS Pro -laajennus py
 - MML:n vektoritiilien esitystyyli ladataan erikseen: Taustakartta ja Maastokartta käyttävät eri Mapbox-tyylejä, Kiinteistöjaotus QGISiin sopivaa pelkistettyä tyyliä.
 
 - Väylän, DigiRoadin, Liiterin, SYKEn, Tilastokeskuksen, Karttapaikan ja Ainon WFS-tasojen haku suoraan palveluiden tasoluetteloista. Useita lähteitä voi valita samaan ajoon.
+- Aino-pyynnöt lähettävät Suomenväylät-User-Agentin. Palvelun Cloudflare estää Pythonin oletustunnisteen virheellä HTTP 403 / 1010 ennen tokenin tarkistusta.
 - MML:n kiinteistöaineistojen ja Karttapaikan maastotietojen OGC API Features -sivutus sekä API-avain HTTP Basic -otsakkeessa.
 - Hallinnolliset aluerajaukset mukana tulevasta GeoPackagesta: koko Suomi, elinvoimakeskus, hyvinvointialue, maakunta ja kunta. Myös projektin oma polygon- tai viivataso kelpaa.
 - WFS- ja OGC-aineistojen rajattu lataus EPSG:3067-GeoPackageen, onnistuneiden tasojen lisäys projektiin. Väylän ja DigiRoadin kohteet tallennetaan kokonaisina kuten ArcGIS Pron CQL-haussa; muut vektoriaineistot leikataan rajaukseen. Oma viivarajaus muutetaan kohteiden konveksiksi peitteeksi kuten ArcGIS Prossa, ja tason valinta rajaa käytettävät kohteet.

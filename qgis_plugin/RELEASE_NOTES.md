@@ -1,3 +1,7 @@
+## Suomenväylät QGIS 0.2.11
+
+- Korjasi Ainon tasoluettelon HTTP 403 -virheen oikeallakin tokenilla: palvelun Cloudflare estää Pythonin oletus-User-Agentin (error code 1010), joten kaikki Ainon urllib-pyynnöt tunnistavat nyt Suomenväylät-lisäosan. Korjaus kattaa WFS- ja WMS-tasoluettelot sekä rajapintatyylit.
+
 ## Suomenväylät QGIS 0.2.2
 
 - Järjesti aineistotyönkulun lähteisiin, aineistovalintaan sekä aluerajaukseen ja tallennukseen.

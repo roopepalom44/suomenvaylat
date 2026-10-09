@@ -69,6 +69,7 @@ UNCLIPPED_WFS_SOURCES = frozenset(["Väylä", "DigiRoad", "Tilastokeskus"])
 # Palvelun testityötilat, joita ei näytetä tasoluettelossa.
 EXCLUDED_WFS_PREFIXES = {"Tilastokeskus": ("testi:",)}
 SENSITIVE_HEADERS = frozenset(["authorization", "proxy-authorization", "cookie"])
+SERVICE_USER_AGENT = "Suomenvaylat-QGIS (+https://github.com/roopepalom44/suomenvaylat)"
 
 
 def _url_origin(url):
@@ -108,6 +109,15 @@ _SAFE_URL_OPENER = urllib.request.build_opener(_SafeRedirectHandler())
 
 def _urlopen(request, timeout=45):
     """``urlopen`` ilman tunnisteiden vuotoa uudelleenohjauksessa."""
+    url = request if isinstance(request, str) else request.full_url
+    if (urllib.parse.urlsplit(url).hostname or "").casefold() == "aino.sitowise.com":
+        # Aino's Cloudflare rejects Python-urllib with HTTP 403 / error 1010
+        # before checking the token. Identify the plugin on every Aino request,
+        # including capabilities and style requests built as Request objects.
+        if isinstance(request, str):
+            request = urllib.request.Request(request)
+        if not request.has_header("User-agent"):
+            request.add_header("User-Agent", SERVICE_USER_AGENT)
     return _SAFE_URL_OPENER.open(request, timeout=timeout)
 
 
@@ -122,7 +132,7 @@ def _add_project_layer(layer):
 
 
 KARTTAKUVA_WMS = "https://karttakuva.maanmittauslaitos.fi/maasto/wms"
-OVERPASS_USER_AGENT = "Suomenvaylat-QGIS (+https://github.com/roopepalom44/suomenvaylat)"
+OVERPASS_USER_AGENT = SERVICE_USER_AGENT
 OVERPASS_ENDPOINTS = [
     "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
     "https://overpass-api.de/api/interpreter",
