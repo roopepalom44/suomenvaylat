@@ -1,6 +1,12 @@
-# Suomenväylät QGIS (esijulkaisu 0.2.11)
+# Suomenväylät QGIS (esijulkaisu 0.2.12)
 
-QGIS 3.44:lle tehty erillinen, natiivi Python-lisäosa. ArcGIS Pro -laajennus pysyy samassa projektissa.
+QGIS 3.34+:lle tehty erillinen, natiivi Python-lisäosa. ArcGIS Pro -laajennus pysyy samassa projektissa.
+
+0.2.12 korjaa taustasäikeen tasojen käsittelyn ja latausten eheystarkistuksen.
+WFS-haku käyttää JSON-muotoa palvelun tukiessa sitä, muulloin GML:ää. Väylän,
+DigiRoadin ja Tilastokeskuksen tarkka aluerajaus lähetetään CQL-suodattimena;
+pitkät suodattimet kulkevat POSTilla. OSM- ja OGC-kohteet puskuroidaan WKB-muodossa
+levylle. [Auditointikorjaukset ja testaus](../docs/AUDIT_FIXES_2026-10-11.md).
 
 ## Asennus
 

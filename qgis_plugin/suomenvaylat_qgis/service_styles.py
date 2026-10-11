@@ -78,10 +78,20 @@ def style_endpoints(entry):
     return [urllib.parse.urlunsplit(parsed._replace(path=path))]
 
 
-def parse_xml(data):
-    if len(data) > MAX_STYLE_BYTES or b"<!DOCTYPE" in data.upper() or b"<!ENTITY" in data.upper():
+def safe_xml(data):
+    declarations = data.replace(b"\x00", b"").upper()
+    if len(data) > MAX_STYLE_BYTES or b"<!DOCTYPE" in declarations or b"<!ENTITY" in declarations:
         raise StyleError("Tyylivastaus on liian suuri tai sisältää DTD-määrityksen")
     root = ET.fromstring(data)
+    errors = [(node.text or "").strip() for node in root.iter()
+              if local(node) in ("ExceptionText", "ServiceException")]
+    if any(errors):
+        raise StyleError("OGC-virhe: " + "; ".join(errors)[:300])
+    return root
+
+
+def parse_xml(data):
+    root = safe_xml(data)
     if local(root) != "StyledLayerDescriptor":
         raise StyleError("Palvelu ei palauttanut SLD-tyyliä")
     return root
@@ -125,7 +135,7 @@ class StyleClient:
                 data = self.fetch(query_url(endpoint, SERVICE="WMS", REQUEST="GetCapabilities", VERSION="1.3.0"))
                 if len(data) > MAX_STYLE_BYTES:
                     raise StyleError("Tasoluettelo on liian suuri")
-                root = ET.fromstring(data)
+                root = safe_xml(data)
                 names = {value(item, "Name") for item in root.iter() if local(item) == "Layer" and value(item, "Name")}
                 self.catalogs[endpoint] = names
             except Exception:

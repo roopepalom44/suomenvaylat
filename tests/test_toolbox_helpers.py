@@ -26,7 +26,7 @@ def load_toolbox_module():
         spec = importlib.util.spec_from_loader(loader.name, loader)
         module = importlib.util.module_from_spec(spec)
         loader.exec_module(module)
-        return module
+        return module.implementation
     finally:
         if old_arcpy is None:
             sys.modules.pop("arcpy", None)
@@ -296,7 +296,7 @@ class ToolboxHelperTests(unittest.TestCase):
                 return False
 
             @staticmethod
-            def read():
+            def read(*args):
                 return '''<WMS_Capabilities xmlns="http://www.opengis.net/wms">
                   <Capability><Layer><Title>Service</Title>
                     <Layer><Name>taustakartat:tausta</Name><Title>Taustakartta</Title></Layer>
@@ -351,7 +351,7 @@ class ToolboxHelperTests(unittest.TestCase):
             def __exit__(self, exc_type, exc, tb):
                 return False
 
-            def read(self):
+            def read(self, *args):
                 return xml
 
         original_open = MODULE._urlopen
@@ -1195,7 +1195,7 @@ class ToolboxHelperTests(unittest.TestCase):
             def __exit__(self, exc_type, exc, tb):
                 return False
 
-            def read(self):
+            def read(self, *args):
                 return b"""<WMS_Capabilities>
                     <Capability><Layer>
                         <Name>ortokuva</Name>
@@ -1295,14 +1295,14 @@ class ToolboxHelperTests(unittest.TestCase):
         self.assertEqual("Kaiteet_abcdef12", name)
 
     def test_removed_execution_checkboxes_are_not_in_toolbox(self):
-        source = TOOLBOX.read_text(encoding="utf-8")
+        source = (TOOLBOX.parent / "arcgis_downloader.py").read_text(encoding="utf-8")
         for parameter_name in (
             "keep_scratch_on_error", "clip_cql_results", "benchmark_copy"
         ):
             self.assertNotIn(parameter_name, source)
 
     def test_osm_branch_defines_mode_for_common_staging_summary(self):
-        source = TOOLBOX.read_text(encoding="utf-8")
+        source = (TOOLBOX.parent / "arcgis_downloader.py").read_text(encoding="utf-8")
         osm_branch = source.index('if layer_kind == "osm":')
         osm_branch_end = source.index('elif layer_kind == "oskari_wms":', osm_branch)
         self.assertIn(
@@ -1340,7 +1340,7 @@ class ToolboxHelperTests(unittest.TestCase):
                 return False
 
             @staticmethod
-            def read():
+            def read(*args):
                 return b'{"elements": [{"type": "node", "id": 1}]}'
 
         calls = []
@@ -1385,7 +1385,7 @@ class ToolboxHelperTests(unittest.TestCase):
             def __exit__(self, exc_type, exc, tb):
                 return False
 
-            def read(self):
+            def read(self, *args):
                 return self.body
 
         responses = [
@@ -1408,7 +1408,7 @@ class ToolboxHelperTests(unittest.TestCase):
         self.assertEqual([], responses)
 
     def test_poi_geojson_conversion_explicitly_uses_point_geometry(self):
-        source = TOOLBOX.read_text(encoding="utf-8")
+        source = (TOOLBOX.parent / "arcgis_downloader.py").read_text(encoding="utf-8")
         self.assertIn(
             'arcpy.conversion.JSONToFeatures(temp_json_path, temp_fc, "POINT")',
             source,
@@ -1573,7 +1573,7 @@ class ToolboxHelperTests(unittest.TestCase):
             def __exit__(self, exc_type, exc, tb):
                 return False
 
-            def read(self):
+            def read(self, *args):
                 return schema
 
         original = MODULE._urlopen
@@ -1609,7 +1609,7 @@ class ToolboxHelperTests(unittest.TestCase):
             def __exit__(self, exc_type, exc, tb):
                 return False
 
-            def read(self):
+            def read(self, *args):
                 if self.fail:
                     raise MODULE.http.client.IncompleteRead(b"\xff\xd8partial")
                 return b"\xff\xd8complete\xff\xd9"

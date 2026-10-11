@@ -7,7 +7,8 @@ from pathlib import Path
 from qgis.core import QgsApplication
 from qgis.PyQt.QtCore import Qt
 
-QgsApplication.setPrefixPath('C:/Program Files/QGIS 3.44.14/apps/qgis-ltr', True)
+if sys.platform == 'win32':
+    QgsApplication.setPrefixPath('C:/Program Files/QGIS 3.44.14/apps/qgis-ltr', True)
 app = QgsApplication([], False)
 app.initQgis()
 
@@ -20,6 +21,11 @@ def checked_item(dialog, source):
                 if dialog.sources.item(i).text() == source)
 
 
+def visible_items(dialog):
+    return [dialog.layers.item(index) for index in range(dialog.layers.count())
+            if not dialog.layers.item(index).isHidden()]
+
+
 def fake_catalog(source, key='', password=''):
     titles = {'Väylä': 'Ensimmäinen', 'DigiRoad': 'Toinen', 'Kapsi': 'Kolmas'}
     return ([{'source': source, 'kind': 'wfs', 'id': source.lower(),
@@ -28,12 +34,12 @@ def fake_catalog(source, key='', password=''):
 
 original_catalog = plugin_module.catalog
 original_selection_geometry = plugin_module.selection_geometry
-original_download = plugin_module.download
+original_download = plugin_module.download_to_files
 original_information = plugin_module.QMessageBox.information
 plugin_module.catalog = fake_catalog
 plugin_module.selection_geometry = lambda *args: (None, None)
 downloaded = []
-plugin_module.download = lambda entry, mask, crs, path, key, progress, **kwargs: downloaded.append(entry['source']) or 1
+plugin_module.download_to_files = lambda entry, mask, crs, path, context, key, progress, **kwargs: (downloaded.append(entry['source']) or 1, [])
 plugin_module.QMessageBox.information = lambda *args: plugin_module.QMessageBox.Ok
 
 try:
@@ -43,22 +49,23 @@ try:
     dialog._load_catalog()
     for query in ('Ensimmäinen', 'Toinen'):
         dialog.search.setText(query)
-        assert dialog.layers.count() == 1
-        dialog.layers.item(0).setCheckState(Qt.Checked)
+        dialog._filter_catalog()
+        assert len(visible_items(dialog)) == 1
+        visible_items(dialog)[0].setCheckState(Qt.Checked)
     assert len(dialog._selected_entries) == 2
 
     checked_item(dialog, 'Väylä').setCheckState(Qt.Unchecked)
     checked_item(dialog, 'DigiRoad').setCheckState(Qt.Unchecked)
     dialog._load_catalog()
-    assert dialog.layers.count() == 0
+    assert not visible_items(dialog)
     assert len(dialog._selected_entries) == 2
     assert dialog.run_button.isEnabled()
 
     checked_item(dialog, 'Kapsi').setCheckState(Qt.Checked)
     dialog.search.setText('Kolmas')
     dialog._load_catalog()
-    assert dialog.layers.count() == 1
-    dialog.layers.item(0).setCheckState(Qt.Checked)
+    assert len(visible_items(dialog)) == 1
+    visible_items(dialog)[0].setCheckState(Qt.Checked)
     assert len(dialog._selected_entries) == 3
 
     with tempfile.TemporaryDirectory() as folder:
@@ -70,5 +77,5 @@ try:
 finally:
     plugin_module.catalog = original_catalog
     plugin_module.selection_geometry = original_selection_geometry
-    plugin_module.download = original_download
+    plugin_module.download_to_files = original_download
     plugin_module.QMessageBox.information = original_information

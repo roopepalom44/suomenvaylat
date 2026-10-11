@@ -1,3 +1,12 @@
+## Suomenväylät QGIS 0.2.12
+
+- Taustatehtävät palauttavat tiedostojen metatiedot; karttatasot ja tyylit avataan pääsäikeessä.
+- WFS tarkistaa sivutuksen ja kokonaismäärän. JSON-muoto valitaan palvelun tuen mukaan, ja GML toimii varamuotona. CQL-suodatus käyttää skeeman geometriakenttää ja pitkissä pyynnöissä POSTia.
+- OGC ja OSM käyttävät WKB-puskuria levyllä. Kirjoitusvaiheen keskeytys siivoaa vajaan tiedoston, ja Z/M-koordinaatit säilyvät.
+- HTTP-virheet yritetään tarvittaessa uudelleen, OGC-virhetekstit jäsennetään, XML-vastausten koko ja DTD-määritykset tarkistetaan.
+- Aluenimet välimuistitetaan, tasoluettelot haetaan rinnakkain ja hakusuodatin viivästetään 200 ms. Karttakuvan WMTS-tasot ovat käytettävissä WMS:n rinnalla; ortokuvan WMS käyttää JPEG:iä.
+- Vähimmäisversio on QGIS 3.34; vanhempien versioiden GeoJSON-geometria luetaan OGR:n kautta. QGIS-testit kuuluvat GitHubin julkaisun edellyttämiin tarkistuksiin.
+
 ## Suomenväylät QGIS 0.2.11
 
 - Korjasi Ainon tasoluettelon HTTP 403 -virheen oikeallakin tokenilla: palvelun Cloudflare estää Pythonin oletus-User-Agentin (error code 1010), joten kaikki Ainon urllib-pyynnöt tunnistavat nyt Suomenväylät-lisäosan. Korjaus kattaa WFS- ja WMS-tasoluettelot sekä rajapintatyylit.

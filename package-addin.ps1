@@ -127,7 +127,7 @@ catch {
 
 if (-not $typesValidated) {
     $assemblyText = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($assemblySource))
-    foreach ($requiredType in @('Module1', 'OpenSuomenvaylatToolButton')) {
+    foreach ($requiredType in @('Module1', 'OpenSuomenvaylatToolButton', 'OpenBasemapToolButton')) {
         if (-not $assemblyText.Contains($requiredType)) {
             throw "Assembly does not contain the expected add-in type '$requiredType': $assemblySource. Build the current C# project or pass the correct DLL with -AssemblyPath."
         }
@@ -150,6 +150,11 @@ $packageFiles = @(
     @{ Relative = 'Install\suomenvaylat.deps.json'; Source = (Join-Path $assemblyDirectory 'suomenvaylat.deps.json'); Required = $false },
     @{ Relative = 'Install\suomenvaylat.runtimeconfig.json'; Source = (Join-Path $assemblyDirectory 'suomenvaylat.runtimeconfig.json'); Required = $false },
     @{ Relative = 'Install\Toolboxes\VaylaWFSDownloader.pyt'; Source = (Join-Path $root 'Toolboxes\VaylaWFSDownloader.pyt'); Required = $true },
+    @{ Relative = 'Install\Toolboxes\arcgis_downloader.py'; Source = (Join-Path $root 'Toolboxes\arcgis_downloader.py'); Required = $true },
+    @{ Relative = 'Install\Toolboxes\arcgis_support.py'; Source = (Join-Path $root 'Toolboxes\arcgis_support.py'); Required = $true },
+    @{ Relative = 'Install\Toolboxes\service_network.py'; Source = (Join-Path $root 'qgis_plugin\suomenvaylat_qgis\service_network.py'); Required = $true },
+    @{ Relative = 'Install\Toolboxes\osm_geometry.py'; Source = (Join-Path $root 'qgis_plugin\suomenvaylat_qgis\osm_geometry.py'); Required = $true },
+    @{ Relative = 'Install\Toolboxes\osm_poi_classes.json'; Source = (Join-Path $root 'qgis_plugin\suomenvaylat_qgis\osm_poi_classes.json'); Required = $true },
     @{ Relative = 'Install\Toolboxes\service_styles.py'; Source = (Join-Path $root 'qgis_plugin\suomenvaylat_qgis\service_styles.py'); Required = $true },
     @{ Relative = 'Install\Toolboxes\Resources\hallinnolliset_aluejaot.gpkg'; Source = (Join-Path $root 'Toolboxes\Resources\hallinnolliset_aluejaot.gpkg'); Required = $true }
 )

@@ -3,7 +3,7 @@
 from pathlib import Path
 from qgis.PyQt.QtGui import QIcon
 
-from qgis.PyQt.QtCore import Qt, QUrlQuery
+from qgis.PyQt.QtCore import Qt, QUrlQuery, QTimer, pyqtSignal
 from qgis.PyQt.QtWidgets import (
     QAction, QAbstractItemView, QComboBox, QDialog, QDialogButtonBox,
     QFileDialog, QFormLayout, QFrame, QGroupBox, QHBoxLayout, QLabel, QLineEdit,
@@ -15,7 +15,8 @@ from qgis.core import (QgsApplication, QgsAuthMethodConfig, QgsDataSourceUri,
                        QgsVectorLayer, QgsVectorTileLayer)
 
 from .services import (WFS_SOURCES, OGC_SOURCES, _add_project_layer, _geometry_type_value,
-                       _request_json, area_choices, catalog, download, selection_geometry)
+                       _request_json, area_choices, catalog, download_to_files, selection_geometry,
+                       open_downloaded_layer, cleanup_output)
 from .service_styles import mml_tile_style
 
 MML_TILEJSON = {
@@ -31,7 +32,7 @@ class DownloadCanceled(Exception):
 
 
 RASTER_KINDS = {"kapsi_wms", "oskari_wms", "oskari_wmts"}
-LIVE_KINDS = {"karttakuva_wms", "aino_wms"}
+LIVE_KINDS = {"karttakuva_wms", "karttakuva_wmts", "aino_wms"}
 
 
 def store_basic_auth(name, username, password):
@@ -68,6 +69,8 @@ def store_basic_auth(name, username, password):
 class FunctionTask(QgsTask):
     """Aja verkko- ja tiedostotyö taustalla ja palauta tulos pääsäikeeseen."""
 
+    statusChanged = pyqtSignal(str)
+
     def __init__(self, description, work, on_done):
         super().__init__(description, QgsTask.CanCancel)
         self._work = work
@@ -75,6 +78,10 @@ class FunctionTask(QgsTask):
         self.result_value = None
         self.error = None
         self.status_text = ""
+
+    def set_status(self, text):
+        self.status_text = text
+        self.statusChanged.emit(text)
 
     def run(self):
         try:
@@ -181,7 +188,11 @@ class SuomenvaylatDialog(QDialog):
         catalog_row = QHBoxLayout()
         self.search = QLineEdit()
         self.search.setPlaceholderText("Hae nimellä tai tunnuksella…")
-        self.search.textChanged.connect(self._filter_catalog)
+        self._search_timer = QTimer(self)
+        self._search_timer.setSingleShot(True)
+        self._search_timer.setInterval(200)
+        self._search_timer.timeout.connect(self._filter_catalog)
+        self.search.textChanged.connect(lambda: self._search_timer.start())
         catalog_row.addWidget(self.search)
         self.refresh_button = QPushButton("Hae tasot")
         self.refresh_button.clicked.connect(self._load_catalog)
@@ -398,17 +409,18 @@ class SuomenvaylatDialog(QDialog):
         query = self.search.text().casefold()
         self.layers.blockSignals(True)
         try:
-            self.layers.clear()
-            for entry in self.entries:
-                text = f"{entry['source']} — {entry['title']} ({entry['id']})"
-                if query not in text.casefold():
-                    continue
-                key = self._entry_key(entry)
-                item = QListWidgetItem(text)
-                item.setData(Qt.UserRole, entry)
-                item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
-                item.setCheckState(Qt.Checked if key in self._selected_entries else Qt.Unchecked)
-                self.layers.addItem(item)
+            if getattr(self, "_display_entries", None) is not self.entries:
+                self.layers.clear()
+                for entry in self.entries:
+                    item = QListWidgetItem(f"{entry['source']} — {entry['title']} ({entry['id']})")
+                    item.setData(Qt.UserRole, entry)
+                    item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+                    self.layers.addItem(item)
+                self._display_entries = self.entries
+            for index in range(self.layers.count()):
+                item = self.layers.item(index)
+                item.setHidden(query not in item.text().casefold())
+                item.setCheckState(Qt.Checked if self._entry_key(item.data(Qt.UserRole)) in self._selected_entries else Qt.Unchecked)
         finally:
             self.layers.blockSignals(False)
         self._update_layer_selection_state()
@@ -428,7 +440,9 @@ class SuomenvaylatDialog(QDialog):
 
     def _select_visible_layers(self):
         for index in range(self.layers.count()):
-            self.layers.item(index).setCheckState(Qt.Checked)
+            item = self.layers.item(index)
+            if not item.isHidden():
+                item.setCheckState(Qt.Checked)
 
     def _clear_layer_selection(self):
         self._selected_entries.clear()
@@ -446,8 +460,7 @@ class SuomenvaylatDialog(QDialog):
         noun = "aineisto" if count == 1 else "aineistoa"
         self.selection_summary.setText(f"{count} {noun} valittuna")
         self.run_button.setEnabled(count > 0)
-        live_kinds = {"karttakuva_wms", "aino_wms"}
-        needs_files = any(entry.get("kind") not in live_kinds for entry in selected)
+        needs_files = any(entry.get("kind") not in LIVE_KINDS for entry in selected)
         self.area_group.setEnabled(needs_files)
         self.output_group.setEnabled(needs_files)
         if not selected:
@@ -522,7 +535,7 @@ class SuomenvaylatDialog(QDialog):
         # Live-tasot lisätään heti pääsäikeessä: ne eivät lataa tiedostoja.
         for entry in live:
             try:
-                if entry["kind"] == "karttakuva_wms":
+                if entry["kind"] in {"karttakuva_wms", "karttakuva_wmts"}:
                     self._add_karttakuva(entry)
                 else:
                     self._add_aino_wms(entry)
@@ -535,6 +548,7 @@ class SuomenvaylatDialog(QDialog):
 
         keys = {entry["source"]: self._key_for_source(entry["source"]) for entry in files}
         plan = []
+        context = QgsProject.instance().transformContext()
         reserved = set()
         for entry in files:
             base = "".join(ch if ch.isalnum() or ch in "_-" else "_" for ch in entry["id"].split(":")[-1])[:60]
@@ -548,45 +562,35 @@ class SuomenvaylatDialog(QDialog):
             plan.append((entry, path))
 
         def work(task):
-            result = {"successes": [], "failures": [], "layers": [], "canceled": False}
-            main_thread = QgsApplication.instance().thread()
-
-            def collect(layer):
-                # Taustasäikeessä luotu taso siirretään pääsäikeeseen ennen
-                # kuin finished() lisää sen projektiin.
-                if not self.run_tasks_synchronously:
-                    layer.moveToThread(main_thread)
-                result["layers"].append(layer)
+            result = {"successes": [], "failures": [], "outputs": [], "canceled": False}
 
             for index, (entry, path) in enumerate(plan):
                 if task.isCanceled():
                     result["canceled"] = True
                     break
 
-                def update_count(count, index=index, entry=entry):
+                def update_count(count, total=None, stage="Ladataan", index=index, entry=entry):
                     if task.isCanceled():
                         raise DownloadCanceled()
-                    task.status_text = f"{entry['title']} — {count} kohdetta"
-                    task.setProgress(100.0 * (index + min(count, 999) / 1000.0) / len(plan))
+                    task.set_status(f"{entry['title']} — {stage.lower()}: {count:,} kohdetta".replace(",", " "))
+                    if total and total > 0:
+                        task.setProgress(100.0 * (index + min(count / total, .99)) / len(plan))
 
-                task.status_text = entry["title"]
+                task.set_status(entry["title"])
                 task.setProgress(100.0 * index / len(plan))
                 try:
-                    first_layer = len(result["layers"])
-                    count = download(entry, mask, crs, path, keys.get(entry["source"], ""),
-                                     update_count, add_layer=collect)
+                    count, outputs = download_to_files(entry, mask, crs, path, context,
+                                                       keys.get(entry["source"], ""), update_count)
+                    result["outputs"].extend((entry, item) for item in outputs)
                     unit = "rasteri" if entry["kind"] in RASTER_KINDS else "kohdetta"
                     result["successes"].append(f"{entry['title']}: {count} {unit}")
-                    for loaded in result["layers"][first_layer:]:
-                        style_status = loaded.customProperty("suomenvaylat/style_status", "")
-                        if style_status:
-                            result["successes"].append(f"  Symboliikka: {style_status}")
+                    task.setProgress(100.0 * (index + 1) / len(plan))
                 except DownloadCanceled:
-                    path.unlink(missing_ok=True)
+                    cleanup_output(path)
                     result["canceled"] = True
                     break
                 except Exception as exc:
-                    path.unlink(missing_ok=True)
+                    cleanup_output(path)
                     result["failures"].append(f"{entry['title']}: {exc}")
             return result
 
@@ -595,14 +599,15 @@ class SuomenvaylatDialog(QDialog):
             self.run_button.setEnabled(bool(self._selected_entries))
             self.cancel_button.setEnabled(False)
             self.status_label.setText("")
-            result = task.result_value or {"successes": [], "failures": [], "layers": [], "canceled": True}
+            result = task.result_value or {"successes": [], "failures": [], "outputs": [], "canceled": True}
             if not ok and task.error is not None:
                 result["failures"].append(str(task.error))
-            for added in result["layers"]:
+            for entry, item in result["outputs"]:
                 try:
+                    added = open_downloaded_layer(item, entry)
                     _add_project_layer(added)
                 except Exception as exc:
-                    result["failures"].append(f"{added.name()}: {exc}")
+                    result["failures"].append(f"{item['title']}: {exc}")
             self._show_download_summary(successes + result["successes"], failures + result["failures"],
                                         result["canceled"] or task.isCanceled(), project_crs_missing)
 
@@ -610,6 +615,7 @@ class SuomenvaylatDialog(QDialog):
         task.progressChanged.connect(
             lambda value: self.status_label.setText(f"{task.status_text} ({value:.0f} %)")
         )
+        task.statusChanged.connect(self.status_label.setText)
         self._download_task = task
         self.run_button.setEnabled(False)
         self.cancel_button.setEnabled(True)
@@ -644,7 +650,8 @@ class SuomenvaylatDialog(QDialog):
             "Kapsi — Ortokuva": ("https://tiles.kartat.kapsi.fi/ortokuva", "ortokuva"),
         }
         url, layer_name = services[title]
-        uri = f"crs=EPSG:3067&dpiMode=7&format=image/png&layers={layer_name}&styles=&url={url}"
+        fmt = "image/jpeg" if "ortokuva" in layer_name.casefold() else "image/png"
+        uri = f"crs=EPSG:3067&dpiMode=7&format={fmt}&layers={layer_name}&styles=&url={url}"
         layer = QgsRasterLayer(uri, title, "wms")
         if layer.isValid():
             _add_project_layer(layer)
@@ -673,7 +680,8 @@ class SuomenvaylatDialog(QDialog):
                 raise RuntimeError("QGIS ei voinut avata MML-vektoritiilitasoa")
             message, ok = layer.loadDefaultStyle()
             if not ok:
-                raise RuntimeError("MML:n vektoritiilien symboliikka ei avaudu")
+                from qgis.core import QgsMessageLog, Qgis
+                QgsMessageLog.logMessage("MML:n oletustyyli ei avaudu: " + message, "Suomenväylät", Qgis.Warning)
             _add_project_layer(layer)
             QMessageBox.information(self, "Suomenväylät", f"Lisättiin: MML — {map_name}")
         except Exception as exc:
@@ -691,6 +699,10 @@ class SuomenvaylatDialog(QDialog):
                             "layers": entry["id"], "styles": "", "url": entry["endpoint"],
                             "authcfg": authcfg}.items():
             uri.setParam(name, value)
+        if entry["kind"] == "karttakuva_wmts":
+            uri.setParam("tileMatrixSet", entry["matrix"])
+            uri.setParam("styles", entry["style"])
+            uri.setParam("format", entry["format"])
         layer = QgsRasterLayer(bytes(uri.encodedUri()).decode("utf-8"),
                                f"MML Karttakuva — {entry['title']}", "wms")
         if not layer.isValid():

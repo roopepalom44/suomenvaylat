@@ -3,17 +3,10 @@ from qgis.core import QgsApplication, QgsProject
 QgsApplication.setPrefixPath('C:/Program Files/QGIS 3.44.14/apps/qgis-ltr', True)
 app = QgsApplication([], False)
 app.initQgis()
-from suomenvaylat_qgis.services import catalog, selection_geometry, download, _open_remote_layer
-from qgis.core import QgsCoordinateTransform, QgsFeatureRequest, QgsGeometry
+from suomenvaylat_qgis.services import catalog, selection_geometry, download
 entries, errors = catalog('Väylä')
 assert entries and not errors
 mask, crs = selection_geometry('Kunta/Kaupunki', ['Helsinki'])
-layer = _open_remote_layer(entries[0])
-source_mask = QgsGeometry(mask)
-source_mask.transform(QgsCoordinateTransform(crs, layer.crs(), QgsProject.instance()))
-request = QgsFeatureRequest().setFilterRect(source_mask.boundingBox()).setLimit(5)
-print('debug', layer.crs().authid(), source_mask.boundingBox().toString(),
-      [(f.id(), f.geometry().intersects(source_mask)) for f in layer.getFeatures(request)], flush=True)
 path = Path(__file__).parent / 'smoke_vayla.gpkg'
 path.unlink(missing_ok=True)
 try:

@@ -31,11 +31,31 @@ jobs:
 
       - name: Static checks
         run: |
-          python -m pyflakes Toolboxes/VaylaWFSDownloader.pyt qgis_plugin/suomenvaylat_qgis tests
-          python -m py_compile Toolboxes/VaylaWFSDownloader.pyt qgis_plugin/package.py
+          python -m pyflakes Toolboxes qgis_plugin/suomenvaylat_qgis tests
+          python -m py_compile Toolboxes/VaylaWFSDownloader.pyt Toolboxes/arcgis_downloader.py Toolboxes/arcgis_support.py qgis_plugin/package.py
 
       - name: Unit tests (ilman arcpyä ja verkkoa)
         run: python -m unittest discover -s tests -v
 
       - name: QGIS plugin package
         run: python qgis_plugin/package.py
+
+  qgis-offline:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      QT_QPA_PLATFORM: offscreen
+      QGIS_PREFIX_PATH: /usr
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Install native QGIS and Python bindings
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y qgis python3-qgis
+      - name: Offline QGIS geometry, file, UI and worker regressions
+        run: |
+          /usr/bin/python3 qgis_plugin/smoke_audit_fixes.py
+          /usr/bin/python3 qgis_plugin/smoke_selection.py
+          /usr/bin/python3 qgis_plugin/test_downloads.py

@@ -4,6 +4,13 @@
 
 ArcGIS Pro -laajennus Suomenväylät-aineistojen lataamiseen WFS-rajapinnoista.
 
+**Auditointikorjaukset 1.0.22 / QGIS 0.2.12:** QGIS lataa tiedostot taustalla
+ja avaa karttatasot pääsäikeessä. WFS-sivutus tarkistaa aineiston eheyden,
+ja GeoPackage-kirjoituksen voi keskeyttää. ArcGIS käyttää pakattuja HTTP-vastauksia,
+korjaa tarvittaessa myös rajausgeometrian ja näyttää tasokohtaisen edistymisen.
+Ribbonissa on oma Taustakartat-painike. [Kaikkien 36 auditointilöydöksen käsittely
+ja validointi](docs/AUDIT_FIXES_2026-10-11.md).
+
 **Korjaus 1.0.21:** Väylän ja muiden WFS-lähteiden symboliikka käyttää
 lähderekisterin palveluosoitetta, jos tasoluettelosta puuttuu osoite.
 Symboliikan valmisteluvirhe antaa varoituksen; tallennetut aineistot lisätään

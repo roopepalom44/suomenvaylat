@@ -257,7 +257,7 @@ class ExecuteFlowTests(unittest.TestCase):
             ["Osoitteet - OpenStreetMap (2)"], clip=clip,
             extra_management={"RepairGeometry": lambda fc, option: repairs.append((fc, option))},
         )
-        self.assertEqual([("pt3", "DELETE_NULL")], repairs)
+        self.assertEqual([("pt3", "DELETE_NULL"), ("boundary_fc", "DELETE_NULL")], repairs)
         self.assertEqual(["pt3", "pt3"], clip_calls)
         self.assertFalse(self.tool._run_had_layer_failures)
         self.assertIn("Osoitteet", [name for _, name in self.copies])

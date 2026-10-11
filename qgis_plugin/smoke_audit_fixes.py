@@ -6,6 +6,7 @@ Set QGIS_PREFIX_PATH if QGIS is not under /usr (Windows: ...\\apps\\qgis-ltr).
 """
 
 import os
+import json
 import sys
 import tempfile
 import time
@@ -51,6 +52,14 @@ def memory_layer(kind, wkts, name="layer"):
     layer.dataProvider().addFeatures(features)
     layer.updateExtents()
     return layer
+
+
+def write_fixture(entry, layer, mask, crs, path, add_layer=None, clip=True):
+    pages = [[{"geometry": json.loads(feature.geometry().asJson()),
+               "properties": dict(zip((field.name() for field in layer.fields()), feature.attributes()))}
+              for feature in layer.getFeatures()]]
+    return services._write_pages(entry, pages, layer.crs(), mask, crs, path, None,
+                                 lambda item: add_layer(services.open_downloaded_layer(item, entry)), clip=clip)
 
 
 # 1. Oma viivarajaus = konveksi peite, valinta rajaa kohteet.
@@ -141,7 +150,7 @@ with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as folder:
     lengths = {}
     for source in ("Väylä", "Liiteri"):
         added = []
-        services._download_vector_layer(
+        write_fixture(
             {"id": f"test:{source}", "title": source, "source": source}, long_line, square_mask, tm35,
             Path(folder) / f"wfs_{len(lengths)}.gpkg", add_layer=added.append,
             clip=source not in services.UNCLIPPED_WFS_SOURCES)
@@ -158,7 +167,7 @@ with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as folder:
     raw = QgsGeometry(next(touching.getFeatures()).geometry()).intersection(square_mask)
     assert QgsWkbTypes.flatType(raw.wkbType()) == QgsWkbTypes.GeometryCollection, raw.asWkt()
     added = []
-    services._download_vector_layer(
+    write_fixture(
         {"id": "test:touching", "title": "Touching", "source": "Liiteri"}, touching, square_mask, tm35,
         Path(folder) / "touching.gpkg", add_layer=added.append, clip=True)
     assert added[0].crs().authid() == "EPSG:3067", added[0].crs().authid()
@@ -185,20 +194,30 @@ plugin_module.QMessageBox.information = lambda *args: None
 plugin_module.QMessageBox.warning = lambda *args: None
 plugin_module.QMessageBox.critical = lambda *args: (_ for _ in ()).throw(RuntimeError(str(args)))
 plugin_module.catalog = lambda source, key="", password="": ([{
-    "source": source, "kind": "wfs", "id": "demo:layer", "title": "Demo",
+    "source": source, "kind": "ogc", "id": "demo", "title": "Demo tulos",
     "endpoint": "https://example.test/"}], [])
 downloaded = []
 
 
-def fake_download(entry, mask, crs, path, key, progress, add_layer=None):
-    progress(1)
-    layer = memory_layer("Point", ["POINT(385500 6670500)"], "Demo tulos")
-    add_layer(layer)
-    downloaded.append(str(path))
-    return 1
+original_json = services._request_json
+worker_threads = []
+import threading
+main_thread = threading.get_ident()
 
+def fake_json(url, key=""):
+    worker_threads.append(threading.get_ident())
+    return {"features": [{"type": "Feature", "geometry": {"type": "Point", "coordinates": [lon, lat]},
+                          "properties": {"a": 1}}]}
 
-plugin_module.download = fake_download
+services._request_json = fake_json
+original_download = plugin_module.download_to_files
+
+def track_download(*args, **kwargs):
+    value = original_download(*args, **kwargs)
+    downloaded.append(value)
+    return value
+
+plugin_module.download_to_files = track_download
 plugin_module.selection_geometry = lambda *args: (square_mask, tm35)
 dialog = plugin_module.SuomenvaylatDialog()
 
@@ -219,7 +238,9 @@ with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as folder:
     dialog.output.setText(folder)
     dialog._run_download()
     wait_for(lambda: dialog._download_task is None)
+services._request_json = original_json
 assert len(downloaded) == 1
+assert worker_threads and all(value != main_thread for value in worker_threads)
 assert any(layer.name() == "Demo tulos" for layer in project.mapLayers().values())
 print("background task download passed", flush=True)
 print("ALL QGIS AUDIT SMOKE CHECKS PASSED", flush=True)
