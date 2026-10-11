@@ -30,7 +30,7 @@ Taustaa korjauksista (ks. myös README.md ja docs/ARCGIS_PRO_TESTIT.md, osio 12)
 - Authorization-otsake pudotetaan uudelleenohjauksessa toiselle hostille,
   HTTPS->HTTP estetty, 4xx/varmennevirheitä ei uusita.
 - Rinnakkaisen esihaun lokiviestit kirjoitetaan pääsäikeestä.
-- Taustakarttatyökalu palauttaa arcpy.env.overwriteOutput-asetuksen ja käyttää
+- Suomenväylät palauttaa arcpy.env.overwriteOutput-asetuksen ja käyttää
   Kapsille ajokohtaista scratchia.
 - Legacy MML WMTS -koodi (mml_raster) poistettiin.
 
@@ -96,10 +96,11 @@ VAIHEET
    G. Monikuntarajaus: Väylä-taso "Kunta/Kaupunki" = "Helsinki;Espoo;Vantaa".
       -> lokin CQL-geometrian osa-/pistemäärä kattaa kaikki kolme; tuloksen
       extent ulottuu kaikkiin kuntiin.
-   H. Taustakarttatyökalu: aseta arcpy.env.overwriteOutput = False, aja
-      arcpy.MMLBasemapDownloader_vayla_wfs_lataus Kapsi-palvelulla pienelle
+   H. Taustakartat: aseta arcpy.env.overwriteOutput = False, aja
+      arcpy.VaylaWFSDownloader_vayla_wfs_lataus Kapsi-lähteellä pienelle
       alueelle ja varmista, että overwriteOutput on ajon jälkeen edelleen False
-      ja JPG + .jgw syntyivät tallennuskohteen rasterikansioon.
+      ja JPG + .jgw syntyivät tallennuskohteen rasterikansioon. Valitse samalla
+      työkalulla MML:n vektoritiilikartta ja varmista, ettei se edellytä rajausta.
    I. Sivutus ja katkaisu: aja monisivuinen taso (esim. DigiRoad "Linkki"
       maakuntarajauksella). -> ei "vaillinainen"-virhettä, jos data on täysi;
       tulosmäärä vastaa palvelun numberMatched-arvoa (tarkista suoralla

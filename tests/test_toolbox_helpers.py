@@ -852,12 +852,9 @@ class ToolboxHelperTests(unittest.TestCase):
             MODULE.MML_VECTOR_TILE_LAYER_IDS["Kiinteistojaotus"],
         )
 
-        basemap = MODULE.MMLBasemapDownloader.__new__(MODULE.MMLBasemapDownloader)
-        basemap._mml_layer_mapping = {}
-        self.assertEqual(
-            ["Taustakartta", "Maastokartta", "Kiinteistojaotus"],
-            basemap._get_basemap_layers_cached("MML"),
-        )
+        entries = self.tool._get_mml_vector_tile_layers()
+        self.assertEqual(["Taustakartta", "Maastokartta", "Kiinteistojaotus"], [entry["style"] for entry in entries])
+        self.assertTrue(all(entry["kind"] == "mml_vector_tile" for entry in entries))
 
     def test_mml_vector_tile_is_added_with_custom_api_key(self):
         class Layer:

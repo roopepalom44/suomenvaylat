@@ -79,7 +79,7 @@ class ExecuteFlowTests(unittest.TestCase):
         self.copies.append((source, name))
         return workspace + "\\" + name
 
-    def _run(self, layers, clip=None, extra_management=None, extra_analysis=None):
+    def _run(self, layers, clip=None, extra_management=None, extra_analysis=None, mml_api_key=""):
         shapes = {"pt1": "Point", "pt2": "Point", "pt3": "Point", "pt4": "Point",
                   "poly1": "Polygon", "bad1": "Polyline"}
 
@@ -106,7 +106,7 @@ class ExecuteFlowTests(unittest.TestCase):
             _param("Helsinki"),
             _param(None),
             _param(r"C:\out.gdb"),
-            _param(""), _param(""), _param(""), _param(""), _param(None), _param(""),
+            _param(mml_api_key), _param(""), _param(""), _param(""), _param(None), _param(""),
         ]
         with _ArcpyPatch(
             Describe=describe, Exists=lambda path: False, ExecuteError=RuntimeError,

@@ -379,8 +379,7 @@ class WFSSourceRegistry(object):
                 # ruuhkautuneita. Kutsu yrittää osoitteita järjestyksessä
                 # ja vaihtaa automaattisesti varapalveluun.
                 "endpoints": [
-                    "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
-                    "https://overpass-api.de/api/interpreter"
+                    *service_network.OVERPASS_ENDPOINTS
                 ],
                 "description": "OpenStreetMap Overpass API"
             },

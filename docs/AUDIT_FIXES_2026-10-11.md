@@ -3,7 +3,8 @@
 Lähde: projektin uusin paikallinen [AUDIT_REPORT.md](../AUDIT_REPORT.md),
 päivätty 11.10.2026. Alkuperäinen raportti säilytetään löydöshetken kuvauksena.
 Tämä tiedosto kertoo toteutuksen ja perustellut tarkennukset kaikkiin 36 tunnisteeseen.
-Versiot: ArcGIS 1.0.22, QGIS 0.2.12.
+Versiot: ArcGIS 1.0.22, QGIS 0.2.12. Käyttäjän pyynnöstä 1.0.23 yhdistää
+taustakartat Suomenväylät-työkaluun; erillinen painike ja työkaluluokka poistettiin.
 
 | Löydös | Toteutus / tarkennus |
 |---|---|
@@ -31,7 +32,7 @@ Versiot: ArcGIS 1.0.22, QGIS 0.2.12.
 | F-MED-06 | Kaikki muunnettavat shapefile-kentät täytetään yhdellä UpdateCursor-kierroksella. DBF-nimet ovat enintään 10 merkkiä ja erottuvat myös olemassa olevista kentistä. |
 | F-MED-07 | APPDATA-tallennus oli jo olemassa, joten raportin pääväite ei vastannut koodia. Vain varareitti korjattiin: LOCALAPPDATA tai käyttäjän kotihakemisto, ei asennuskansio. DPAPI-suojaus säilyy. |
 | F-MED-08 | Molemmat paketit käyttävät samoja OSM-geometrioita, POI-JSONia ja uudelleenohjausten turvakoodia. ArcGIS-paketointi ja projekti lisäävät yhteiset tiedostot. |
-| F-MED-09 | Ribbonissa on Taustakartat-painike, joka avaa MMLBasemapDownloaderin. Paketointi tarkistaa myös uuden C#-tyypin. |
+| F-MED-09 | Käyttäjä tarkensi yhden työkalun toimintatavan: erillinen Taustakartat-painike ja luokka poistettiin 1.0.23:ssa. MML:n kolme vektoritiilikarttaa löytyvät Suomenväylät-työkalun MML-aineistovalikosta. Kapsin rasterilataus oli jo samassa työkalussa ja säilyy siellä. Pelkkä live-karttavalinta ei edellytä aluerajausta tai tallennuskohdetta. |
 | F-MED-10 | WFS BBOX -varareitti käyttää ArcGISin tavoin 1 000 metrin hakumarginaalia. Tarkka paikallinen rajaus säilyy. CQL-reitillä käytetään tarkkaa monikulmiota. |
 | F-MED-11 | Karttakuvan tasoluettelo tarjoaa EPSG:3067-WMTS-tasot ensin. QGIS käyttää natiivia WMTS-matriisia ja tunnistautumisasetusta. WMS säilyy vaihtoehtona ja WMTS:n epäonnistumisen varareittinä. Tunnuksellista palvelua ei tässä validoitu oikeilla tunnuksilla. |
 | F-MED-12 | Kirjoittimet vapautetaan ennen siivousta. TemporaryDirectory-siivoaminen ja GPKG-sivutiedostojen poisto eivät korvaa alkuperäistä latausvirhettä. Siivouksen lukitusvirhe kirjataan. GeoPackage-tyylin tallennuksen jälkeen OGR-lukuyhteys avataan uudelleen, jotta SQLite-skeeman muutos ei riko tason seuraavaa kohdehakua. |
@@ -46,7 +47,7 @@ Versiot: ArcGIS 1.0.22, QGIS 0.2.12.
 
 ## Validointi
 
-- Tavallinen unittest-ajo: 202 testiä, ei ArcGIS/QGIS-asennusta eikä verkkoyhteyttä.
+- Tavallinen unittest-ajo: 212 testiä, ei ArcGIS/QGIS-asennusta eikä verkkoyhteyttä. Uudet testit kattavat yhden julkisen työkalun, MML-livekarttojen ja Kapsi-rasterien yhdistämisen sekä alueparametrien validoinnin.
 - Natiivi QGIS 3.44.14: 9 tiedosto-/virhetestiä sekä verkottomat auditointi- ja valintatestit. Auditointitesti käyttää oikeaa QgsTaskManageria ja osoittaa HTTP-työn tapahtuvan taustasäikeessä.
 - Pienet oikeat WFS-haut: DigiRoad `dr_pysakki` (39 kohdetta), Tilastokeskus `vaki2024_1km` (4 kohdetta), Karttapaikka `gn:NamedPlace` (5 kohdetta, GML). Tulokset EPSG:3067:ssä, tallennetut määrät tarkistettu.
 - Pyflakes sekä Python-syntaksitarkistukset.

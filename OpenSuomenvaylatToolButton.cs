@@ -9,7 +9,6 @@ namespace suomenvaylat
 {
     internal class OpenSuomenvaylatToolButton : Button
     {
-        protected virtual string ToolClassName => "VaylaWFSDownloader";
         protected override void OnClick()
         {
             try
@@ -35,7 +34,7 @@ namespace suomenvaylat
 
                 // 3) Määritä työkalun polku TÄSMÄLLEEN Esrin vaatimassa lokaalissa muodossa:
                 // Syntaksi: "X:\koko\polku\tyokalu.pyt\PythonLuokanNimi"
-                string toolClassName = ToolClassName;
+                string toolClassName = "VaylaWFSDownloader";
                 string toolPath = $@"{pytPath}\{toolClassName}";
 
                 // 4) Avaa työkalu
@@ -51,10 +50,5 @@ namespace suomenvaylat
                     System.Windows.MessageBoxImage.Error);
             }
         }
-    }
-
-    internal class OpenBasemapToolButton : OpenSuomenvaylatToolButton
-    {
-        protected override string ToolClassName => "MMLBasemapDownloader";
     }
 }

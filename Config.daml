@@ -6,7 +6,7 @@
         xsi:schemaLocation="http://schemas.esri.com/DADF/Registry file:///C:/Program%20Files/ArcGIS/Pro/bin/ArcGIS.Desktop.Framework.xsd">
 
 	<AddInInfo id="{2aea3c93-c012-4ed4-b416-6b3a844e0204}"
-			   version="1.0.22"
+			   version="1.0.23"
 			   desktopVersion="3.5.0.57366"
 			   product="ArcGISPro">
 		<Name>suomenvaylat</Name>
@@ -33,17 +33,11 @@
 					   smallImage="Images\Suomenvaylat16.png"
 					   largeImage="Images\Suomenvaylat32.png">
 					<button refID="suomenvaylat_SuomenvaylatButton" size="large" />
-					<button refID="suomenvaylat_BasemapButton" size="large" />
 				</group>
 			</groups>
 
 			<!-- Nappi -->
 			<controls>
-				<button id="suomenvaylat_BasemapButton" caption="Taustakartat"
-						className="OpenBasemapToolButton" loadOnClick="true" keytip="TK"
-						smallImage="Images\Suomenvaylat16.png" largeImage="Images\Suomenvaylat32.png">
-					<tooltip heading="Taustakartat">Avaa MML- ja Kapsi-taustakarttatyökalun.<disabledText /></tooltip>
-				</button>
 				<button id="suomenvaylat_SuomenvaylatButton"
 						caption="Suomenväylät.fi"
 						className="OpenSuomenvaylatToolButton"

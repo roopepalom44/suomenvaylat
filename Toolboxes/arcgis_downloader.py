@@ -61,15 +61,15 @@ MML_PROPERTY_VECTOR_TILE_TILEJSON = support.MML_PROPERTY_VECTOR_TILE_TILEJSON
 
 class Toolbox(object):
     def __init__(self):
-        self.label = "Väylävirasto WFS Lataustyökalu"
+        self.label = "Suomenväylät"
         self.alias = "vayla_wfs_lataus"
-        self.tools = [VaylaWFSDownloader, MMLBasemapDownloader]
+        self.tools = [VaylaWFSDownloader]
 
 
 class VaylaWFSDownloader(object):
     def __init__(self):
         self.label = "Suomenväylät.fi"
-        self.description = "Lataa WFS- ja OGC API Features -aineistot osissa, hakee aluerajaukset paikallisesta geopackagesta ja leikkaa aineistot."
+        self.description = "Lataa rajatut paikkatietoaineistot ja Kapsin karttakuvat sekä lisää MML:n ja Ainon live-karttatasot samaan karttaan."
         self.canRunInBackground = False
 
         self.wfs_registry = WFSSourceRegistry()
@@ -111,7 +111,6 @@ class VaylaWFSDownloader(object):
         self.cql_wfs_sources = ["Tilastokeskus"]
 
         # MML:n OGC API Features- ja vector tile -palvelut
-        self._mml_layer_mapping = {}
         self._runtime_mml_api_key = ""
         self._runtime_karttapaikka_api_key = ""
         self._runtime_aino_token = ""
@@ -1070,7 +1069,7 @@ class VaylaWFSDownloader(object):
 
     def _layer_catalog_cache_key(self, source_values):
         """Sama lähde- ja tunnusavain katalogin näytölle sekä lataukselle."""
-        return "catalog-v2|{}|mml:{}|kartta:{}|kk:{}:{}|aino:{}".format(
+        return "catalog-v3|{}|mml:{}|kartta:{}|kk:{}:{}|aino:{}".format(
             "|".join(source_values),
             self._secret_cache_key(self._runtime_mml_api_key),
             self._secret_cache_key(self._runtime_karttapaikka_api_key),
@@ -1802,6 +1801,13 @@ class VaylaWFSDownloader(object):
             })
         return layers
 
+    @staticmethod
+    def _get_mml_vector_tile_layers():
+        return [{"id": endpoint, "endpoint": endpoint, "source": "MML",
+                 "title": name.replace("Kiinteistojaotus", "Kiinteistöjaotus") + " (vektoritiili)",
+                 "kind": "mml_vector_tile", "style": name, "is_background": True}
+                for name, endpoint in MML_VECTOR_TILE_LAYER_IDS.items()]
+
     def _get_layer_entries_for_sources(self, source_names):
         entries = []
         mapping = {}
@@ -1820,9 +1826,9 @@ class VaylaWFSDownloader(object):
                     )
                     source_entries = []
             elif source_type == "mml_ogcapi":
-                source_entries = []
+                source_entries = self._get_mml_vector_tile_layers()
                 try:
-                    source_entries = self._get_mml_ogc_layers()
+                    source_entries.extend(self._get_mml_ogc_layers())
                 except Exception as ex:
                     self._warn(
                         "[VAROITUS] MML:n kiinteistöjen OGC API -tasojen "
@@ -4241,29 +4247,6 @@ class VaylaWFSDownloader(object):
                 self._all_kapsi_layers_cache = sorted(list(self._kapsi_layer_mapping.keys()))
         return self._all_kapsi_layers_cache
 
-    def _get_basemap_layers_cached(self, provider):
-        if provider == "Kapsi":
-            return self._get_kapsi_layers_cached()
-        # MML:n nykyinen avoin karttakuvapalvelu julkaisee TileJSONin kautta
-        # sekä maastotiedot että kiinteistöjaotuksen.
-        self._mml_layer_mapping = dict(MML_VECTOR_TILE_LAYER_IDS)
-        return list(MML_VECTOR_TILE_LAYER_IDS.keys())
-
-    def _get_basemap_layer_id(self, provider, display_name):
-        if provider == "Kapsi":
-            return self._kapsi_layer_mapping.get(display_name, display_name)
-        # ArcGIS Pro voi ajaa executen eri instanssissa kuin tasolistauksen,
-        # joten MML:n kiinteä TileJSON-kartoitus luetaan vakiosta.
-        return (
-            MML_VECTOR_TILE_LAYER_IDS.get(display_name)
-            or self._mml_layer_mapping.get(display_name, display_name)
-        )
-
-    def _get_basemap_mode_options(self, provider):
-        if provider == "Kapsi":
-            return ["Raster (JPEG WMS EPSG:3067)"]
-        return ["Live vector tile"]
-
     def _write_world_file(self, raster_path, ext, width, height):
         root, extension = os.path.splitext(raster_path)
         world_extension_map = {
@@ -5200,7 +5183,7 @@ class VaylaWFSDownloader(object):
         p_layer_search.value = ""
 
         p_layers = arcpy.Parameter(
-            displayName="Valitse ladattavat aineistot",
+            displayName="Valitse aineistot ja karttatasot",
             name="layers",
             datatype="GPString",
             parameterType="Required",
@@ -5335,6 +5318,12 @@ class VaylaWFSDownloader(object):
             p_refresh_layers,
             p_aino_token
         ]
+
+    def _selected_layers_need_boundary(self, labels):
+        if not labels:
+            return True
+        return any((self._lookup_layer_info(label) or {}).get("kind")
+                   not in ("mml_vector_tile", "mml_karttakuva", "aino_wms") for label in labels)
 
     def updateParameters(self, parameters):
         try:
@@ -5484,6 +5473,14 @@ class VaylaWFSDownloader(object):
                 else:
                     self._clear_multivalue_param(parameters[2])
 
+            needs_boundary = self._selected_layers_need_boundary(valid_selection)
+            parameters[3].enabled = needs_boundary
+            parameters[6].enabled = needs_boundary
+            if not needs_boundary:
+                parameters[4].enabled = False
+                parameters[5].enabled = False
+                return
+
             parameters[4].enabled = False
             parameters[5].enabled = False
             parameters[4].filter.list = []
@@ -5523,14 +5520,15 @@ class VaylaWFSDownloader(object):
             if not self._is_layer_placeholder(value)
         ]
 
+        needs_boundary = self._selected_layers_need_boundary(selected_layers)
         vals = self._parse_multivalue(extent_value_text)
 
-        if extent_type in ["Kunta/Kaupunki", "Maakunta", "Elinvoimakeskus", "Hyvinvointialue"] and not vals:
+        if needs_boundary and extent_type in ["Kunta/Kaupunki", "Maakunta", "Elinvoimakeskus", "Hyvinvointialue"] and not vals:
             parameters[4].setErrorMessage("Valitse alue on pakollinen tälle aluerajauksen tasolle.")
         else:
             parameters[4].clearMessage()
 
-        if extent_type == "Oma aineisto (Polygon/Polyline)":
+        if needs_boundary and extent_type == "Oma aineisto (Polygon/Polyline)":
             if not custom_layer or str(custom_layer).strip() == "":
                 parameters[5].setErrorMessage("Valitse oma rajausaineisto.")
             else:
@@ -5540,7 +5538,7 @@ class VaylaWFSDownloader(object):
 
         layers_text = parameters[2].valueAsText
         if not layers_text or not selected_layers:
-            parameters[2].setErrorMessage("Valitse vähintään yksi ladattava taso.")
+            parameters[2].setErrorMessage("Valitse vähintään yksi aineisto tai karttataso.")
         else:
             parameters[2].clearMessage()
 
@@ -5548,7 +5546,7 @@ class VaylaWFSDownloader(object):
         if selected_layers:
             for lbl in selected_layers:
                 info = self._layer_mapping.get(lbl)
-                if info and info.get("kind") == "mml_property_ogcapi":
+                if info and info.get("kind") in ("mml_property_ogcapi", "mml_vector_tile"):
                     needs_mml_key = True
                     break
         if needs_mml_key and not mml_api_key.strip():
@@ -5611,10 +5609,15 @@ class VaylaWFSDownloader(object):
             else:
                 parameters[12].clearMessage()
 
-        if extent_type in ["Koko Suomi", "Kunta/Kaupunki", "Maakunta", "Elinvoimakeskus", "Hyvinvointialue"]:
+        if needs_boundary and extent_type in ["Koko Suomi", "Kunta/Kaupunki", "Maakunta", "Elinvoimakeskus", "Hyvinvointialue"]:
             gpkg = self._find_admin_gpkg()
             if not gpkg:
                 parameters[3].setErrorMessage("Resources-kansiosta puuttuu tiedosto hallinnolliset_aluejaot.gpkg.")
+            else:
+                parameters[3].clearMessage()
+        else:
+            parameters[3].clearMessage()
+
     def _lookup_layer_info(self, layer_ui_name):
         clean_name = (layer_ui_name or "").strip().strip("'").strip('"')
         info = self._layer_mapping.get(clean_name)
@@ -5897,6 +5900,52 @@ class VaylaWFSDownloader(object):
                 )
         return workspace
 
+    def _add_live_layer(self, info):
+        kind = info["kind"]
+        if kind == "mml_vector_tile":
+            return self._add_mml_vector_tile_layer(info["endpoint"], info["style"], self._runtime_mml_api_key)
+        if kind == "mml_karttakuva":
+            if not self._runtime_karttakuva_user or not self._runtime_karttakuva_pass:
+                raise ValueError("MML Karttakuva vaatii käyttäjätunnuksen ja salasanan")
+            return self._add_karttakuva_wmts_layer(info["id"], self._runtime_karttakuva_user, self._runtime_karttakuva_pass)
+        if kind == "aino_wms":
+            return self._add_aino_wms_layer(info["endpoint"], info["id"],
+                                           info.get("wms_title") or info["title"], self._runtime_aino_token,
+                                           is_background=bool(info.get("is_background")))
+        raise ValueError("Tuntematon live-karttataso")
+
+    def _save_runtime_credentials(self):
+        for name, value in (("mml_api_key", self._runtime_mml_api_key),
+                            ("karttapaikka_api_key", self._runtime_karttapaikka_api_key),
+                            ("aino_token", self._runtime_aino_token)):
+            if value:
+                self._set_saved_secret(name, value)
+        if self._runtime_karttakuva_user and self._runtime_karttakuva_pass:
+            self._set_saved_secret("karttakuva_user", self._runtime_karttakuva_user)
+            self._set_saved_secret("karttakuva_pass", self._runtime_karttakuva_pass)
+
+    def _execute_live_layers(self, labels):
+        started, failures = time.perf_counter(), 0
+        self._progress("SetProgressor", "step", "Lisätään karttatasoja...", 0, len(labels), 1)
+        for index, label in enumerate(labels):
+            self._progress("SetProgressorLabel", label)
+            self._progress("SetProgressorPosition", index)
+            try:
+                self._add_live_layer(self._lookup_layer_info(label))
+            except Exception as ex:
+                failures += 1
+                self._run_had_layer_failures = True
+                self._warn("[VAROITUS] Taso '{}' epäonnistui: {}".format(label, self._redact_secrets(ex)))
+        self._progress("SetProgressorPosition", len(labels))
+        self._save_runtime_credentials()
+        self._tool_metrics.set("tulosten kartalle lisääminen", time.perf_counter() - started)
+        if failures == len(labels):
+            self._warn("=== Ajo epäonnistui: yhtään valittua karttatasoa ei lisätty ===")
+        elif failures:
+            self._msg("=== Ajo suoritettu osittain: onnistuneet karttatasot lisättiin ===")
+        else:
+            self._msg("=== Ajo suoritettu onnistuneesti ===")
+
     def _execute_impl(self, parameters, messages):
         self._msg("=== Työkalu käynnistyy ===")
 
@@ -5926,6 +5975,27 @@ class VaylaWFSDownloader(object):
         self._runtime_karttakuva_user = karttakuva_user
         self._runtime_karttakuva_pass = karttakuva_pass
         self._runtime_aino_token = aino_token
+        if not layers:
+            self._error("[VIRHE] Valitse vähintään yksi aineisto tai karttataso.")
+            raise arcpy.ExecuteError
+        # Valittujen tasojen lähteet voivat olla poissa nykyisestä rajapintalistasta.
+        # Hae määritykset niitä vastaavalla välimuistiavaimella.
+        definitions_start = time.perf_counter()
+        self._fetch_layer_list(
+            needed_sources,
+            cache_key=self._layer_catalog_cache_key(needed_sources),
+        )
+        self._tool_metrics.set(
+            "tasomääritysten muodostaminen", time.perf_counter() - definitions_start
+        )
+
+        if not self._selected_layers_need_boundary(layers):
+            self._tool_metrics.set(
+                "parametrien lukeminen ja validointi", time.perf_counter() - parameter_start
+                - self._tool_metrics.get("tasomääritysten muodostaminen", 0)
+            )
+            self._execute_live_layers(layers)
+            return
         sel_vals = self._parse_multivalue(extent_value_text)
 
         if extent_type in ["Kunta/Kaupunki", "Maakunta", "Elinvoimakeskus", "Hyvinvointialue"] and not sel_vals:
@@ -5942,6 +6012,7 @@ class VaylaWFSDownloader(object):
 
         self._tool_metrics.set(
             "parametrien lukeminen ja validointi", time.perf_counter() - parameter_start
+            - self._tool_metrics.get("tasomääritysten muodostaminen", 0)
         )
 
         try:
@@ -6069,17 +6140,6 @@ class VaylaWFSDownloader(object):
                     label, reason
                 )
             )
-
-        # Valittujen tasojen lähteet voivat olla poissa nykyisestä rajapintalistasta.
-        # Hae määritykset niitä vastaavalla välimuistiavaimella.
-        definitions_start = time.perf_counter()
-        self._fetch_layer_list(
-            needed_sources,
-            cache_key=self._layer_catalog_cache_key(needed_sources),
-        )
-        self._tool_metrics.set(
-            "tasomääritysten muodostaminen", time.perf_counter() - definitions_start
-        )
 
         needs_kunta_chunks = False
         if extent_type in ["Maakunta", "Elinvoimakeskus", "Hyvinvointialue", "Koko Suomi"]:
@@ -6248,7 +6308,13 @@ class VaylaWFSDownloader(object):
                 ))
                 self._msg("  [TASO] Hakutapa: {}".format(requested_mode))
 
-            if layer_kind == "aino_wms":
+            if layer_kind == "mml_vector_tile":
+                try:
+                    self._add_live_layer(layer_info)
+                except Exception as ex:
+                    _record_layer_failure(layer_ui_name, ex)
+                continue
+            elif layer_kind == "aino_wms":
                 try:
                     self._add_aino_wms_layer(
                         layer_info.get("endpoint") or base_wfs,
@@ -6837,15 +6903,7 @@ class VaylaWFSDownloader(object):
             "lopputulosten kopiointi", time.perf_counter() - outputs_copy_start
         )
 
-        if mml_api_key.strip():
-            self._set_saved_secret("mml_api_key", mml_api_key)
-        if karttapaikka_api_key.strip():
-            self._set_saved_secret("karttapaikka_api_key", karttapaikka_api_key)
-        if karttakuva_user and karttakuva_pass:
-            self._set_saved_secret("karttakuva_user", karttakuva_user)
-            self._set_saved_secret("karttakuva_pass", karttakuva_pass)
-        if aino_token:
-            self._set_saved_secret("aino_token", aino_token)
+        self._save_runtime_credentials()
 
         self._msg("[INFO] Lisätään aineistoa kartalle.")
         map_all_start = time.perf_counter()
@@ -7141,279 +7199,3 @@ class VaylaWFSDownloader(object):
                 cache_key, layer_list, dict(self._layer_mapping)
             )
         return layer_list
-
-
-class MMLBasemapDownloader(VaylaWFSDownloader):
-    def __init__(self):
-        super().__init__()
-        self.label = "Taustakartat (MML/Kapsi)"
-        self.description = "Lisää MML:n nykyiset vector tile -taustakartat tai lataa Kapsin rasteritaustan."
-        self.canRunInBackground = False
-        # Kaikki MML-/WMS-attribuutit ja apumetodit peritään emoluokasta
-        # (VaylaWFSDownloader); vain UI ja execute eroavat.
-
-    def getParameterInfo(self):
-        p_provider = arcpy.Parameter(
-            displayName="Taustakarttapalvelu",
-            name="provider",
-            datatype="GPString",
-            parameterType="Required",
-            direction="Input"
-        )
-        p_provider.filter.list = ["MML", "Kapsi"]
-        p_provider.value = "MML"
-
-        p_map_search = arcpy.Parameter(
-            displayName="Suodata taustakarttoja kirjoittamalla",
-            name="map_search",
-            datatype="GPString",
-            parameterType="Optional",
-            direction="Input"
-        )
-        p_map_search.value = ""
-
-        p_map = arcpy.Parameter(
-            displayName="Valitse taustakartta",
-            name="mml_map",
-            datatype="GPString",
-            parameterType="Required",
-            direction="Input"
-        )
-        p_map.filter.type = "ValueList"
-        try:
-            p_map.filter.list = self._get_basemap_layers_cached("MML")
-        except Exception:
-            p_map.filter.list = []
-
-        p_mode = arcpy.Parameter(
-            displayName="Toimitustapa",
-            name="delivery_mode",
-            datatype="GPString",
-            parameterType="Required",
-            direction="Input"
-        )
-        p_mode.filter.list = ["Live vector tile"]
-        p_mode.value = "Live vector tile"
-
-        p_extent_type = arcpy.Parameter(
-            displayName="Aluerajauksen taso",
-            name="extent_type",
-            datatype="GPString",
-            parameterType="Required",
-            direction="Input"
-        )
-        p_extent_type.filter.list = [
-            "Koko Suomi",
-            "Elinvoimakeskus",
-            "Hyvinvointialue",
-            "Maakunta",
-            "Kunta/Kaupunki",
-            "Oma aineisto (Polygon/Polyline)"
-        ]
-        p_extent_type.value = "Koko Suomi"
-
-        p_extent_value = arcpy.Parameter(
-            displayName="Valitse alue",
-            name="extent_value",
-            datatype="GPString",
-            parameterType="Optional",
-            direction="Input",
-            multiValue=True
-        )
-        p_extent_value.enabled = False
-        p_extent_value.filter.type = "ValueList"
-        p_extent_value.filter.list = []
-
-        p_custom_layer = arcpy.Parameter(
-            displayName="Oma rajausaineisto",
-            name="custom_layer",
-            datatype="GPFeatureLayer",
-            parameterType="Optional",
-            direction="Input"
-        )
-        p_custom_layer.filter.list = ["Polygon", "Polyline"]
-        p_custom_layer.enabled = False
-
-        p_workspace = arcpy.Parameter(
-            displayName="Tallennuskohde (File GDB tai kansio)",
-            name="workspace",
-            datatype="DEWorkspace",
-            parameterType="Optional",
-            direction="Input"
-        )
-        try:
-            aprx = arcpy.mp.ArcGISProject("CURRENT")
-            p_workspace.value = aprx.defaultGeodatabase
-        except Exception:
-            pass
-
-        p_api_key = arcpy.Parameter(
-            displayName="MML API-avain",
-            name="api_key",
-            datatype="GPStringHidden",
-            parameterType="Optional",
-            direction="Input"
-        )
-        p_api_key.value = self._get_saved_secret("mml_api_key")
-
-        return [p_provider, p_map_search, p_map, p_mode, p_extent_type, p_extent_value, p_custom_layer, p_workspace, p_api_key]
-
-    def updateParameters(self, parameters):
-        try:
-            provider = parameters[0].valueAsText or "MML"
-            map_search = parameters[1].valueAsText or ""
-            selected_map = parameters[2].valueAsText
-            extent_type = parameters[4].valueAsText
-            api_key = (parameters[8].valueAsText or "").strip()
-            self._runtime_mml_api_key = api_key
-            mode_options = self._get_basemap_mode_options(provider)
-            mode = parameters[3].valueAsText or mode_options[0]
-
-            all_maps = self._get_basemap_layers_cached(provider)
-            filtered = all_maps
-            if map_search.strip():
-                q = self._norm(map_search)
-                filtered = [x for x in all_maps if q in self._norm(x)]
-            parameters[2].filter.list = filtered if filtered else ["(ei osumia – tyhjennä haku)"]
-            if selected_map and selected_map in filtered:
-                # filter.list-päivitys voi muuten nollata valinnan ArcGIS Prossa.
-                parameters[2].value = selected_map
-            elif selected_map and selected_map not in filtered:
-                parameters[2].value = None
-            parameters[3].filter.list = mode_options
-            if mode not in mode_options:
-                parameters[3].value = mode_options[0]
-
-            parameters[5].enabled = False
-            parameters[6].enabled = False
-            parameters[5].filter.list = []
-            parameters[7].enabled = (provider == "Kapsi")
-            # MML:n vector tile -palvelu on live-palvelu: se piirtää kartan
-            # kulloisenkin karttanäkymän mukaan eikä tee rajauskohtaisesti
-            # tiedostoon tallennettavaa rasteria. Rajausparametrit koskevat
-            # siksi vain Kapsin rasterilatausta.
-            parameters[4].enabled = (provider == "Kapsi")
-            if provider == "Kapsi" and extent_type in [
-                "Kunta/Kaupunki", "Maakunta", "Elinvoimakeskus", "Hyvinvointialue"
-            ]:
-                parameters[5].enabled = True
-                parameters[5].filter.list = self._get_extent_choices(extent_type)
-            elif provider == "Kapsi" and extent_type == "Oma aineisto (Polygon/Polyline)":
-                parameters[6].enabled = True
-                parameters[5].value = None
-
-            parameters[8].enabled = (provider == "MML")
-        except Exception as e:
-            self._warn(f"updateParameters epäonnistui: {e}")
-
-    def updateMessages(self, parameters):
-        provider = parameters[0].valueAsText or "MML"
-        extent_type = parameters[4].valueAsText
-        extent_value_text = parameters[5].valueAsText
-        custom_layer = parameters[6].valueAsText
-        api_key = parameters[8].valueAsText or ""
-
-        vals = self._parse_multivalue(extent_value_text)
-        if provider == "Kapsi" and extent_type in [
-            "Kunta/Kaupunki", "Maakunta", "Elinvoimakeskus", "Hyvinvointialue"
-        ] and not vals:
-            parameters[5].setErrorMessage("Valitse alue on pakollinen tälle aluerajauksen tasolle.")
-        else:
-            parameters[5].clearMessage()
-
-        if provider == "Kapsi" and extent_type == "Oma aineisto (Polygon/Polyline)" and (not custom_layer or str(custom_layer).strip() == ""):
-            parameters[6].setErrorMessage("Valitse oma rajausaineisto.")
-        else:
-            parameters[6].clearMessage()
-
-        if provider == "MML" and not api_key.strip():
-            parameters[8].setErrorMessage(
-                "MML:n OGC API/vector tile -tasojen listaus ja lisäys vaativat API-avaimen."
-            )
-        else:
-            parameters[8].clearMessage()
-
-    def execute(self, parameters, messages):
-        original_overwrite = arcpy.env.overwriteOutput
-        self._reserved_output_names = set()
-        self._run_had_layer_failures = False
-        self._begin_message_owner()
-        scratch_created = False
-        try:
-            arcpy.env.overwriteOutput = True
-            provider = parameters[0].valueAsText or "MML"
-            if provider == "Kapsi":
-                # Kapsin laatat ja rajaus tehdään ajokohtaisessa scratchissa,
-                # joka siivotaan ajon lopuksi.
-                self._create_run_scratch()
-                scratch_created = True
-            self._execute_basemap(parameters)
-        finally:
-            if scratch_created:
-                _, cleanup_error = self._cleanup_run_scratch(preserve=False)
-                if cleanup_error:
-                    self._warn(
-                        "[VAROITUS] Scratch-aineiston siivous epäonnistui: {}".format(
-                            cleanup_error
-                        )
-                    )
-            arcpy.env.overwriteOutput = original_overwrite
-            self._end_message_owner()
-            self._transport().close_all()
-            self._progress("ResetProgressor")
-
-    def _execute_basemap(self, parameters):
-        self._msg("=== Taustakarttatyökalu käynnistyy ===")
-
-        provider = parameters[0].valueAsText or "MML"
-        map_display = parameters[2].valueAsText
-        extent_type = parameters[4].valueAsText
-        extent_vals = self._parse_multivalue(parameters[5].valueAsText)
-        custom_layer = parameters[6].valueAsText
-        workspace = parameters[7].valueAsText
-        api_key = parameters[8].valueAsText or ""
-        self._runtime_mml_api_key = api_key.strip()
-
-        if not map_display or self._is_layer_placeholder(map_display):
-            raise Exception("Valitse taustakartta.")
-        try:
-            # Täytä näyttönimen ja teknisen tunnisteen kartoitus myös silloin,
-            # kun execute ajetaan uudessa työkaluinstanssissa.
-            self._get_basemap_layers_cached(provider)
-        except Exception as ex:
-            self._warn("[VAROITUS] Taustakarttojen luettelon haku epäonnistui: {}".format(ex))
-        layer_id = self._get_basemap_layer_id(provider, map_display)
-        boundary_fc = None
-        if provider == "Kapsi":
-            workspace = self._resolve_output_workspace(workspace)
-            if extent_type == "Oma aineisto (Polygon/Polyline)":
-                boundary_fc = self._prepare_custom_boundary(custom_layer)
-            else:
-                boundary_fc = self._process_administrative_boundary(
-                    extent_type, extent_vals, self._scratch_gdb()
-                )
-
-        try:
-            if provider == "MML":
-                if not api_key.strip():
-                    raise Exception("MML:n vector tile -palvelu vaatii API-avaimen.")
-                self._add_mml_vector_tile_layer(
-                    layer_id, map_display, api_key.strip()
-                )
-            else:
-                out_jpg = self._download_kapsi_wms_jpeg(
-                    layer_id, boundary_fc, self._scratch_folder()
-                )
-                final_jpg = self._copy_raster_bundle_to_workspace(out_jpg, workspace)
-                added, add_error = self._add_to_map(final_jpg)
-                if not added and add_error and "CURRENT" not in add_error:
-                    self._warn("[VAROITUS] Rasteria ei lisätty kartalle: {}".format(add_error))
-                self._remove_local_output(out_jpg)
-        finally:
-            if boundary_fc:
-                self._safe_delete(boundary_fc)
-
-        if api_key.strip():
-            self._set_saved_secret("mml_api_key", api_key)
-
-        self._msg("[INFO] Taustakartan tuonti valmis.")

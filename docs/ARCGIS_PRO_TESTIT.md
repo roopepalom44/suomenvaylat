@@ -73,8 +73,10 @@ Yhdistetyn JSONin tai suoran feature class -kirjoituksen toteutusta ei pidä ott
 
 ## 8. MML:n rinnakkaiset taustakarttatasot
 
-1. Avaa **Taustakartat (MML/Kapsi)**, syötä MML API-avain ja valitse
-   **Taustakartta**, **Maastokartta** tai **Kiinteistojaotus**.
+1. Avaa **Suomenväylät**, valitse lähteeksi **MML**, syötä MML API-avain ja valitse
+   **Taustakartta (vektoritiili)**, **Maastokartta (vektoritiili)** tai
+   **Kiinteistöjaotus (vektoritiili)**. Varmista, ettei erillistä Taustakartat-painiketta
+   tai työkalua ole. Pelkällä live-valinnalla aluerajaus ja tallennuskohde poistuvat käytöstä.
 2. Varmista lokista, että MML TileJSON lisätään `VECTOR_TILE`-tyyppinä
    `Taustakartta`-ryhmään ja että API-avain välitetään custom request
    parameterina. Avainta ei saa näkyä URL:ssa tai lokissa.
@@ -189,10 +191,11 @@ Yhdistetyn JSONin tai suoran feature class -kirjoituksen toteutusta ei pidä ott
    tasovirheenä eikä kaada koko ajoa.
 7. **Rajauksen yhdistäminen.** Valitse useita vierekkäisiä kuntia. CQL-lokin
    pistemäärä ja lopputulos kattavat kaikki valitut kunnat, ei vain ensimmäistä.
-8. **Taustakarttatyökalu.** Aja **Taustakartat (MML/Kapsi)** Kapsilla ja
+8. **Taustakartat samassa työkalussa.** Aja **Suomenväylät** lähteellä **Kapsi** ja
    tarkista, että Geoprocessing-asetus *Allow geoprocessing tools to overwrite
    existing datasets* palautuu ajon jälkeen entiseen arvoonsa. MML-vektoritiili
-   lisätään kartalle oikealla TileJSON-osoitteella.
+   lisätään samalla työkalulla kartalle oikealla TileJSON-osoitteella. Testaa myös
+   MML-vektoritiili ja ladattava aineisto samalla ajolla: vain tiedostoaineisto rajataan.
 9. **Rinnakkainen sivutus.** Aja monisivuinen WFS-taso (esim. DigiRoad
    `Linkki` maakuntarajauksella). Mahdolliset uudelleenyritysviestit näkyvät
    lokissa normaalisti, eikä ArcGIS Pro kaadu tai jäädy.

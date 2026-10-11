@@ -127,7 +127,7 @@ catch {
 
 if (-not $typesValidated) {
     $assemblyText = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($assemblySource))
-    foreach ($requiredType in @('Module1', 'OpenSuomenvaylatToolButton', 'OpenBasemapToolButton')) {
+    foreach ($requiredType in @('Module1', 'OpenSuomenvaylatToolButton')) {
         if (-not $assemblyText.Contains($requiredType)) {
             throw "Assembly does not contain the expected add-in type '$requiredType': $assemblySource. Build the current C# project or pass the correct DLL with -AssemblyPath."
         }
