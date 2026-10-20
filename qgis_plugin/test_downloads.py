@@ -127,5 +127,41 @@ class DownloadTests(unittest.TestCase):
         self.assertIsInstance(outputs[0], dict)
 
 
+class SykeCatalogTests(unittest.TestCase):
+    groundwater = "https://paikkatiedot.ymparisto.fi/geoserver/inspire_ge/wfs"
+    protected = "https://paikkatiedot.ymparisto.fi/geoserver/inspire_ps/wfs"
+
+    def capabilities(self, name, title):
+        return services.checked_xml((
+            '<WFS_Capabilities xmlns="http://www.opengis.net/wfs/2.0">'
+            '<FeatureTypeList><FeatureType><Name>' + name + '</Name><Title>' + title +
+            '</Title></FeatureType></FeatureTypeList></WFS_Capabilities>'
+        ).encode())
+
+    def test_syke_lists_groundwater_and_protected_layers_with_correct_endpoints(self):
+        roots = [(self.capabilities("inspire_ge:GE.Groundwaterbody", "Pohjavesialueet"), None),
+                 (self.capabilities("inspire_ps:PS.ProtectedSites", "Suojelualueet"), None)]
+        with patch.object(services.syke_sources, "discover_endpoints",
+                          return_value=([self.groundwater, self.protected], [])), \
+             patch.object(services, "_capability_results", return_value=roots) as fetch:
+            entries, errors = services.catalog("Syke")
+        self.assertEqual([], errors)
+        self.assertEqual([self.groundwater, self.protected], [item["endpoint"] for item in entries])
+        self.assertEqual("Pohjavesialueet", entries[0]["title"])
+        self.assertEqual("inspire_ge:GE.Groundwaterbody", entries[0]["id"])
+        self.assertEqual(2, len(fetch.call_args.args[0]))
+
+    def test_unavailable_workspace_returns_other_layers_and_identifies_failure(self):
+        roots = [(self.capabilities("inspire_ge:GE.Groundwaterbody", "Pohjavesialueet"), None),
+                 (None, RuntimeError("Service WFS is disabled"))]
+        with patch.object(services.syke_sources, "discover_endpoints",
+                          return_value=([self.groundwater, self.protected], [])), \
+             patch.object(services, "_capability_results", return_value=roots):
+            entries, errors = services.catalog("Syke")
+        self.assertEqual(1, len(entries))
+        self.assertEqual(1, len(errors))
+        self.assertIn(self.protected, errors[0])
+
+
 if __name__ == "__main__":
     unittest.main()

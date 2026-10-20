@@ -56,6 +56,9 @@
     <Content Include="qgis_plugin\suomenvaylat_qgis\service_network.py" Link="Toolboxes\service_network.py">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>
+    <Content Include="qgis_plugin\suomenvaylat_qgis\syke_sources.py" Link="Toolboxes\syke_sources.py">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
     <Content Include="qgis_plugin\suomenvaylat_qgis\osm_geometry.py" Link="Toolboxes\osm_geometry.py">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>

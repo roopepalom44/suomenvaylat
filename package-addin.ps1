@@ -153,6 +153,7 @@ $packageFiles = @(
     @{ Relative = 'Install\Toolboxes\arcgis_downloader.py'; Source = (Join-Path $root 'Toolboxes\arcgis_downloader.py'); Required = $true },
     @{ Relative = 'Install\Toolboxes\arcgis_support.py'; Source = (Join-Path $root 'Toolboxes\arcgis_support.py'); Required = $true },
     @{ Relative = 'Install\Toolboxes\service_network.py'; Source = (Join-Path $root 'qgis_plugin\suomenvaylat_qgis\service_network.py'); Required = $true },
+    @{ Relative = 'Install\Toolboxes\syke_sources.py'; Source = (Join-Path $root 'qgis_plugin\suomenvaylat_qgis\syke_sources.py'); Required = $true },
     @{ Relative = 'Install\Toolboxes\osm_geometry.py'; Source = (Join-Path $root 'qgis_plugin\suomenvaylat_qgis\osm_geometry.py'); Required = $true },
     @{ Relative = 'Install\Toolboxes\osm_poi_classes.json'; Source = (Join-Path $root 'qgis_plugin\suomenvaylat_qgis\osm_poi_classes.json'); Required = $true },
     @{ Relative = 'Install\Toolboxes\service_styles.py'; Source = (Join-Path $root 'qgis_plugin\suomenvaylat_qgis\service_styles.py'); Required = $true },

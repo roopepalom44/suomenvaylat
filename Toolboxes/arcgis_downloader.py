@@ -1069,7 +1069,7 @@ class VaylaWFSDownloader(object):
 
     def _layer_catalog_cache_key(self, source_values):
         """Sama lähde- ja tunnusavain katalogin näytölle sekä lataukselle."""
-        return "catalog-v3|{}|mml:{}|kartta:{}|kk:{}:{}|aino:{}".format(
+        return "catalog-v4|{}|mml:{}|kartta:{}|kk:{}:{}|aino:{}".format(
             "|".join(source_values),
             self._secret_cache_key(self._runtime_mml_api_key),
             self._secret_cache_key(self._runtime_karttapaikka_api_key),
@@ -1879,6 +1879,8 @@ class VaylaWFSDownloader(object):
             else:
                 try:
                     source_entries = self.wfs_registry.get_capabilities(source_name)
+                    for error in getattr(self.wfs_registry, "_capabilities_errors", {}).get(source_name, []):
+                        self._warn("[VAROITUS] {}-tasoluettelo on puutteellinen: {}".format(source_name, error))
                 except Exception as ex:
                     self._warn("[VAROITUS] GetCapabilities epäonnistui lähteelle '{}': {}".format(source_name, ex))
                     source_entries = []
@@ -5378,8 +5380,8 @@ class VaylaWFSDownloader(object):
             if len(parameters) > 12:
                 parameters[12].enabled = uses_aino
 
-            # Versioi avain, jotta vanhan 113 WFS -tason Aino-välimuisti ei
-            # peitä uuden version 175 WMS -valintaa päivityksen jälkeen.
+            # Versioitu avain ohittaa vanhan version suppeat tasoluettelot
+            # (esim. SYKEn pelkkä inspire_ps-työtila) päivityksen jälkeen.
             source_key = self._layer_catalog_cache_key(source_values)
             self._last_layer_source_key = source_key
             refresh_requested = bool(
@@ -5391,6 +5393,8 @@ class VaylaWFSDownloader(object):
                 self._layer_refresh_consumed = True
                 self._all_wfs_layers_cache.pop(source_key, None)
                 self._layer_mapping_cache.pop(source_key, None)
+                for source_name in source_values:
+                    getattr(self.wfs_registry, "_capabilities_cache", {}).pop(source_name, None)
                 try:
                     parameters[11].value = False
                 except Exception:
@@ -7194,7 +7198,8 @@ class VaylaWFSDownloader(object):
                 self._layer_mapping = dict(mapping)
                 return list(layers)
         layer_list = self._get_layer_entries_for_sources(selected_sources)
-        if cache_key and layer_list:
+        errors = getattr(getattr(self, "wfs_registry", None), "_capabilities_errors", {})
+        if cache_key and layer_list and not any(errors.get(source) for source in selected_sources):
             self._write_layer_disk_cache(
                 cache_key, layer_list, dict(self._layer_mapping)
             )

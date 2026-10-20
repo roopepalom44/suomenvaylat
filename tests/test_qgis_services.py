@@ -174,6 +174,23 @@ class WFSPagingTests(unittest.TestCase):
             with self.assertRaises(json.JSONDecodeError):
                 list(wfs.pages(self.entry, "0,0,1,1", None, fetch, None))
 
+    def test_syke_prefers_working_json_over_advertised_but_rejected_geojson(self):
+        caps = b'''<WFS_Capabilities version="2.0.0"><OperationsMetadata>
+        <Operation name="GetFeature"><Parameter name="outputFormat"><AllowedValues>
+        <Value>application/geo+json</Value><Value>application/json</Value><Value>json</Value>
+        </AllowedValues></Parameter></Operation></OperationsMetadata></WFS_Capabilities>'''
+        queue = [caps, b"<schema/>"]
+        self.assertEqual("application/json", wfs.metadata(self.entry, lambda *args: queue.pop(0))[1])
+
+    def test_wfs_formats_are_read_from_getfeature_not_other_operations(self):
+        caps = b'''<WFS_Capabilities version="2.0.0"><OperationsMetadata>
+        <Operation name="DescribeFeatureType"><Parameter name="outputFormat">
+        <Value>application/json</Value></Parameter></Operation>
+        <Operation name="GetFeature"><Parameter name="outputFormat">
+        <Value>text/xml</Value></Parameter></Operation></OperationsMetadata></WFS_Capabilities>'''
+        queue = [caps, b"<schema/>"]
+        self.assertIsNone(wfs.metadata(self.entry, lambda *args: queue.pop(0))[1])
+
 
 class ArcGISIntegrationTests(unittest.TestCase):
     def test_shapefile_conversion_uses_one_cursor_and_unique_names(self):

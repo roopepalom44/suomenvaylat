@@ -4,6 +4,19 @@
 
 ArcGIS Pro -laajennus Suomenväylät-aineistojen lataamiseen WFS-rajapinnoista.
 
+**SYKEn tasoluettelo (1.0.24 / QGIS 0.2.13):** Syke-valinta kattaa nyt
+[SYKEn rajapintahakemiston](https://www.syke.fi/fi/ymparistotieto/avoimet-rajapinnat/paikkatietorajapinnat)
+kaikki WFS-palvelut, myös pohjavesialueet ja pohjavesialuerajat. Aiemmin
+haettiin vain suojelualueiden `inspire_ps`-työtila. Palveluosoitteet luetaan
+hakemistosta ja tasot kunkin palvelun omasta GetCapabilities-vastauksesta;
+mukana toimitetaan varaluettelo hakemiston häiriöitä varten. Jokainen taso
+ladataan omasta palvelustaan. Käytöstä poistetut tai häiriössä olevat palvelut
+näytetään varoituksina, ja muut tasot pysyvät käytettävissä. Pelkät WMS-/WCS-
+tai OGC API -palvelut eivät kuulu tähän WFS-vektoritasojen luetteloon.
+QGIS suosii nyt `application/json`-muotoa: SYKE ilmoittaa myös
+`application/geo+json`-tuen, mutta esimerkiksi pohjavesipalvelu hylkää sen.
+[Tutkinnan ja testauksen tulokset](docs/SYKE_CATALOG_2026-10-20.md).
+
 **Yksi työkalu (1.0.23):** Taustakarttatoiminnot kuuluvat Suomenväylät-työkaluun.
 Valitse **MML** ja **Taustakartta (vektoritiili)**, **Maastokartta (vektoritiili)**
 tai **Kiinteistöjaotus (vektoritiili)** ja anna MML API-avain. Pelkät live-karttatasot

@@ -37,13 +37,20 @@ def metadata(entry, fetch):
     root = checked_xml(raw)
     version = root.get("version", "2.0.0")
     formats = []
-    for node in root.iter():
+    operation = next((node for node in root.iter()
+                      if (node.tag.split("}")[-1] == "Operation" and node.get("name") == "GetFeature")
+                      or node.tag.split("}")[-1] == "GetFeature"), root)
+    for node in operation.iter():
         if node.tag.split("}")[-1] == "Parameter" and node.get("name", "").lower() == "outputformat":
             formats.extend((child.text or "").strip() for child in node.iter()
                            if child.tag.split("}")[-1] == "Value")
         if node.tag.split("}")[-1] == "ResultFormat":
             formats.extend(child.tag.split("}")[-1] for child in node)
-    output = next((value for value in formats if "json" in value.lower()), None)
+    # SYKE advertises application/geo+json first, but rejects it for GetFeature
+    # on e.g. inspire_ge. Prefer the working canonical application/json format.
+    output = next((value for preferred in ("application/json", "json", "application/geo+json")
+                   for value in formats if value.lower() == preferred), None)
+    output = output or next((value for value in formats if "json" in value.lower()), None)
     schema_url = query_url(entry["endpoint"], service="WFS", version=version,
                            request="DescribeFeatureType", typeName=entry["id"])
     schema = checked_xml(fetch(schema_url, None))

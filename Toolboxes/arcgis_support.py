@@ -13,6 +13,7 @@ import socket
 import ssl
 import threading
 import importlib.util
+import concurrent.futures
 
 
 def _load_shared_module(name):
@@ -31,6 +32,7 @@ def _load_shared_module(name):
 service_styles = _load_shared_module("service_styles")
 service_network = _load_shared_module("service_network")
 osm_geometry = _load_shared_module("osm_geometry")
+syke_sources = _load_shared_module("syke_sources")
 
 
 # MML:n nykyiset avoimet rajapinnat. Kiinteistöaineistot haetaan OGC API
@@ -310,10 +312,8 @@ class WFSSourceRegistry(object):
             },
             "Syke": {
                 "type": "wfs",
-                "endpoints": [
-                    "https://paikkatiedot.ymparisto.fi/geoserver/inspire_ps/wfs"
-                ],
-                "description": "SYKE INSPIRE Protected Sites"
+                "endpoints": list(syke_sources.WFS_ENDPOINTS),
+                "description": "SYKEn julkaisemat WFS-aineistot"
             },
             "Tilastokeskus": {
                 "type": "wfs",
@@ -390,6 +390,7 @@ class WFSSourceRegistry(object):
             }
         }
         self._capabilities_cache = {}
+        self._capabilities_errors = {}
 
     def get_sources_list(self):
         return [
@@ -438,28 +439,54 @@ class WFSSourceRegistry(object):
 
         layers = []
         seen = set()
+        errors = []
+        if source_name == "Syke":
+            endpoints, errors = syke_sources.discover_endpoints(self._fetch_syke_directory)
         excluded = tuple(prefix.lower() for prefix in source.get("exclude_prefixes") or [])
-        for endpoint in endpoints:
+
+        def fetch(endpoint):
             try:
                 sep = "&" if "?" in endpoint else "?"
                 endpoint_layers = self._parse_capabilities("{}{}service=WFS&request=GetCapabilities".format(endpoint, sep))
-            except Exception:
-                endpoint_layers = []
+                if not endpoint_layers:
+                    raise ValueError("palvelu ei palauttanut WFS-tasoja")
+                return endpoint_layers, None
+            except Exception as exc:
+                return [], "{}: {}".format(endpoint, exc)
+
+        # SYKE has dozens of independent workspaces. Bound concurrency to avoid
+        # serial minute-long discovery without flooding the provider.
+        if source_name == "Syke":
+            with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+                results = list(pool.map(fetch, endpoints))
+        else:
+            results = [fetch(endpoint) for endpoint in endpoints]
+        for endpoint, (endpoint_layers, error) in zip(endpoints, results):
+            if error:
+                errors.append(error)
             for lyr in endpoint_layers:
                 lid = lyr.get("id")
                 if lid and excluded and lid.lower().startswith(excluded):
                     continue
                 if lid and lid not in seen:
                     seen.add(lid)
-                    layers.append(lyr)
-        self._capabilities_cache[source_name] = layers
+                    # Download and style requests must use this workspace, not
+                    # the registry's first endpoint (formerly always inspire_ps).
+                    layers.append(dict(lyr, endpoint=endpoint))
+        self._capabilities_errors[source_name] = errors
+        if not errors:
+            self._capabilities_cache[source_name] = layers
         return layers
+
+    @staticmethod
+    def _fetch_syke_directory(url):
+        req = urllib.request.Request(url, headers={"User-Agent": "Suomenvaylat-ArcGISPro"})
+        return service_network.request_bytes(req, _urlopen, limit=syke_sources.MAX_DIRECTORY_BYTES)
 
     def _parse_capabilities(self, url):
         layers = []
-        req = urllib.request.Request(url)
-        with _urlopen(req, timeout=60) as response:
-            xml_bytes = response.read(service_network.MAX_XML_BYTES + 1)
+        req = urllib.request.Request(url, headers={"User-Agent": "Suomenvaylat-ArcGISPro"})
+        xml_bytes = service_network.request_bytes(req, _urlopen, limit=service_network.MAX_XML_BYTES)
         root = service_network.checked_xml(xml_bytes)
 
         feature_types = [e for e in root.iter() if e.tag.endswith('FeatureType')]

@@ -28,7 +28,7 @@ from qgis.PyQt.QtCore import QVariant
 
 from .osm_geometry import element_geometry
 from .service_styles import StyleClient, MAX_STYLE_BYTES, localize_graphics, save_sld, StyleError
-from . import service_network, wfs_pages
+from . import service_network, wfs_pages, syke_sources
 
 from .service_network import checked_xml
 _WORK_CONTEXT = ContextVar("suomenvaylat_transform_context", default=None)
@@ -137,7 +137,7 @@ WFS_SOURCES = {
         "https://paikkatiedot.ymparisto.fi/geoserver/liiteri_etaisyysvyohykkeet/wfs",
         "https://paikkatiedot.ymparisto.fi/geoserver/liiteri_taajamat/wfs",
     ],
-    "Syke": ["https://paikkatiedot.ymparisto.fi/geoserver/inspire_ps/wfs"],
+    "Syke": list(syke_sources.WFS_ENDPOINTS),
     # Globaali GeoServer-WFS: kaikki Tilastokeskuksen työtilat yhdellä
     # GetCapabilitiesilla (INSPIRE OGC API oli samoille alueille 10-40x hitaampi).
     "Tilastokeskus": ["https://geo.stat.fi/geoserver/wfs"],
@@ -326,8 +326,15 @@ def catalog(source, api_key="", password=""):
         raise ValueError("Aino-token tarvitaan tasoluettelon hakuun")
     endpoints = [endpoint + "?" + urllib.parse.urlencode({"token": api_key}) if source == "Aino" else endpoint
                  for endpoint in WFS_SOURCES.get(source, [])]
+    if source == "Syke":
+        def fetch_directory(url):
+            request = urllib.request.Request(url, headers={"User-Agent": SERVICE_USER_AGENT})
+            return service_network.request_bytes(request, _urlopen, limit=syke_sources.MAX_DIRECTORY_BYTES)
+        endpoints, directory_errors = syke_sources.discover_endpoints(fetch_directory)
+        errors.extend(directory_errors)
     urls = [endpoint + ("&" if "?" in endpoint else "?") + "SERVICE=WFS&REQUEST=GetCapabilities"
             for endpoint in endpoints]
+    seen = set()
     for endpoint, (root, error) in zip(endpoints, _capability_results(urls)):
         try:
             if error is not None:
@@ -339,11 +346,15 @@ def catalog(source, api_key="", password=""):
                 name = children.get("Name", "")
                 if name and name.lower().startswith(EXCLUDED_WFS_PREFIXES.get(source, ())):
                     continue
-                if name:
+                if name and name not in seen:
+                    seen.add(name)
                     entries.append({"source": source, "kind": "wfs", "id": name,
                                     "title": children.get("Title") or name, "endpoint": endpoint})
+            if not any(element.tag.split("}")[-1] == "FeatureType" for element in root.iter()):
+                raise ValueError("palvelu ei palauttanut WFS-tasoja")
         except Exception as exc:
-            errors.append(f"{source}: {str(exc).replace(api_key, '[PIILOTETTU]') if api_key else exc}")
+            clean_endpoint = endpoint.split("?", 1)[0]
+            errors.append(f"{source} ({clean_endpoint}): {str(exc).replace(api_key, '[PIILOTETTU]') if api_key else exc}")
     if source == "Aino":
         endpoint = "https://aino.sitowise.com/ows"
         url = endpoint + "?" + urllib.parse.urlencode({"token": api_key,
