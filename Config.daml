@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8" ?>
+<?xml version="1.0" encoding="utf-8" ?>
 <ArcGIS defaultAssembly="suomenvaylat.dll"
         defaultNamespace="suomenvaylat"
         xmlns="http://schemas.esri.com/DADF/Registry"
@@ -6,7 +6,7 @@
         xsi:schemaLocation="http://schemas.esri.com/DADF/Registry file:///C:/Program%20Files/ArcGIS/Pro/bin/ArcGIS.Desktop.Framework.xsd">
 
 	<AddInInfo id="{2aea3c93-c012-4ed4-b416-6b3a844e0204}"
-			   version="1.0.24"
+			   version="1.0.25"
 			   desktopVersion="3.5.0.57366"
 			   product="ArcGISPro">
 		<Name>suomenvaylat</Name>
@@ -14,11 +14,19 @@
 		<Image>Images\Suomenvaylat32.png</Image>
 		<Author>RPAL</Author>
 		<Company>Ramboll</Company>
-		<Date>2026-10-11</Date>
+		<Date>2026-10-24</Date>
 		<Subject>Framework</Subject>
 	</AddInInfo>
 
-	<modules>
+	<conditions>
+    <insertCondition id="suomenvaylat_SharedHelp_suomenvaylat_Condition"><and><state id="PaikkatietoOhje_Owner_suomenvaylat"/><state id="PaikkatietoOhje_Tool_suomenvaylat"/></and></insertCondition>
+    <insertCondition id="suomenvaylat_SharedHelp_muuntaja_Condition"><and><state id="PaikkatietoOhje_Owner_suomenvaylat"/><state id="PaikkatietoOhje_Tool_muuntaja"/></and></insertCondition>
+    <insertCondition id="suomenvaylat_SharedHelp_liikenneselvitys_Condition"><and><state id="PaikkatietoOhje_Owner_suomenvaylat"/><state id="PaikkatietoOhje_Tool_liikenneselvitys"/></and></insertCondition>
+    <insertCondition id="suomenvaylat_SharedHelp_saavutettavuuskartat_Condition"><and><state id="PaikkatietoOhje_Owner_suomenvaylat"/><state id="PaikkatietoOhje_Tool_saavutettavuuskartat"/></and></insertCondition>
+    <insertCondition id="suomenvaylat_SharedHelp_Condition"><state id="PaikkatietoOhje_Owner_suomenvaylat"/></insertCondition>
+  </conditions>
+
+  <modules>
 		<insertModule id="suomenvaylat_Module"
 					  className="Module1"
 					  autoLoad="true"
@@ -26,15 +34,29 @@
 
 			<!-- Ryhmä välilehdelle -->
 			<groups>
-				<group id="suomenvaylat_CustomToolsGroup"
-					   caption=""
-					   appearsOnAddInTab="true"
+<group id="suomenvaylat_CustomToolsGroup"
+					   caption=" "
+					   appearsOnAddInTab="false"
 					   keytip="TL"
-					   smallImage="Images\Suomenvaylat16.png"
-					   largeImage="Images\Suomenvaylat32.png">
+					   smallImage="Images\Suomenvaylat16.png">
 					<button refID="suomenvaylat_SuomenvaylatButton" size="large" />
 				</group>
-			</groups>
+        <group id="suomenvaylat_SharedHelp_suomenvaylat_Group" caption=" " keytip="SV" appearsOnAddInTab="true" condition="suomenvaylat_SharedHelp_suomenvaylat_Condition" smallImage="SharedHelp\Icons\suomenvaylat16.png">
+          <button refID="suomenvaylat_SharedHelp_suomenvaylat_Button" size="large"/>
+        </group>
+        <group id="suomenvaylat_SharedHelp_muuntaja_Group" caption=" " keytip="MU" appearsOnAddInTab="true" condition="suomenvaylat_SharedHelp_muuntaja_Condition" smallImage="SharedHelp\Icons\muuntaja16.png">
+          <button refID="suomenvaylat_SharedHelp_muuntaja_Button" size="large"/>
+        </group>
+        <group id="suomenvaylat_SharedHelp_liikenneselvitys_Group" caption=" " keytip="LS" appearsOnAddInTab="true" condition="suomenvaylat_SharedHelp_liikenneselvitys_Condition" smallImage="SharedHelp\Icons\liikenneselvitys16.png">
+          <button refID="suomenvaylat_SharedHelp_liikenneselvitys_Button" size="large"/>
+        </group>
+        <group id="suomenvaylat_SharedHelp_saavutettavuuskartat_Group" caption=" " keytip="SK" appearsOnAddInTab="true" condition="suomenvaylat_SharedHelp_saavutettavuuskartat_Condition" smallImage="SharedHelp\Icons\saavutettavuuskartat16.png">
+          <button refID="suomenvaylat_SharedHelp_saavutettavuuskartat_Button" size="large"/>
+        </group>
+        <group id="suomenvaylat_SharedHelp_Group" caption=" " keytip="OH" appearsOnAddInTab="true" condition="suomenvaylat_SharedHelp_Condition" smallImage="SharedHelp\Icons\help16.png">
+          <button refID="suomenvaylat_SharedHelp_Button" size="large"/>
+        </group>
+      </groups>
 
 			<!-- Nappi -->
 			<controls>
@@ -50,7 +72,23 @@
 						<disabledText />
 					</tooltip>
 				</button>
-			</controls>
+
+        <button id="suomenvaylat_SharedHelp_suomenvaylat_Button" caption="Suomenväylät.fi" className="PaikkatietoOhje.SuomenvaylatButton" loadOnClick="true" keytip="SV" smallImage="SharedHelp\Icons\suomenvaylat16.png" largeImage="SharedHelp\Icons\suomenvaylat32.png">
+          <tooltip heading="Suomenväylät.fi">Avaa Suomenväylät.fi-työkalu.<disabledText/></tooltip>
+        </button>
+        <button id="suomenvaylat_SharedHelp_muuntaja_Button" caption="Muuntaja" className="PaikkatietoOhje.MuuntajaButton" loadOnClick="true" keytip="MU" smallImage="SharedHelp\Icons\muuntaja16.png" largeImage="SharedHelp\Icons\muuntaja32.png">
+          <tooltip heading="Muuntaja">Avaa Muuntaja-työkalu.<disabledText/></tooltip>
+        </button>
+        <button id="suomenvaylat_SharedHelp_liikenneselvitys_Button" caption="Liikenneselvitys" className="PaikkatietoOhje.LiikenneselvitysButton" loadOnClick="true" keytip="LS" smallImage="SharedHelp\Icons\liikenneselvitys16.png" largeImage="SharedHelp\Icons\liikenneselvitys32.png">
+          <tooltip heading="Liikenneselvitys">Avaa Liikenneselvitys-työkalu.<disabledText/></tooltip>
+        </button>
+        <button id="suomenvaylat_SharedHelp_saavutettavuuskartat_Button" caption="Saavutettavuuskartat" className="PaikkatietoOhje.SaavutettavuuskartatButton" loadOnClick="true" keytip="SK" smallImage="SharedHelp\Icons\saavutettavuuskartat16.png" largeImage="SharedHelp\Icons\saavutettavuuskartat32.png">
+          <tooltip heading="Saavutettavuuskartat">Avaa Saavutettavuuskartat-työkalu.<disabledText/></tooltip>
+        </button>
+        <button id="suomenvaylat_SharedHelp_Button" caption="Avaa ohje" className="PaikkatietoOhje.OpenHelpButton" loadOnClick="true" keytip="OH" smallImage="SharedHelp\Icons\help16.png" largeImage="SharedHelp\Icons\help32.png">
+          <tooltip heading="Avaa ohje">Avaa neljän paikkatietotyökalun yhteinen käyttöohje selaimeen.<disabledText/></tooltip>
+        </button>
+      </controls>
 
 		</insertModule>
 	</modules>

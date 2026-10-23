@@ -10,6 +10,7 @@ $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 
 $root = (Resolve-Path -LiteralPath $PSScriptRoot).Path
+. (Join-Path $root 'SharedHelp\package.ps1')
 $outputDirectory = Join-Path $root "bin\$Configuration\$TargetFramework"
 if ([string]::IsNullOrWhiteSpace($OutputPath)) {
     $packagePath = Join-Path $outputDirectory 'suomenvaylat.esriAddInX'
@@ -60,6 +61,7 @@ if ([string]::IsNullOrWhiteSpace($AssemblyPath)) {
     $assemblyItem = Get-Item -LiteralPath $assemblySource
     $latestCSharpSource = @(
         (Join-Path $root 'Module1.cs'),
+        (Join-Path $root 'SharedHelp\SharedHelp.cs'),
         (Join-Path $root 'OpenSuomenvaylatToolButton.cs'),
         (Join-Path $root 'suomenvaylat.csproj')
     ) |
@@ -127,7 +129,7 @@ catch {
 
 if (-not $typesValidated) {
     $assemblyText = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($assemblySource))
-    foreach ($requiredType in @('Module1', 'OpenSuomenvaylatToolButton')) {
+    foreach ($requiredType in @('Module1', 'OpenSuomenvaylatToolButton', 'SharedHelp', 'OpenHelpButton')) {
         if (-not $assemblyText.Contains($requiredType)) {
             throw "Assembly does not contain the expected add-in type '$requiredType': $assemblySource. Build the current C# project or pass the correct DLL with -AssemblyPath."
         }
@@ -159,6 +161,7 @@ $packageFiles = @(
     @{ Relative = 'Install\Toolboxes\service_styles.py'; Source = (Join-Path $root 'qgis_plugin\suomenvaylat_qgis\service_styles.py'); Required = $true },
     @{ Relative = 'Install\Toolboxes\Resources\hallinnolliset_aluejaot.gpkg'; Source = (Join-Path $root 'Toolboxes\Resources\hallinnolliset_aluejaot.gpkg'); Required = $true }
 )
+$packageFiles += $sharedHelpPackageFiles
 $packageFiles = @($packageFiles | Where-Object {
     $_.Required -or (Test-Path -LiteralPath $_.Source -PathType Leaf)
 })

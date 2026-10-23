@@ -1,9 +1,12 @@
 """Build an installable QGIS plugin ZIP without caches or test artifacts."""
 
 from pathlib import Path
+import subprocess
+import sys
 from zipfile import ZipFile, ZIP_DEFLATED
 
 ROOT = Path(__file__).resolve().parent
+subprocess.run([sys.executable, str(ROOT.parent / "SharedHelp/sync.py"), "--check"], check=True)
 PLUGIN = ROOT / "suomenvaylat_qgis"
 # Hallinnolliset aluejaot jaetaan ArcGIS Pro -työkalun kanssa; repossa on yksi kopio.
 ADMIN_GPKG = ROOT.parent / "Toolboxes" / "Resources" / "hallinnolliset_aluejaot.gpkg"
@@ -12,7 +15,7 @@ VERSION = next(line.split("=", 1)[1].strip() for line in (PLUGIN / "metadata.txt
                if line.startswith("version="))
 OUTPUT = ROOT / "dist" / f"Suomenvaylat-QGIS-{VERSION}.zip"
 OUTPUT.parent.mkdir(exist_ok=True)
-ALLOWED = {".py", ".txt", ".png", ".json"}
+ALLOWED = {".html", ".svg", ".py", ".txt", ".png", ".json"}
 if not ADMIN_GPKG.is_file():
     raise SystemExit(f"Missing administrative boundaries: {ADMIN_GPKG}")
 

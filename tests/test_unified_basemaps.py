@@ -47,13 +47,15 @@ class UnifiedBasemapTests(unittest.TestCase):
                 Param("Kunta/Kaupunki"), Param(), Param(), Param(),
                 Param(key), Param(""), Param(""), Param(""), Param(False), Param("")]
 
-    def test_only_one_public_tool_and_one_ribbon_button(self):
+    def test_only_one_public_tool_besides_shared_ribbon_commands(self):
         self.assertEqual([MODULE.VaylaWFSDownloader], MODULE.Toolbox().tools)
         self.assertFalse(hasattr(MODULE, "MMLBasemapDownloader"))
         root = Path(__file__).resolve().parents[1]
         daml = ET.parse(root / "Config.daml").getroot()
         buttons = daml.findall(".//{http://schemas.esri.com/DADF/Registry}controls/{http://schemas.esri.com/DADF/Registry}button")
-        self.assertEqual(["OpenSuomenvaylatToolButton"], [button.get("className") for button in buttons])
+        own_buttons = [button for button in buttons if not button.get("className", "").startswith("PaikkatietoOhje.")]
+        self.assertEqual(["OpenSuomenvaylatToolButton"], [button.get("className") for button in own_buttons])
+        self.assertEqual(1, sum(button.get("className") == "PaikkatietoOhje.OpenHelpButton" for button in buttons))
 
     def test_mml_catalog_retains_ogc_collections_and_adds_three_live_maps(self):
         self.tool._get_mml_ogc_layers = lambda: [{"id": "parcel", "title": "Palstat", "kind": "mml_property_ogcapi"}]

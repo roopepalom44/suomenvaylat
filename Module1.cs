@@ -6,6 +6,18 @@ namespace suomenvaylat
 {
     internal class Module1 : Module
     {
+
+        protected override bool Initialize()
+        {
+            PaikkatietoOhje.SharedHelp.Register("suomenvaylat", System.Reflection.Assembly.GetExecutingAssembly());
+            return true;
+        }
+
+        protected override void Uninitialize()
+        {
+            PaikkatietoOhje.SharedHelp.Unregister("suomenvaylat");
+        }
+
         private static Module1 _this = null;
 
         /// <summary>

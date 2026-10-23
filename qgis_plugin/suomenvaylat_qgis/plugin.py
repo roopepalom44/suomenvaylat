@@ -1,6 +1,8 @@
 """Native QGIS interface for browsing and downloading Finnish map data."""
 
 from pathlib import Path
+
+from .shared_help import register as register_shared_help, unregister as unregister_shared_help
 from qgis.PyQt.QtGui import QIcon
 
 from qgis.PyQt.QtCore import Qt, QUrlQuery, QTimer, pyqtSignal
@@ -765,8 +767,10 @@ class SuomenvaylatPlugin:
         self.action.triggered.connect(self.open)
         self.iface.addPluginToMenu("Suomenväylät", self.action)
         self.iface.addToolBarIcon(self.action)
+        register_shared_help(self.iface, "suomenvaylat", self.action)
 
     def unload(self):
+        unregister_shared_help(self.iface, "suomenvaylat")
         if self.dialog is not None:
             self.dialog.close()
             self.dialog.deleteLater()

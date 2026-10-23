@@ -8,6 +8,7 @@ import suomenvaylat_qgis.plugin as plugin_module
 from suomenvaylat_qgis import classFactory
 import suomenvaylat_qgis.services as services
 from pathlib import Path
+from io import BytesIO
 from qgis.core import QgsCoordinateReferenceSystem, QgsCoordinateTransform, QgsProject, QgsVectorLayer
 names = area_choices('Maakunta')
 assert len(names) >= 18
@@ -32,8 +33,13 @@ finally:
     plugin_module.catalog = old_catalog
 dialog.close()
 print('dialog constructed', flush=True)
+from qgis.PyQt.QtWidgets import QMainWindow, QToolBar
 class Interface:
-    def mainWindow(self): return None
+    def __init__(self):
+        self.window = QMainWindow()
+        self.toolbar = QToolBar(self.window)
+    def mainWindow(self): return self.window
+    def pluginToolBar(self): return self.toolbar
     def addPluginToMenu(self, *args): pass
     def addToolBarIcon(self, *args): pass
     def removePluginMenu(self, *args): pass
@@ -77,20 +83,22 @@ finally:
     services._request_json = old_request
     QgsProject.instance().removeAllMapLayers()
 class FakeResponse:
-    def __init__(self, data): self.data = data
+    def __init__(self, data):
+        self.data = BytesIO(data)
+        self.headers = {}
     def __enter__(self): return self
     def __exit__(self, *args): return False
-    def read(self): return self.data
+    def read(self, size=-1): return self.data.read(size)
 old_urlopen = services._urlopen
 def fake_urlopen(request, timeout=45):
     url = request if isinstance(request, str) else request.full_url
-    if 'SERVICE=WMS' in url:
+    if 'service=wms' in url.lower():
         return FakeResponse(b'<WMS_Capabilities><Layer><Name>aino:map</Name><Title>Aino map</Title></Layer></WMS_Capabilities>')
     return FakeResponse(b'<WFS_Capabilities><FeatureType><Name>aino:data</Name><Title>Aino data</Title></FeatureType></WFS_Capabilities>')
 services._urlopen = fake_urlopen
 try:
     entries, errors = services.catalog('Aino', 'dummy')
-    assert len(entries) == 2 and not errors
+    assert len(entries) == 2 and not errors, (entries, errors)
     assert {entry['kind'] for entry in entries} == {'wfs', 'aino_wms'}
     karttakuva, errors = services.catalog('MML Karttakuva', 'user', 'password')
     assert len(karttakuva) == 1 and karttakuva[0]['kind'] == 'karttakuva_wms' and not errors

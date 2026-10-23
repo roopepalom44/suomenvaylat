@@ -1,0 +1,4 @@
+
+# Manual checksums must survive checkout on Windows and Linux.
+SharedHelp/** -text
+qgis_plugin/*/shared_help/** -text

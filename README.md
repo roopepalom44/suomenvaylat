@@ -1,5 +1,7 @@
 # Suomenväylät - ArcGIS Pro Add-in
 
+**[Yhteinen kuvallinen HTML-käyttöohje](SharedHelp/index.html)**: Suomenväylät, Muuntaja, Liikenneselvitys ja Saavutettavuuskartat. Jokainen uusi asennus sisältää saman offline-ohjeen ja yhden **Avaa ohje** -painikkeen. [Ohjeen ylläpito](SharedHelp/README.md).
+
 **QGIS-versio (esijulkaisu):** [asennus ja nykyinen toiminnallisuus](qgis_plugin/README.md). Ladattavat ZIP-paketit ovat [uusimmassa GitHub-julkaisussa](https://github.com/roopepalom44/suomenvaylat/releases/latest) AddInX-paketin rinnalla.
 
 ArcGIS Pro -laajennus Suomenväylät-aineistojen lataamiseen WFS-rajapinnoista.
