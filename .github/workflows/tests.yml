@@ -60,11 +60,12 @@ jobs:
           done
           apt_options=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
           sudo apt-get "${apt_options[@]}" update
-          sudo apt-get "${apt_options[@]}" install --no-install-recommends -y qgis python3-qgis xvfb xauth gdb
+          sudo apt-get "${apt_options[@]}" install --no-install-recommends -y qgis python3-qgis xvfb xauth
       - name: Offline QGIS geometry, file, UI and worker regressions
         run: |
           /usr/bin/python3 qgis_plugin/smoke_audit_fixes.py
           /usr/bin/python3 qgis_plugin/smoke_selection.py
           /usr/bin/python3 qgis_plugin/test_downloads.py
           /usr/bin/python3 SharedHelp/test_qgis_help.py
-          timeout 120s xvfb-run -a env QT_QPA_PLATFORM=xcb LIBGL_ALWAYS_SOFTWARE=1 PYTHONFAULTHANDLER=1 gdb --batch --return-child-result -ex run -ex bt --args /usr/bin/qgis.bin --nologo --noversioncheck --profiles-path "$RUNNER_TEMP/shared-help-profile" --profile help-regression --code "$GITHUB_WORKSPACE/SharedHelp/test_native_qgis.py"
+          sed -i '1i import faulthandler; faulthandler.enable()' SharedHelp/test_native_qgis.py
+          timeout 120s xvfb-run -a env QT_QPA_PLATFORM=xcb LIBGL_ALWAYS_SOFTWARE=1 qgis --nologo --noversioncheck --profiles-path "$RUNNER_TEMP/shared-help-profile" --profile help-regression --code "$GITHUB_WORKSPACE/SharedHelp/test_native_qgis.py"
