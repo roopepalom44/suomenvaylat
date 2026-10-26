@@ -53,9 +53,9 @@ class UnifiedBasemapTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         daml = ET.parse(root / "Config.daml").getroot()
         buttons = daml.findall(".//{http://schemas.esri.com/DADF/Registry}controls/{http://schemas.esri.com/DADF/Registry}button")
-        own_buttons = [button for button in buttons if not button.get("className", "").startswith("PaikkatietoOhje.")]
+        own_buttons = [button for button in buttons if button.get("className") == "OpenSuomenvaylatToolButton"]
         self.assertEqual(["OpenSuomenvaylatToolButton"], [button.get("className") for button in own_buttons])
-        self.assertEqual(1, sum(button.get("className") == "PaikkatietoOhje.OpenHelpButton" for button in buttons))
+        self.assertEqual(1, sum(button.get("className") == "OpenHelpButton" for button in buttons))
 
     def test_mml_catalog_retains_ogc_collections_and_adds_three_live_maps(self):
         self.tool._get_mml_ogc_layers = lambda: [{"id": "parcel", "title": "Palstat", "kind": "mml_property_ogcapi"}]

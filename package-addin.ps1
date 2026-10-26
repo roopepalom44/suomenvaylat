@@ -43,6 +43,7 @@ function Resolve-AssemblyPath {
 }
 
 $assemblySource = Resolve-AssemblyPath -ExplicitPath $AssemblyPath
+Assert-SharedHelpDamlTypes -AssemblyPath $assemblySource
 try {
     [Reflection.AssemblyName]::GetAssemblyName($assemblySource) | Out-Null
 }
