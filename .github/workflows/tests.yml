@@ -58,9 +58,23 @@ jobs:
               sudo sed -i 's|http://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' "$source_file"
             fi
           done
+          # Ubuntu's QGIS 3.34/Python 3.12 crashes in setRequestPreprocessor
+          # before our shared help is registered: qgis/QGIS#55329.
+          # Exercise the native desktop against the supported 3.44 LTR line.
+          curl --fail --show-error --location --retry 3 https://download.qgis.org/downloads/qgis-archive-keyring.gpg --output "$RUNNER_TEMP/qgis-archive-keyring.gpg"
+          sudo install -m 644 "$RUNNER_TEMP/qgis-archive-keyring.gpg" /etc/apt/keyrings/qgis-archive-keyring.gpg
+          cat <<'QGIS_REPOSITORY' | sudo tee /etc/apt/sources.list.d/qgis.sources > /dev/null
+          Types: deb
+          URIs: https://qgis.org/ubuntu-ltr
+          Suites: noble
+          Architectures: amd64
+          Components: main
+          Signed-By: /etc/apt/keyrings/qgis-archive-keyring.gpg
+          QGIS_REPOSITORY
           apt_options=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
           sudo apt-get "${apt_options[@]}" update
           sudo apt-get "${apt_options[@]}" install --no-install-recommends -y qgis python3-qgis xvfb xauth
+          /usr/bin/python3 -c 'from qgis.core import Qgis; print(Qgis.QGIS_VERSION); assert 34400 <= Qgis.QGIS_VERSION_INT < 34500'
       - name: Offline QGIS geometry, file, UI and worker regressions
         run: |
           /usr/bin/python3 qgis_plugin/smoke_audit_fixes.py
