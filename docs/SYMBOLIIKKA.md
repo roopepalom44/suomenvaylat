@@ -95,7 +95,10 @@ nopeusrajoituksissa numerot ja niiden ympyrätaustat ovat erillisiä label-luokk
 GeoServerin laskennalliset label-funktiot ja vaihtoehtoiset geometriat eivät
 kuulu tukeen; tueton label tai puuttuva label-kenttä antaa erillisen varoituksen,
 ja muut tuetut symbolit säilyvät. Palvelimen ja ArcGISin sijoittelumoottorit
-voivat sijoittaa tekstit eri kohtiin. QGIS käyttää omaa
+voivat sijoittaa tekstit eri kohtiin. QGIS 0.2.16 täydentää oman SLD-tuontinsa
+puuttuvat labelien mittakaavarajat ja ympyrä-/neliötaustat, kun lähdesääntö ja
+tuotu label-sääntö voidaan yhdistää yksiselitteisesti suodattimella. Yleiset
+fonttiperheet kohdistetaan koneen vastaaviin fontteihin. QGIS käyttää omaa
 SLD-tukeaan, jonka toteutus ei sekään kata kaikkia palvelinkohtaisia laajennuksia.
 Shapefilen kenttänimen katkeaminen voi estää luokittelukentän tunnistamisen;
 työkalu ilmoittaa siitä eikä arvaa luokittelua. GDB/GeoPackage säilyttää pitkät nimet.
@@ -117,6 +120,8 @@ pelkkä tyylin palautuminen GetStylesista ei takaa kaikkien kuvien saatavuutta.
   mittakaavarajan tarkistus sekä LYRX/APRX:n uudelleenavaus.
 - QGISin oma Python: `qgis_plugin/smoke_styles.py`. Samat palvelutyylit,
   GeoPackagen oletustyylin palautuminen ja kartan kuvavienti.
+- `qgis_plugin/smoke_labels.py`: Väylän nopeusrajoitusten kymmenen oikeaa
+  numeroa, ympyrätaustat, mittakaavaraja, kuvavienti ja GeoPackage/QML-palautuminen.
 - `tests/smoke_vector_tile_styles_arcgispro.py` ja
   `qgis_plugin/smoke_vector_tile_styles.py`: paikallinen HTTP-palvelu tarjoilee
   oikean MVT-tiilen ja Mapbox-tyylin; molempien ohjelmien kuvaviennistä tarkistetaan

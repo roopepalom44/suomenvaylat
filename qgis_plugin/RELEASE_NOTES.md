@@ -1,3 +1,9 @@
+## Suomenväylät QGIS 0.2.16
+
+- SLD-labeloinnin puuttuvat ympyrä-/neliötaustat ja mittakaavarajat täydennetään QGISin tuonnin jälkeen. Esimerkiksi Väylän nopeusrajoitusten numerot säilyvät ympyröissä myös uudelleen avatussa GeoPackagessa ja QML-tyylissä.
+- Yleiset Serif-, sans-serif- ja monospace-fontit kohdistetaan koneelta löytyvään vastaavaan fonttiin. Suodattimet säilyvät QGISin omasta SLD-tuonnista.
+- Oikean nopeusrajoitustyylin labelointi, kymmenen numeroluokkaa, mittakaavaraja, kuvavienti ja tyylin palautuminen kuuluvat QGISin julkaisua edeltäviin testeihin.
+
 ## Suomenväylät QGIS 0.2.12
 
 - Taustatehtävät palauttavat tiedostojen metatiedot; karttatasot ja tyylit avataan pääsäikeessä.

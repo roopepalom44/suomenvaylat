@@ -80,6 +80,7 @@ jobs:
           /usr/bin/python3 qgis_plugin/smoke_audit_fixes.py
           /usr/bin/python3 qgis_plugin/smoke_selection.py
           /usr/bin/python3 qgis_plugin/test_downloads.py
+          /usr/bin/python3 qgis_plugin/smoke_labels.py
           /usr/bin/python3 SharedHelp/test_qgis_help.py
           sed -i '1i import faulthandler; faulthandler.enable()' SharedHelp/test_native_qgis.py
           timeout 120s xvfb-run -a env QT_QPA_PLATFORM=xcb LIBGL_ALWAYS_SOFTWARE=1 qgis --nologo --noversioncheck --profiles-path "$RUNNER_TEMP/shared-help-profile" --profile help-regression --code "$GITHUB_WORKSPACE/SharedHelp/test_native_qgis.py"

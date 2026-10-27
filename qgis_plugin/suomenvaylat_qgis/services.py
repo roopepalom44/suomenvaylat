@@ -775,6 +775,8 @@ def _apply_provider_style(layer, entry, destination, prepared=False):
         message, ok = layer.loadSldStyle(str(path))
         if not ok:
             raise StyleError("QGIS ei voinut ottaa SLD-symboliikkaa käyttöön")
+        from .qgis_labels import complete_sld_labels
+        complete_sld_labels(layer, path)
         layer.setCustomProperty("suomenvaylat/style_status", "Rajapinnan symboliikka")
         # GeoPackage stores the native renderer and labels, so reopening the
         # downloaded dataset also restores the style without a network request.

@@ -1,6 +1,11 @@
-# Suomenväylät QGIS (esijulkaisu 0.2.12)
+# Suomenväylät QGIS (esijulkaisu 0.2.16)
 
 QGIS 3.34+:lle tehty erillinen, natiivi Python-lisäosa. ArcGIS Pro -laajennus pysyy samassa projektissa.
+
+Väylän nopeusrajoitusten labelointi säilyttää 0.2.16:ssa nopeusluvut,
+ympyrätaustat ja mittakaavarajan 1:362834. QGISin SLD-tuonnin puuttuvat taustat
+ja mittakaavarajat täydennetään ennen GeoPackage- ja QML-tallennusta. Asenna
+päivitys ja lataa taso uudelleen, jotta aiemmin puuttuneet asetukset tulevat mukaan.
 
 0.2.12 korjaa taustasäikeen tasojen käsittelyn ja latausten eheystarkistuksen.
 WFS-haku käyttää JSON-muotoa palvelun tukiessa sitä, muulloin GML:ää. Väylän,
