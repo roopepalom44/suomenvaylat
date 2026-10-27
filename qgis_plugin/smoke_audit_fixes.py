@@ -38,209 +38,228 @@ if not hasattr(services.QgsJsonUtils, "geometryFromGeoJson"):
     services.QgsJsonUtils = SimpleNamespace(geometryFromGeoJson=lambda text: QgsGeometry.fromWkt(
         ogr.CreateGeometryFromJson(text).ExportToIsoWkt()))
 
-project = QgsProject.instance()
-tm35 =QgsCoordinateReferenceSystem("EPSG:3067")
+def main():
+    project = QgsProject.instance()
+    tm35 =QgsCoordinateReferenceSystem("EPSG:3067")
 
 
-def memory_layer(kind, wkts, name="layer"):
-    layer = QgsVectorLayer(f"{kind}?crs=EPSG:3067", name, "memory")
-    features = []
-    for wkt in wkts:
-        feature = QgsFeature()
-        feature.setGeometry(QgsGeometry.fromWkt(wkt))
-        features.append(feature)
-    layer.dataProvider().addFeatures(features)
-    layer.updateExtents()
-    return layer
+    def memory_layer(kind, wkts, name="layer"):
+        layer = QgsVectorLayer(f"{kind}?crs=EPSG:3067", name, "memory")
+        features = []
+        for wkt in wkts:
+            feature = QgsFeature()
+            feature.setGeometry(QgsGeometry.fromWkt(wkt))
+            features.append(feature)
+        layer.dataProvider().addFeatures(features)
+        layer.updateExtents()
+        return layer
 
 
-def write_fixture(entry, layer, mask, crs, path, add_layer=None, clip=True):
-    pages = [[{"geometry": json.loads(feature.geometry().asJson()),
-               "properties": dict(zip((field.name() for field in layer.fields()), feature.attributes()))}
-              for feature in layer.getFeatures()]]
-    return services._write_pages(entry, pages, layer.crs(), mask, crs, path, None,
-                                 lambda item: add_layer(services.open_downloaded_layer(item, entry)), clip=clip)
+    def write_fixture(entry, layer, mask, crs, path, add_layer=None, clip=True):
+        pages = [[{"geometry": json.loads(feature.geometry().asJson()),
+                   "properties": dict(zip((field.name() for field in layer.fields()), feature.attributes()))}
+                  for feature in layer.getFeatures()]]
+        return services._write_pages(entry, pages, layer.crs(), mask, crs, path, None,
+                                     lambda item: add_layer(services.open_downloaded_layer(item, entry)), clip=clip)
 
 
-# 1. Oma viivarajaus = konveksi peite, valinta rajaa kohteet.
-lines = memory_layer("LineString", [
-    "LINESTRING(380000 6670000, 390000 6670000, 390000 6680000)",
-    "LINESTRING(500000 7000000, 501000 7000000)",
-])
-mask, crs = services.selection_geometry("Oma aineisto", (), lines)
-assert services._geometry_type_value(mask.type()) == 2 and mask.area() > 1e9, mask.area()
-first_id = next(lines.getFeatures()).id()
-lines.selectByIds([first_id])
-selected_mask, _ = services.selection_geometry("Oma aineisto", (), lines)
-assert abs(selected_mask.area() - 5e7) < 1, selected_mask.area()
-straight = memory_layer("LineString", ["LINESTRING(0 0, 10 0)"])
-try:
-    services.selection_geometry("Oma aineisto", (), straight)
-    raise AssertionError("straight line should fail")
-except ValueError:
-    pass
-print("custom line boundary passed", flush=True)
-
-square_mask = QgsGeometry.fromWkt("POLYGON((385000 6670000, 386000 6670000, 386000 6671000, 385000 6671000, 385000 6670000))")
-wgs = QgsCoordinateReferenceSystem("EPSG:4326")
-
-# Windows lukitsee avoimet GPKG-tiedostot, joten siivousvirhe ei saa kaataa testiä.
-with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as folder:
-    # 2. OGC-kentät kaikilta sivuilta.
-    center = QgsGeometry.fromWkt("POINT(385500 6670500)")
-    from qgis.core import QgsCoordinateTransform
-    center.transform(QgsCoordinateTransform(tm35, wgs, project))
-    lon, lat = center.asPoint().x(), center.asPoint().y()
-    pages = [
-        {"features": [{"type": "Feature", "geometry": {"type": "Point", "coordinates": [lon, lat]},
-                       "properties": {"a": 1, "nested": {"k": 1}}}],
-         "links": [{"rel": "next", "href": "?page=2"}]},
-        {"features": [{"type": "Feature", "geometry": {"type": "Point", "coordinates": [lon, lat]},
-                       "properties": {"a": 1.5, "late": "x"}}], "links": []},
-    ]
-    original_request = services._request_json
-    services._request_json = lambda url, key="": pages.pop(0)
-    added = []
+    # 1. Oma viivarajaus = konveksi peite, valinta rajaa kohteet.
+    lines = memory_layer("LineString", [
+        "LINESTRING(380000 6670000, 390000 6670000, 390000 6680000)",
+        "LINESTRING(500000 7000000, 501000 7000000)",
+    ])
+    mask, crs = services.selection_geometry("Oma aineisto", (), lines)
+    assert services._geometry_type_value(mask.type()) == 2 and mask.area() > 1e9, mask.area()
+    first_id = next(lines.getFeatures()).id()
+    lines.selectByIds([first_id])
+    selected_mask, _ = services.selection_geometry("Oma aineisto", (), lines)
+    assert abs(selected_mask.area() - 5e7) < 1, selected_mask.area()
+    straight = memory_layer("LineString", ["LINESTRING(0 0, 10 0)"])
     try:
-        count = services.download({"kind": "ogc", "id": "demo", "title": "demo", "endpoint": "https://example.test/"},
-                                  square_mask, tm35, Path(folder) / "ogc.gpkg", add_layer=added.append)
-    finally:
-        services._request_json = original_request
-    assert count == 2 and len(added) == 1
-    fields = {field.name(): field.typeName().lower() for field in added[0].fields()}
-    assert "late" in fields and "nested" in fields, fields
-    values = sorted(feature["a"] for feature in added[0].getFeatures())
-    assert values == [1.0, 1.5], values
-    print("OGC fields from all pages passed", fields, flush=True)
+        services.selection_geometry("Oma aineisto", (), straight)
+        raise AssertionError("straight line should fail")
+    except ValueError:
+        pass
+    print("custom line boundary passed", flush=True)
 
-    # 3. OSM: relaatio + sekageometria -> erilliset tasot.
-    def ll(x, y):
-        point = QgsGeometry.fromWkt(f"POINT({x} {y})")
-        point.transform(QgsCoordinateTransform(tm35, wgs, project))
-        return {"lon": point.asPoint().x(), "lat": point.asPoint().y()}
+    square_mask = QgsGeometry.fromWkt("POLYGON((385000 6670000, 386000 6670000, 386000 6671000, 385000 6671000, 385000 6670000))")
+    wgs = QgsCoordinateReferenceSystem("EPSG:4326")
 
-    ring = [ll(385100, 6670100), ll(385400, 6670100), ll(385400, 6670400), ll(385100, 6670400), ll(385100, 6670100)]
-    elements = [
-        {"type": "node", "id": 1, "tags": {"addr:housenumber": "1"}, **ll(385500, 6670500)},
-        {"type": "way", "id": 2, "tags": {"building": "yes"}, "geometry": ring},
-        {"type": "way", "id": 3, "tags": {"highway": "residential"}, "geometry": ring},
-        {"type": "relation", "id": 4, "tags": {"type": "multipolygon", "landuse": "forest"},
-         "members": [{"type": "way", "role": "outer", "geometry": ring[:3]},
-                     {"type": "way", "role": "outer", "geometry": ring[2:]}]},
-    ]
-    original_fetch = services._overpass_fetch
-    services._overpass_fetch = lambda query: list(elements)
-    added = []
-    try:
-        count = services.download({"kind": "osm", "id": "osm_addresses", "title": "Osoitteet",
-                                   "query": "(node({bbox}););out geom;"},
-                                  square_mask, tm35, Path(folder) / "osm.gpkg", add_layer=added.append)
-    finally:
-        services._overpass_fetch = original_fetch
-    names = sorted(layer.name() for layer in added)
-    assert count == 4 and names == ["Osoitteet (alueet)", "Osoitteet (pisteet)", "Osoitteet (viivat)"], names
-    by_name = {layer.name(): layer for layer in added}
-    assert by_name["Osoitteet (alueet)"].featureCount() == 2
-    assert {f["osm_type"] for f in by_name["Osoitteet (alueet)"].getFeatures()} == {"way", "relation"}
-    assert by_name["Osoitteet (viivat)"].featureCount() == 1
-    print("OSM relations and geometry split passed", flush=True)
+    # Windows lukitsee avoimet GPKG-tiedostot, joten siivousvirhe ei saa kaataa testiä.
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as folder:
+        # 2. OGC-kentät kaikilta sivuilta.
+        center = QgsGeometry.fromWkt("POINT(385500 6670500)")
+        from qgis.core import QgsCoordinateTransform
+        center.transform(QgsCoordinateTransform(tm35, wgs, project))
+        lon, lat = center.asPoint().x(), center.asPoint().y()
+        pages = [
+            {"features": [{"type": "Feature", "geometry": {"type": "Point", "coordinates": [lon, lat]},
+                           "properties": {"a": 1, "nested": {"k": 1}}}],
+             "links": [{"rel": "next", "href": "?page=2"}]},
+            {"features": [{"type": "Feature", "geometry": {"type": "Point", "coordinates": [lon, lat]},
+                           "properties": {"a": 1.5, "late": "x"}}], "links": []},
+        ]
+        original_request = services._request_json
+        services._request_json = lambda url, key="": pages.pop(0)
+        added = []
+        try:
+            count = services.download({"kind": "ogc", "id": "demo", "title": "demo", "endpoint": "https://example.test/"},
+                                      square_mask, tm35, Path(folder) / "ogc.gpkg", add_layer=added.append)
+        finally:
+            services._request_json = original_request
+        assert count == 2 and len(added) == 1
+        fields = {field.name(): field.typeName().lower() for field in added[0].fields()}
+        assert "late" in fields and "nested" in fields, fields
+        values = sorted(feature["a"] for feature in added[0].getFeatures())
+        assert values == [1.0, 1.5], values
+        print("OGC fields from all pages passed", fields, flush=True)
 
-    # 4. WFS-leikkaus: muut kuin Väylä/DigiRoad leikataan rajaukseen.
-    long_line = memory_layer("LineString", ["LINESTRING(384000 6670500, 387000 6670500)"], "wfs")
-    lengths = {}
-    for source in ("Väylä", "Liiteri"):
+        # 3. OSM: relaatio + sekageometria -> erilliset tasot.
+        def ll(x, y):
+            point = QgsGeometry.fromWkt(f"POINT({x} {y})")
+            point.transform(QgsCoordinateTransform(tm35, wgs, project))
+            return {"lon": point.asPoint().x(), "lat": point.asPoint().y()}
+
+        ring = [ll(385100, 6670100), ll(385400, 6670100), ll(385400, 6670400), ll(385100, 6670400), ll(385100, 6670100)]
+        elements = [
+            {"type": "node", "id": 1, "tags": {"addr:housenumber": "1"}, **ll(385500, 6670500)},
+            {"type": "way", "id": 2, "tags": {"building": "yes"}, "geometry": ring},
+            {"type": "way", "id": 3, "tags": {"highway": "residential"}, "geometry": ring},
+            {"type": "relation", "id": 4, "tags": {"type": "multipolygon", "landuse": "forest"},
+             "members": [{"type": "way", "role": "outer", "geometry": ring[:3]},
+                         {"type": "way", "role": "outer", "geometry": ring[2:]}]},
+        ]
+        original_fetch = services._overpass_fetch
+        services._overpass_fetch = lambda query: list(elements)
+        added = []
+        try:
+            count = services.download({"kind": "osm", "id": "osm_addresses", "title": "Osoitteet",
+                                       "query": "(node({bbox}););out geom;"},
+                                      square_mask, tm35, Path(folder) / "osm.gpkg", add_layer=added.append)
+        finally:
+            services._overpass_fetch = original_fetch
+        names = sorted(layer.name() for layer in added)
+        assert count == 4 and names == ["Osoitteet (alueet)", "Osoitteet (pisteet)", "Osoitteet (viivat)"], names
+        by_name = {layer.name(): layer for layer in added}
+        assert by_name["Osoitteet (alueet)"].featureCount() == 2
+        assert {f["osm_type"] for f in by_name["Osoitteet (alueet)"].getFeatures()} == {"way", "relation"}
+        assert by_name["Osoitteet (viivat)"].featureCount() == 1
+        print("OSM relations and geometry split passed", flush=True)
+
+        # 4. WFS-leikkaus: muut kuin Väylä/DigiRoad leikataan rajaukseen.
+        long_line = memory_layer("LineString", ["LINESTRING(384000 6670500, 387000 6670500)"], "wfs")
+        lengths = {}
+        for source in ("Väylä", "Liiteri"):
+            added = []
+            write_fixture(
+                {"id": f"test:{source}", "title": source, "source": source}, long_line, square_mask, tm35,
+                Path(folder) / f"wfs_{len(lengths)}.gpkg", add_layer=added.append,
+                clip=source not in services.UNCLIPPED_WFS_SOURCES)
+            lengths[source] = next(added[0].getFeatures()).geometry().length()
+        assert abs(lengths["Väylä"] - 3000) < 1e-6 and abs(lengths["Liiteri"] - 1000) < 1e-6, lengths
+        print("WFS clip policy passed", lengths, flush=True)
+
+        # 4b. Leikkaus, josta GEOS palauttaa alue + viiva -kokoelman (toinen osa
+        # sivuaa rajausta), tallentuu aluetasona kelvollisessa koordinaatistossa.
+        touching = memory_layer("MultiPolygon", [
+            "MULTIPOLYGON(((385500 6670500, 386500 6670500, 386500 6670600, 385500 6670600, 385500 6670500)),"
+            "((386000 6670800, 387000 6670800, 387000 6670900, 386000 6670900, 386000 6670800)))",
+        ], "touching")
+        raw = QgsGeometry(next(touching.getFeatures()).geometry()).intersection(square_mask)
+        assert QgsWkbTypes.flatType(raw.wkbType()) == QgsWkbTypes.GeometryCollection, raw.asWkt()
         added = []
         write_fixture(
-            {"id": f"test:{source}", "title": source, "source": source}, long_line, square_mask, tm35,
-            Path(folder) / f"wfs_{len(lengths)}.gpkg", add_layer=added.append,
-            clip=source not in services.UNCLIPPED_WFS_SOURCES)
-        lengths[source] = next(added[0].getFeatures()).geometry().length()
-    assert abs(lengths["Väylä"] - 3000) < 1e-6 and abs(lengths["Liiteri"] - 1000) < 1e-6, lengths
-    print("WFS clip policy passed", lengths, flush=True)
+            {"id": "test:touching", "title": "Touching", "source": "Liiteri"}, touching, square_mask, tm35,
+            Path(folder) / "touching.gpkg", add_layer=added.append, clip=True)
+        assert added[0].crs().authid() == "EPSG:3067", added[0].crs().authid()
+        assert services._geometry_type_value(added[0].geometryType()) == 2, added[0].wkbType()
+        assert abs(next(added[0].getFeatures()).geometry().area() - 50000) < 1e-6
+        print("clip geometry collection passed", flush=True)
 
-    # 4b. Leikkaus, josta GEOS palauttaa alue + viiva -kokoelman (toinen osa
-    # sivuaa rajausta), tallentuu aluetasona kelvollisessa koordinaatistossa.
-    touching = memory_layer("MultiPolygon", [
-        "MULTIPOLYGON(((385500 6670500, 386500 6670500, 386500 6670600, 385500 6670600, 385500 6670500)),"
-        "((386000 6670800, 387000 6670800, 387000 6670900, 386000 6670900, 386000 6670800)))",
-    ], "touching")
-    raw = QgsGeometry(next(touching.getFeatures()).geometry()).intersection(square_mask)
-    assert QgsWkbTypes.flatType(raw.wkbType()) == QgsWkbTypes.GeometryCollection, raw.asWkt()
-    added = []
-    write_fixture(
-        {"id": "test:touching", "title": "Touching", "source": "Liiteri"}, touching, square_mask, tm35,
-        Path(folder) / "touching.gpkg", add_layer=added.append, clip=True)
-    assert added[0].crs().authid() == "EPSG:3067", added[0].crs().authid()
-    assert services._geometry_type_value(added[0].geometryType()) == 2, added[0].wkbType()
-    assert abs(next(added[0].getFeatures()).geometry().area() - 50000) < 1e-6
-    print("clip geometry collection passed", flush=True)
+    # 5. Uudelleenohjaus ei vuoda tunnisteita.
+    handler = services._SafeRedirectHandler()
+    request = services.urllib.request.Request("https://a.example/x", headers={"Authorization": "Basic k"})
+    assert handler.redirect_request(request, None, 302, "Found", {}, "https://b.example/y").get_header("Authorization") is None
+    print("safe redirect passed", flush=True)
 
-# 5. Uudelleenohjaus ei vuoda tunnisteita.
-handler = services._SafeRedirectHandler()
-request = services.urllib.request.Request("https://a.example/x", headers={"Authorization": "Basic k"})
-assert handler.redirect_request(request, None, 302, "Found", {}, "https://b.example/y").get_header("Authorization") is None
-print("safe redirect passed", flush=True)
+    # 6. Tunnistautumisasetus päivitetään eikä monisteta.
+    assert QgsApplication.authManager().setMasterPassword("smoke-pass", True)
+    first = plugin_module.store_basic_auth("Suomenväylät — smoke", "key1", "")
+    second = plugin_module.store_basic_auth("Suomenväylät — smoke", "key2", "")
+    names = [c.name() for c in QgsApplication.authManager().availableAuthMethodConfigs().values()]
+    assert first == second and names.count("Suomenväylät — smoke") == 1, names
+    print("auth config reuse passed", flush=True)
 
-# 6. Tunnistautumisasetus päivitetään eikä monisteta.
-assert QgsApplication.authManager().setMasterPassword("smoke-pass", True)
-first = plugin_module.store_basic_auth("Suomenväylät — smoke", "key1", "")
-second = plugin_module.store_basic_auth("Suomenväylät — smoke", "key2", "")
-names = [c.name() for c in QgsApplication.authManager().availableAuthMethodConfigs().values()]
-assert first == second and names.count("Suomenväylät — smoke") == 1, names
-print("auth config reuse passed", flush=True)
-
-# 7. Dialogin taustatehtävä (oikea QgsTaskManager) ja lisäys pääsäikeessä.
-plugin_module.QMessageBox.information = lambda *args: None
-plugin_module.QMessageBox.warning = lambda *args: None
-plugin_module.QMessageBox.critical = lambda *args: (_ for _ in ()).throw(RuntimeError(str(args)))
-plugin_module.catalog = lambda source, key="", password="": ([{
-    "source": source, "kind": "ogc", "id": "demo", "title": "Demo tulos",
-    "endpoint": "https://example.test/"}], [])
-downloaded = []
+    # 7. Dialogin taustatehtävä (oikea QgsTaskManager) ja lisäys pääsäikeessä.
+    plugin_module.QMessageBox.information = lambda *args: None
+    plugin_module.QMessageBox.warning = lambda *args: None
+    plugin_module.QMessageBox.critical = lambda *args: (_ for _ in ()).throw(RuntimeError(str(args)))
+    plugin_module.catalog = lambda source, key="", password="": ([{
+        "source": source, "kind": "ogc", "id": "demo", "title": "Demo tulos",
+        "endpoint": "https://example.test/"}], [])
+    downloaded = []
 
 
-original_json = services._request_json
-worker_threads = []
-import threading
-main_thread = threading.get_ident()
+    original_json = services._request_json
+    worker_threads = []
+    import threading
+    main_thread = threading.get_ident()
 
-def fake_json(url, key=""):
-    worker_threads.append(threading.get_ident())
-    return {"features": [{"type": "Feature", "geometry": {"type": "Point", "coordinates": [lon, lat]},
-                          "properties": {"a": 1}}]}
+    def fake_json(url, key=""):
+        worker_threads.append(threading.get_ident())
+        return {"features": [{"type": "Feature", "geometry": {"type": "Point", "coordinates": [lon, lat]},
+                              "properties": {"a": 1}}]}
 
-services._request_json = fake_json
-original_download = plugin_module.download_to_files
+    services._request_json = fake_json
+    original_download = plugin_module.download_to_files
 
-def track_download(*args, **kwargs):
-    value = original_download(*args, **kwargs)
-    downloaded.append(value)
-    return value
+    def track_download(*args, **kwargs):
+        value = original_download(*args, **kwargs)
+        downloaded.append(value)
+        return value
 
-plugin_module.download_to_files = track_download
-plugin_module.selection_geometry = lambda *args: (square_mask, tm35)
-dialog = plugin_module.SuomenvaylatDialog()
+    plugin_module.download_to_files = track_download
+    plugin_module.selection_geometry = lambda *args: (square_mask, tm35)
+    dialog = plugin_module.SuomenvaylatDialog()
 
 
-def wait_for(condition, seconds=20):
-    deadline = time.time() + seconds
-    while not condition():
+    def wait_for(condition, seconds=20):
+        deadline = time.time() + seconds
+        while not condition():
+            app.processEvents()
+            if time.time() > deadline:
+                raise AssertionError("timeout")
+            time.sleep(0.01)
+
+
+    dialog._load_catalog()
+    wait_for(lambda: dialog.refresh_button.isEnabled() and dialog.entries)
+    dialog.layers.item(0).setCheckState(plugin_module.Qt.Checked)
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as folder:
+        dialog.output.setText(folder)
+        dialog._run_download()
+        wait_for(lambda: dialog._download_task is None)
+    services._request_json = original_json
+    assert len(downloaded) == 1
+    assert worker_threads and all(value != main_thread for value in worker_threads)
+    assert any(layer.name() == "Demo tulos" for layer in project.mapLayers().values())
+    print("background task download passed", flush=True)
+    print("ALL QGIS AUDIT SMOKE CHECKS PASSED", flush=True)
+
+    dialog.close()
+    dialog.deleteLater()
+
+
+if __name__ == "__main__":
+    import gc
+    from qgis.PyQt.QtCore import QCoreApplication, QEvent
+    try:
+        main()
+    finally:
+        # Release test-owned Qt/QGIS objects before the provider registry and
+        # application are destroyed (Linux QGIS 3.44 otherwise crashes at exit).
+        QgsProject.instance().removeAllMapLayers()
+        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
         app.processEvents()
-        if time.time() > deadline:
-            raise AssertionError("timeout")
-        time.sleep(0.01)
-
-
-dialog._load_catalog()
-wait_for(lambda: dialog.refresh_button.isEnabled() and dialog.entries)
-dialog.layers.item(0).setCheckState(plugin_module.Qt.Checked)
-with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as folder:
-    dialog.output.setText(folder)
-    dialog._run_download()
-    wait_for(lambda: dialog._download_task is None)
-services._request_json = original_json
-assert len(downloaded) == 1
-assert worker_threads and all(value != main_thread for value in worker_threads)
-assert any(layer.name() == "Demo tulos" for layer in project.mapLayers().values())
-print("background task download passed", flush=True)
-print("ALL QGIS AUDIT SMOKE CHECKS PASSED", flush=True)
+        gc.collect()
+        app.exitQgis()

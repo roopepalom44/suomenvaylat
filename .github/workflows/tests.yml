@@ -46,6 +46,7 @@ jobs:
     env:
       QT_QPA_PLATFORM: offscreen
       QGIS_PREFIX_PATH: /usr
+      PYTHONFAULTHANDLER: '1'
     steps:
       - uses: actions/checkout@v7
         with:
