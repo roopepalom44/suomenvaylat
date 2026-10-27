@@ -107,8 +107,7 @@ def open_downloaded_layer(item, entry):
     if not layer.isValid():
         raise RuntimeError(f"Tallennettu taso ei avaudu: {item['title']}")
     if name:
-        _apply_provider_style(layer, entry, path, prepared=item.get("style_prepared", False),
-                              preparation=item.get("style_preparation"))
+        _apply_provider_style(layer, entry, path, prepared=item.get("style_prepared", False))
     return layer
 
 
@@ -119,13 +118,10 @@ def download_to_files(entry, mask, mask_crs, destination, context, key="", progr
     try:
         count = download(entry, mask, mask_crs, destination, key, progress,
                          add_layer=outputs.append, files_only=True)
-        preparation = None
-        if entry.get("kind") in ("wfs", "oskari_wfs"):
-            preparation = _prepare_provider_style(entry, destination)
+        if entry.get("kind") == "wfs":
+            _prepare_provider_style(entry, destination)
         for item in outputs:
             item["style_prepared"] = True
-            if preparation is not None:
-                item["style_preparation"] = preparation
         return count, outputs
     except Exception:
         cleanup_output(destination)
@@ -763,47 +759,25 @@ def _prepare_provider_style(entry, destination):
             save_sld(root, path)
             localize_graphics(root, endpoint, path, _style_fetch)
             save_sld(root, path)
-            return {"available": True}
-        return {"available": False}
-    except Exception as exc:
-        # Keep the original SLD for inspection, but never apply that incomplete
-        # file after a failed icon download (including worker -> GUI handoff).
-        message = str(exc) if isinstance(exc, StyleError) else "Rajapinnan symboliikkaa ei saatu ladattua"
-        return {"available": False, "error": message}
+    except Exception:
+        pass  # Styling must not invalidate a complete dataset.
 
 
-def _apply_provider_style(layer, entry, destination, prepared=False, preparation=None):
+def _apply_provider_style(layer, entry, destination, prepared=False):
     """Apply and persist a downloaded style on the GUI thread."""
     from qgis.core import QgsMessageLog, Qgis
-    from .qgis_styles import ensure_visible_renderer, reset_to_fallback, validate_sld_resources
     path = Path(destination).with_suffix(".sld")
     try:
         if not prepared:
-            preparation = _prepare_provider_style(entry, destination)
-        if preparation is not None:
-            if preparation.get("error"):
-                raise StyleError(preparation["error"])
-            if not preparation.get("available"):
-                return
+            _prepare_provider_style(entry, destination)
         if not path.exists():
             return
-        validate_sld_resources(path)
         message, ok = layer.loadSldStyle(str(path))
         if not ok:
             raise StyleError("QGIS ei voinut ottaa SLD-symboliikkaa käyttöön")
         from .qgis_labels import complete_sld_labels
         complete_sld_labels(layer, path)
-        ensure_visible_renderer(layer)
         layer.setCustomProperty("suomenvaylat/style_status", "Rajapinnan symboliikka")
-    except Exception as exc:
-        # A failed/partial import may have already replaced the native renderer.
-        # Replace it explicitly and persist that visible style in the GeoPackage.
-        reset_to_fallback(layer)
-        message = str(exc) if isinstance(exc, StyleError) else "Rajapinnan symboliikan käyttöönotto epäonnistui"
-        message += "; käytetään näkyvää oletussymbolia"
-        layer.setCustomProperty("suomenvaylat/style_status", message)
-        QgsMessageLog.logMessage(layer.name() + ": " + message, "Suomenväylät", Qgis.Warning)
-    try:
         # GeoPackage stores the native renderer and labels, so reopening the
         # downloaded dataset also restores the style without a network request.
         message = layer.saveStyleToDatabase("Suomenväylät", "Rajapinnan oletustyyli", True, "")
@@ -813,9 +787,12 @@ def _apply_provider_style(layer, entry, destination, prepared=False, preparation
         layer.saveNamedStyle(str(Path(destination).with_suffix(".qml")))
         if message:
             QgsMessageLog.logMessage("Tyylin GeoPackage-tallennus: " + message, "Suomenväylät", Qgis.Warning)
-    except Exception:
-        QgsMessageLog.logMessage(layer.name() + ": Tyylin tallennus epäonnistui; kohteet näkyvät kartalla.",
-                                 "Suomenväylät", Qgis.Warning)
+    except Exception as exc:
+        # Raw HTTP exception URLs can contain an Aino token. Persist only the
+        # curated error, never a service response or authenticated request URL.
+        message = str(exc) if isinstance(exc, StyleError) else "Rajapinnan symboliikan käyttöönotto epäonnistui"
+        layer.setCustomProperty("suomenvaylat/style_status", message)
+        QgsMessageLog.logMessage(layer.name() + ": " + message, "Suomenväylät", Qgis.Warning)
 
 
 def _download_oskari_wms(entry, mask, mask_crs, destination, add_layer=None):

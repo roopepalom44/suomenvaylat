@@ -1,9 +1,3 @@
-## Suomenväylät QGIS 0.2.17
-
-- Ladatut kohteet näkyvät myös, jos mikään palvelutyylin luokka ei vastaa niiden arvoja. Luokittelemattomat kohteet saavat varasymbolin; osuvat luokat ja palvelun omat ELSE-säännöt säilyvät.
-- Puuttuva tyylikenttä tai latautumaton symbolikuva palauttaa näkyvän oletussymbolin. Epäonnistunut tyylin valmistelu välittyy myös lataustyöntekijältä käyttöliittymälle, joten keskeneräistä SLD:tä ei oteta käyttöön.
-- Näkyvä varatyyli tallennetaan sekä GeoPackageen että QML-tiedostoon. Kuvavientitesti toistaa tyhjän kartan virheen koko kirjoitus-/avausketjussa ja tarkistaa korjauksen myös uudelleen avatussa aineistossa.
-
 ## Suomenväylät QGIS 0.2.16
 
 - SLD-labeloinnin puuttuvat ympyrä-/neliötaustat ja mittakaavarajat täydennetään QGISin tuonnin jälkeen. Esimerkiksi Väylän nopeusrajoitusten numerot säilyvät ympyröissä myös uudelleen avatussa GeoPackagessa ja QML-tyylissä.
