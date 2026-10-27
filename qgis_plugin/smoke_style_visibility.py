@@ -113,15 +113,13 @@ def main():
                 settings = QgsMapSettings()
                 context = QgsRenderContext.fromMapSettings(settings)
                 context.setRendererScale(500)
-                # appendScopes() double-frees its scope list on Linux PyQGIS; a single owned scope is enough.
-                context.expressionContext().appendScope(QgsExpressionContextUtils.layerScope(layer))
+                context.expressionContext().appendScopes(QgsExpressionContextUtils.globalProjectLayerScopes(layer))
                 renderer = layer.renderer()
                 renderer.startRender(context, layer.fields())
                 feature = next(layer.getFeatures())
                 context.expressionContext().setFeature(feature)
                 assert any(symbol.color().name() == "#ff0000" for symbol in renderer.symbolsForFeature(feature, context))
                 renderer.stopRender(context)
-                del renderer, context, settings
             reopened = QgsVectorLayer(str(destination), name + " reopened", "ogr")
             assert reopened.isValid() and reopened.featureCount() == 3
             assert render(reopened, name + "_reopened") == colors, (name, "GeoPackage lost the visible style")
