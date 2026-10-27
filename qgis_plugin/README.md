@@ -1,6 +1,12 @@
-# Suomenväylät QGIS (esijulkaisu 0.2.16)
+# Suomenväylät QGIS (esijulkaisu 0.2.17)
 
 QGIS 3.34+:lle tehty erillinen, natiivi Python-lisäosa. ArcGIS Pro -laajennus pysyy samassa projektissa.
+
+0.2.17 estää ladattujen kohteiden katoamisen kartalta, jos palvelutyylin
+luokittelu ei vastaa niiden attribuutteja. Näille kohteille tulee näkyvä
+**Luokittelemattomat kohteet** -symboli. Osuvien luokkien alkuperäiset värit
+säilyvät. Puuttuva tyylikenttä tai latautumaton kuvasymboli palauttaa näkyvän
+oletussymbolin ja antaa varoituksen. Korjattu tyyli tallentuu GeoPackageen ja QML:ään.
 
 Väylän nopeusrajoitusten labelointi säilyttää 0.2.16:ssa nopeusluvut,
 ympyrätaustat ja mittakaavarajan 1:362834. QGISin SLD-tuonnin puuttuvat taustat

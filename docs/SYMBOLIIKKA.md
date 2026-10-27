@@ -77,6 +77,16 @@ pelkistettyä tyyliä, joka toimii laajemmin eri asiakasohjelmissa.
 
 ## Rajat ja virhetilanteet
 
+QGIS 0.2.17 säilyttää myös luokittelemattomien kohteiden näkyvyyden.
+Jos mikään SLD:n sääntö ei anna kohteelle symbolia, se piirretään harmaana
+**Luokittelemattomat kohteet** -luokassa. Alkuperäinen sääntöpuu, värit ja
+sen omat ELSE-säännöt säilyvät. Geometrian lähdetyylin mittakaavarajan
+ulkopuolella varasymboli pitää aineiston näkyvänä; labelien mittakaavarajat säilyvät.
+Jos tyyli viittaa puuttuvaan kenttään tai symbolikuvaan, käytetään näkyvää
+oletussymbolia ja näytetään varoitus. Epäonnistunut kuvan lataus ei saa jättää
+keskeneräistä SLD:tä käyttöön. Näkyvä tyyli tallentuu myös GeoPackageen/QML:ään.
+[Näkyvyysvirheen toisto ja tarkistukset](QGIS_STYLE_VISIBILITY_2026-10-27.md).
+
 Tyylipyyntö käyttää 15 sekunnin aikakatkaisua. Tyylin puuttuminen tai
 muunnosvirhe ei poista jo tallennettua aineistoa eikä keskeytä muiden tasojen
 latausta. ArcGIS kirjoittaa varoituksen GP-lokiin; QGIS näyttää tilan ajon
@@ -122,6 +132,10 @@ pelkkä tyylin palautuminen GetStylesista ei takaa kaikkien kuvien saatavuutta.
   GeoPackagen oletustyylin palautuminen ja kartan kuvavienti.
 - `qgis_plugin/smoke_labels.py`: Väylän nopeusrajoitusten kymmenen oikeaa
   numeroa, ympyrätaustat, mittakaavaraja, kuvavienti ja GeoPackage/QML-palautuminen.
+- `qgis_plugin/smoke_style_visibility.py`: koko lataustyöntekijä-/kirjoitus-/avausketju,
+  tyhjän kartan virheen toisto, luokittelemattomat ja NULL-arvot, puuttuva kenttä,
+  palvelun oma ELSE, mittakaavarajat ja rikkinäinen kuvasymboli. Näkyvyys tarkistetaan
+  kuvaviennistä sekä alkuperäisestä että uudelleen avatusta GeoPackagesta/QML:stä.
 - `tests/smoke_vector_tile_styles_arcgispro.py` ja
   `qgis_plugin/smoke_vector_tile_styles.py`: paikallinen HTTP-palvelu tarjoilee
   oikean MVT-tiilen ja Mapbox-tyylin; molempien ohjelmien kuvaviennistä tarkistetaan

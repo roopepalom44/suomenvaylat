@@ -6,6 +6,11 @@
 
 ArcGIS Pro -laajennus Suomenväylät-aineistojen lataamiseen WFS-rajapinnoista.
 
+**QGIS-kohteiden näkyvyys (0.2.17):** palvelutyylin luokittelemattomat kohteet
+piirretään varasymbolilla, joten attribuuttitauluun ladatut kohteet eivät katoa
+kartalta puuttuvan luokan takia. Rikkinäinen tyyli palauttaa näkyvän oletussymbolin.
+Alkuperäiset toimivat luokat säilyvät, ja näkyvä tyyli tallentuu GeoPackageen/QML:ään.
+
 **Labelointi (ArcGIS 1.0.27 / QGIS 0.2.16):** SLD-tekstisymbolit muunnetaan nyt ArcGISin
 label-luokiksi. Esimerkiksi Väylän nopeusrajoitusten numerot, värit,
 ympyrätaustat ja mittakaavarajat säilyvät myös tallennetussa LYRX-tiedostossa.
