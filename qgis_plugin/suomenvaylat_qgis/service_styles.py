@@ -467,9 +467,7 @@ def arc_rules(root, geometry):
             layers = []
             for sym in element:
                 if local(sym).endswith("Symbolizer"):
-                    if local(sym) == "TextSymbolizer":
-                        warnings.append("SLD:n tekstisymbolia ei muunnettu ArcGIS-tekstitykseksi")
-                    else:
+                    if local(sym) != "TextSymbolizer":
                         layers = symbol_layers(sym, geometry) + layers
             if not layers:
                 continue
@@ -477,9 +475,170 @@ def arc_rules(root, geometry):
                           "filter": predicate(child(element, "Filter")), "else": child(element, "ElseFilter") is not None,
                           "group": group, "min": number(value(element, "MinScaleDenominator")),
                           "max": number(value(element, "MaxScaleDenominator"), math.inf), "layers": layers})
-    if not rules:
+    if not rules and not any(local(item) == "TextSymbolizer" for item in root.iter()):
         raise StyleError("SLD ei sisällä tämän geometriatyypin tuettua symboliikkaa")
     return rules, sorted(set(warnings))
+
+
+def label_parts(element):
+    """SLD field/literal concatenation, without evaluating provider functions."""
+    if element is None:
+        raise StyleError("Tekstisymbolista puuttuu Label")
+    parts = []
+    if element.text and (not len(element) or element.text.strip()):
+        parts.append(("literal", element.text))
+    for item in element:
+        kind = local(item)
+        if kind == "PropertyName" and not len(item) and (item.text or "").strip():
+            parts.append(("field", field_name(item.text.strip())))
+        elif kind == "Literal" and not len(item):
+            parts.append(("literal", item.text or ""))
+        else:
+            raise StyleError("Label-lausekkeen osaa ei tueta: " + kind)
+        if item.tail and item.tail.strip():
+            parts.append(("literal", item.tail))
+    if not parts:
+        raise StyleError("Label-lauseke on tyhjä")
+    return parts
+
+
+def text_symbol(element, geometry):
+    uom = element.get("uom", "")
+    if uom and not uom.endswith("pixel"):
+        raise StyleError("Tekstisymbolin yksikköä ei tueta")
+    if child(element, "Geometry") is not None:
+        # The default geometry is handled just like other symbolizers.
+        symbol_layers(element, geometry)
+    font = parameters(child(element, "Font"))
+    bold = font.get("font-weight", "normal").lower() in ("bold", "700", "800", "900")
+    italic = font.get("font-style", "normal").lower() in ("italic", "oblique")
+    family = font.get("font-family", "Arial").strip("\"'")
+    family = {"serif": "Times New Roman", "sans-serif": "Arial", "monospace": "Courier New"}.get(family.lower(), family)
+    symbol = {"type": "CIMTextSymbol", "fontFamilyName": family,
+              "fontStyleName": "Bold Italic" if bold and italic else "Bold" if bold else "Italic" if italic else "Regular",
+              "height": number(font.get("font-size"), 10) * 0.75,
+              "horizontalAlignment": "Center", "verticalAlignment": "Center",
+              "symbol": {"type": "CIMPolygonSymbol", "symbolLayers": [fill(child(element, "Fill")) or
+                         {"type": "CIMSolidFill", "enable": True, "color": color("black")}]}}
+    halo = child(element, "Halo")
+    if halo is not None:
+        symbol["haloSize"] = number(value(halo, "Radius"), 1) * 0.75
+        symbol["haloSymbol"] = {"type": "CIMPolygonSymbol", "symbolLayers": [fill(child(halo, "Fill")) or
+                                {"type": "CIMSolidFill", "enable": True, "color": color("white")}]}
+    placement = child(element, "LabelPlacement")
+    point, line = child(placement, "PointPlacement"), child(placement, "LinePlacement")
+    if point is not None:
+        anchor = child(point, "AnchorPoint")
+        ax, ay = number(value(anchor, "AnchorPointX"), 0.5), number(value(anchor, "AnchorPointY"), 0.5)
+        if ax not in (0, 0.5, 1) or ay not in (0, 0.5, 1):
+            raise StyleError("Tekstisymbolin ankkuripistettä ei tueta")
+        symbol["horizontalAlignment"] = {0: "Left", 0.5: "Center", 1: "Right"}[ax]
+        symbol["verticalAlignment"] = {0: "Bottom", 0.5: "Center", 1: "Top"}[ay]
+        displacement = child(point, "Displacement")
+        symbol["offsetX"] = number(value(displacement, "DisplacementX")) * 0.75
+        symbol["offsetY"] = number(value(displacement, "DisplacementY")) * 0.75
+        symbol["angle"] = -number(value(point, "Rotation"))
+    options = {item.get("name"): (item.text or "").strip() for item in children(element, "VendorOption")}
+    graphic = child(element, "Graphic")
+    if graphic is not None:
+        point_symbolizer = ET.Element("PointSymbolizer")
+        graphic = copy.deepcopy(graphic)
+        if child(graphic, "Size") is None:
+            # A shield must enclose both the glyph height and the provider margin.
+            ET.SubElement(graphic, "Size").text = str(symbol["height"] / 0.75 * 2 + 2 * number(options.get("graphic-margin"), 0))
+        point_symbolizer.append(graphic)
+        symbol["callout"] = {"type": "CIMPointSymbolCallout", "backgroundScale": "PropUniform",
+                             "pointSymbol": {"type": "CIMPointSymbol", "symbolLayers": symbol_layers(point_symbolizer, "Point")}}
+    feature_type = {"Point": "Point", "Multipoint": "Point", "Polyline": "Line", "Polygon": "Polygon"}[geometry]
+    along = line is not None
+    offset = number(value(line, "PerpendicularOffset")) * 0.75
+    group = options.get("group", "").lower() in ("yes", "true", "1")
+    standard = {"type": "CIMStandardLabelPlacementProperties", "featureType": feature_type,
+                "pointPlacementMethod": "OnTopPoint", "polygonPlacementMethod": "AlwaysHorizontal",
+                "numLabelsOption": "OneLabelPerName" if group else "OneLabelPerShape",
+                "lineLabelPosition": {"type": "CIMStandardLineLabelPosition", "above": bool(offset),
+                                      "onTop": not offset, "inLine": True, "horizontal": not along,
+                                      "parallel": along, "offset": offset}}
+    maplex = {"type": "CIMMaplexLabelPlacementProperties", "featureType": feature_type,
+              "pointPlacementMethod": "CenteredOnPoint", "polygonPlacementMethod": "HorizontalInPolygon",
+              "linePlacementMethod": "OffsetStraightFromLine" if offset else "CenteredStraightOnLine" if along else "CenteredHorizontalOnLine",
+              "primaryOffset": abs(offset), "canStackLabel": False, "thinDuplicateLabels": group,
+              "multiPartOption": "OneLabelPerFeature"}
+    return {"parts": label_parts(child(element, "Label")), "textSymbol": {"type": "CIMSymbolReference", "symbol": symbol},
+            "standardLabelPlacementProperties": standard, "maplexLabelPlacementProperties": maplex}
+
+
+def arc_label_rules(root, geometry):
+    rules, warnings = [], []
+    for group, fts in enumerate(item for item in root.iter() if local(item) == "FeatureTypeStyle"):
+        for element in children(fts, "Rule"):
+            texts = []
+            for sym in children(element, "TextSymbolizer"):
+                try:
+                    texts.append(text_symbol(sym, geometry))
+                except StyleError as ex:
+                    warnings.append("SLD:n tekstisymbolia ei muunnettu labeloinniksi: " + str(ex))
+            invalid_filter = False
+            try:
+                test = predicate(child(element, "Filter"))
+            except StyleError as ex:
+                invalid_filter, test = True, ["true"]
+                if texts:
+                    warnings.append("SLD:n label-suodatinta ei muunnettu: " + str(ex))
+                texts = []
+            rules.append({"label": value(element, "Title") or value(element, "Name") or "Label",
+                          "filter": test, "invalid_filter": invalid_filter, "else": child(element, "ElseFilter") is not None,
+                          "group": group, "min": number(value(element, "MinScaleDenominator")),
+                          "max": number(value(element, "MaxScaleDenominator"), math.inf), "texts": texts})
+    for rule in rules:
+        if rule["texts"] and rule["else"] and any(other["invalid_filter"] for other in rules if other["group"] == rule["group"]):
+            rule["texts"] = []
+            warnings.append("SLD:n ElseFilter-labelointia ei muunnettu: ryhmässä on tuntematon suodatin")
+    return rules, sorted(set(warnings))
+
+
+def label_fields(rule, rules):
+    needed = filter_fields(rule["filter"])
+    for text in rule["texts"]:
+        needed.update(part[1] for part in text["parts"] if part[0] == "field")
+    if rule["else"]:
+        for other in rules:
+            if other["group"] == rule["group"] and not other["else"]:
+                needed.update(filter_fields(other["filter"]))
+    return needed
+
+
+def arc_label_classes(rules, fields):
+    classes = []
+    for rule in rules:
+        if not rule["texts"]:
+            continue
+        if rule["else"]:
+            # Split at peer scale boundaries: the label profile has no $view.scale.
+            peers = [other for other in rules if other["group"] == rule["group"] and not other["else"]]
+            bounds = sorted({rule["min"], rule["max"]} | {b for other in peers for b in (other["min"], other["max"])
+                                                       if rule["min"] < b < rule["max"]})
+            intervals = list(zip(bounds, bounds[1:]))
+        else:
+            peers, intervals = [], [(rule["min"], rule["max"])]
+        for low, high in intervals:
+            tests = [arcade(other["filter"], fields) for other in peers if other["min"] <= low < other["max"]]
+            condition = "!(" + " || ".join(tests) + ")" if tests else "true" if rule["else"] else arcade(rule["filter"], fields)
+            for text in rule["texts"]:
+                parts = []
+                for kind, val in text["parts"]:
+                    if kind == "literal":
+                        parts.append(json.dumps(val, ensure_ascii=False))
+                    else:
+                        field = "$feature[" + json.dumps(fields[val][0], ensure_ascii=False) + "]"
+                        parts.append('IIf(' + field + ' == null, "", Text(' + field + '))')
+                classes.append({"type": "CIMLabelClass", "name": rule["label"] + " " + str(len(classes) + 1),
+                                "visibility": True, "expressionEngine": "Arcade",
+                                "expression": 'if (!(' + condition + ')) { return ""; }\nreturn ' + " + ".join(parts) + ";",
+                                # CIM uses zoomed-out minimumScale and zoomed-in maximumScale.
+                                "minimumScale": high if math.isfinite(high) else 0, "maximumScale": low,
+                                **{key: copy.deepcopy(text[key]) for key in ("textSymbol", "standardLabelPlacementProperties", "maplexLabelPlacementProperties")}})
+    return classes
 
 
 def matching_rules(rules, row, scale):

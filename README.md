@@ -6,6 +6,11 @@
 
 ArcGIS Pro -laajennus Suomenväylät-aineistojen lataamiseen WFS-rajapinnoista.
 
+**Labelointi (1.0.27):** SLD-tekstisymbolit muunnetaan nyt ArcGISin
+label-luokiksi. Esimerkiksi Väylän nopeusrajoitusten numerot, värit,
+ympyrätaustat ja mittakaavarajat säilyvät myös tallennetussa LYRX-tiedostossa.
+Asenna päivitys ja lataa taso uudelleen, jotta aiemmin ohitetut tekstit tulevat mukaan.
+
 **SYKEn tasoluettelo (1.0.24 / QGIS 0.2.13):** Syke-valinta kattaa nyt
 [SYKEn rajapintahakemiston](https://www.syke.fi/fi/ymparistotieto/avoimet-rajapinnat/paikkatietorajapinnat)
 kaikki WFS-palvelut, myös pohjavesialueet ja pohjavesialuerajat. Aiemmin

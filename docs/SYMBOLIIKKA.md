@@ -87,8 +87,15 @@ ArcGIS-muunnos ei kata koko SLD/SE-standardia: esimerkiksi SVG-kuvasymbolit,
 kuviotäytöt ja kuviolliset viivat, laskennalliset symboliominaisuudet,
 `PropertyIsLike`, GeoServerin funktiot ja vaihtoehtoiset geometriakentät
 voivat estää muunnoksen. Näissä tilanteissa alkuperäinen SLD säilytetään ja
-tasolle jää ArcGISin oletussymboli. Tekstisymbolit jätetään pois erillisellä
-varoituksella; muita tuettuja symboleita voidaan käyttää. QGIS käyttää omaa
+tasolle jää ArcGISin oletussymboli. Versiosta 1.0.27 alkaen tekstisymbolit
+muunnetaan ArcGISin label-luokiksi: kenttä- ja vakiotekstit, yhdistelmät,
+suodattimet, mittakaavarajat, fontti, väri, halo, piste-/viivasijoittelu sekä
+paikallisiksi ladattavat taustamerkit siirtyvät LYRX-tiedostoon. Väylän
+nopeusrajoituksissa numerot ja niiden ympyrätaustat ovat erillisiä label-luokkia.
+GeoServerin laskennalliset label-funktiot ja vaihtoehtoiset geometriat eivät
+kuulu tukeen; tueton label tai puuttuva label-kenttä antaa erillisen varoituksen,
+ja muut tuetut symbolit säilyvät. Palvelimen ja ArcGISin sijoittelumoottorit
+voivat sijoittaa tekstit eri kohtiin. QGIS käyttää omaa
 SLD-tukeaan, jonka toteutus ei sekään kata kaikkia palvelinkohtaisia laajennuksia.
 Shapefilen kenttänimen katkeaminen voi estää luokittelukentän tunnistamisen;
 työkalu ilmoittaa siitä eikä arvaa luokittelua. GDB/GeoPackage säilyttää pitkät nimet.
@@ -105,6 +112,9 @@ pelkkä tyylin palautuminen GetStylesista ei takaa kaikkien kuvien saatavuutta.
 - ArcGIS Pron oma Python: `tests/smoke_styles_arcgispro.py`. Kuuden julkisen
   palvelun oikeat SLD-näytteet, CIM-luokat, LYRX:n uudelleenavaus, kartalle lisäys
   ja mittakaavan mukana vaihtuvan värin todellinen kuvavienti.
+- `tests/smoke_labels_arcgispro.py`: Väylän oikea nopeusrajoitustyyli,
+  kymmenen label-luokkaa, kenttäaliakset, Standard- ja Maplex-kuvaviennit,
+  mittakaavarajan tarkistus sekä LYRX/APRX:n uudelleenavaus.
 - QGISin oma Python: `qgis_plugin/smoke_styles.py`. Samat palvelutyylit,
   GeoPackagen oletustyylin palautuminen ja kartan kuvavienti.
 - `tests/smoke_vector_tile_styles_arcgispro.py` ja

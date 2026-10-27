@@ -587,10 +587,32 @@ class VaylaWFSDownloader(object):
                 renderer = service_styles.arc_renderer(rules, geometry, fields, [{}])
             definition = layer.getDefinition("V3")
             definition.renderer = service_styles.cim_object(arcpy, renderer)
+            label_rules, label_warnings = service_styles.arc_label_rules(root, geometry)
+            warnings.extend(label_warnings)
+            for rule in label_rules:
+                if not rule["texts"]:
+                    continue
+                for name in service_styles.label_fields(rule, label_rules):
+                    if name in fields:
+                        continue
+                    exact = [f for f in available if f.name.casefold() == name.casefold()]
+                    aliases = [f for f in available if str(f.aliasName).casefold() == name.casefold()]
+                    match = exact or aliases
+                    if len(match) != 1:
+                        warnings.append("Label-kenttää ei tunnistettu: " + name)
+                        rule["texts"] = []
+                        break
+                    fields[name] = (match[0].name, match[0].type)
+            label_classes = service_styles.arc_label_classes(label_rules, fields)
+            if label_classes:
+                definition.labelClasses = service_styles.cim_object(arcpy, label_classes)
+                definition.labelVisibility = True
             layer.setDefinition(definition)
             layer.saveACopy(base + ".lyrx")
             self._msg("[INFO] Rajapinnan symboliikka asetettu: {} (SLD ja LYRX tallennettu).".format(layer.name))
-            for warning in warnings:
+            if label_classes:
+                self._msg("[INFO] Labelointi asetettu: {} ({} label-luokkaa).".format(layer.name, len(label_classes)))
+            for warning in sorted(set(warnings)):
                 self._warn("[VAROITUS] {}: {}".format(layer.name, warning))
             return base + ".lyrx"
         except Exception as ex:

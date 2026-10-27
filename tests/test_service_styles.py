@@ -134,6 +134,108 @@ class StyleDiscoveryTests(unittest.TestCase):
 
 
 class ArcGISConversionTests(unittest.TestCase):
+    def label_style(self, body):
+        root = ET.fromstring('<StyledLayerDescriptor><NamedLayer><UserStyle><FeatureTypeStyle>' + body +
+                             '</FeatureTypeStyle></UserStyle></NamedLayer></StyledLayerDescriptor>')
+        return ss.arc_label_rules(root, "Polyline")
+
+    def test_real_speed_style_has_ten_filtered_scaled_label_classes(self):
+        root = ss.parse_xml(fixture("vayla_nopeusrajoitukset"))
+        render_rules, warnings = ss.arc_rules(root, "Polyline")
+        self.assertFalse(warnings)
+        self.assertEqual(20, len(render_rules))
+        rules, warnings = ss.arc_label_rules(root, "Polyline")
+        self.assertFalse(warnings)
+        fields = {"nopeusrajoitus": ("speed", "Integer"), "tyyppi": ("kind", "String")}
+        classes = ss.arc_label_classes(rules, fields)
+        self.assertEqual(10, len(classes))
+        first = classes[0]
+        self.assertIn('$feature["speed"] == 120.0', first["expression"])
+        self.assertIn('$feature["kind"] == "Nopeusrajoitus"', first["expression"])
+        self.assertNotIn("$view", first["expression"])
+        self.assertEqual((362834, 0), (first["minimumScale"], first["maximumScale"]))
+        symbol = first["textSymbol"]["symbol"]
+        self.assertEqual(("Times New Roman", "Bold", 7.5),
+                         (symbol["fontFamilyName"], symbol["fontStyleName"], symbol["height"]))
+        self.assertEqual("CIMPointSymbolCallout", symbol["callout"]["type"])
+        self.assertEqual("PropUniform", symbol["callout"]["backgroundScale"])
+        self.assertEqual("CenteredHorizontalOnLine", first["maplexLabelPlacementProperties"]["linePlacementMethod"])
+        self.assertTrue(first["maplexLabelPlacementProperties"]["thinDuplicateLabels"])
+        # Rendering-only attributes are not unnecessarily required for labels.
+        self.assertEqual({"nopeusrajoitus", "tyyppi"}, ss.label_fields(rules[-1], rules))
+
+    def test_label_literals_concatenate_and_fields_use_local_names(self):
+        rules, warnings = self.label_style('<Rule><TextSymbolizer><Label><Literal>Nopeus: </Literal>'
+                                          '<PropertyName>vayla:parent/nopeusrajoitus</PropertyName>'
+                                          '<Literal> km/h</Literal></Label></TextSymbolizer></Rule>')
+        self.assertFalse(warnings)
+        expression = ss.arc_label_classes(rules, {"nopeusrajoitus": ('speed"field', "Integer")})[0]["expression"]
+        self.assertIn('"Nopeus: " + IIf(', expression)
+        self.assertIn(' == null, "", Text(', expression)
+        self.assertIn('speed\\"field', expression)
+        self.assertIn('+ " km/h"', expression)
+
+    def test_label_halo_line_offset_and_scale_direction(self):
+        rules, warnings = self.label_style('<Rule><MinScaleDenominator>1000</MinScaleDenominator>'
+            '<MaxScaleDenominator>20000</MaxScaleDenominator><TextSymbolizer><Label>Road</Label>'
+            '<Font><CssParameter name="font-style">italic</CssParameter></Font>'
+            '<Halo><Radius>2</Radius><Fill><CssParameter name="fill">#ffffff</CssParameter></Fill></Halo>'
+            '<LabelPlacement><LinePlacement><PerpendicularOffset>4</PerpendicularOffset></LinePlacement></LabelPlacement>'
+            '</TextSymbolizer></Rule>')
+        self.assertFalse(warnings)
+        label = ss.arc_label_classes(rules, {})[0]
+        self.assertEqual((20000, 1000), (label["minimumScale"], label["maximumScale"]))
+        self.assertEqual(1.5, label["textSymbol"]["symbol"]["haloSize"])
+        self.assertEqual("Italic", label["textSymbol"]["symbol"]["fontStyleName"])
+        self.assertEqual(3, label["maplexLabelPlacementProperties"]["primaryOffset"])
+
+    def test_else_labels_exclude_graphical_peers_and_split_their_scale_ranges(self):
+        rules, warnings = self.label_style('<Rule><MaxScaleDenominator>1000</MaxScaleDenominator>'
+            '<Filter><PropertyIsEqualTo><PropertyName>type</PropertyName><Literal>A</Literal></PropertyIsEqualTo></Filter>'
+            '<LineSymbolizer><Stroke/></LineSymbolizer></Rule>'
+            '<Rule><ElseFilter/><TextSymbolizer><Label>Other</Label></TextSymbolizer></Rule>')
+        self.assertFalse(warnings)
+        self.assertEqual({"type"}, ss.label_fields(rules[1], rules))
+        classes = ss.arc_label_classes(rules, {"type": ("type", "String")})
+        self.assertEqual(2, len(classes))
+        self.assertIn('!((', classes[0]["expression"])
+        self.assertIn('$feature["type"] == "A"', classes[0]["expression"])
+        self.assertEqual((1000, 0), (classes[0]["minimumScale"], classes[0]["maximumScale"]))
+        self.assertNotIn('$feature', classes[1]["expression"])
+        self.assertEqual((0, 1000), (classes[1]["minimumScale"], classes[1]["maximumScale"]))
+
+    def test_unsupported_label_function_warns_without_removing_line_symbols(self):
+        root = ET.fromstring('<StyledLayerDescriptor><FeatureTypeStyle><Rule>'
+            '<LineSymbolizer><Stroke/></LineSymbolizer><TextSymbolizer><Label>'
+            '<Function name="strConcat"><PropertyName>name</PropertyName></Function>'
+            '</Label></TextSymbolizer></Rule></FeatureTypeStyle></StyledLayerDescriptor>')
+        rules, warnings = ss.arc_rules(root, "Polyline")
+        self.assertEqual(1, len(rules))
+        labels, warnings = ss.arc_label_rules(root, "Polyline")
+        self.assertEqual([], ss.arc_label_classes(labels, {}))
+        self.assertEqual(1, len(warnings))
+        self.assertIn("Function", warnings[0])
+
+    def test_label_only_style_is_accepted_and_has_no_default_geometry_symbol(self):
+        root = ET.fromstring('<StyledLayerDescriptor><FeatureTypeStyle><Rule>'
+            '<TextSymbolizer><Label>Only text</Label></TextSymbolizer></Rule></FeatureTypeStyle></StyledLayerDescriptor>')
+        rules, warnings = ss.arc_rules(root, "Point")
+        self.assertEqual([], rules)
+        renderer = ss.arc_renderer(rules, "Point", {}, [{}])
+        self.assertFalse(renderer["useDefaultSymbol"])
+        self.assertFalse(renderer["groups"][0]["classes"])
+        label_rules, warnings = ss.arc_label_rules(root, "Point")
+        self.assertFalse(warnings)
+        self.assertEqual(1, len(ss.arc_label_classes(label_rules, {})))
+
+    def test_unknown_label_filter_does_not_label_all_features_or_enable_else_labels(self):
+        rules, warnings = self.label_style('<Rule><Filter><PropertyIsLike wildCard="*">'
+            '<PropertyName>name</PropertyName><Literal>A*</Literal></PropertyIsLike></Filter>'
+            '<TextSymbolizer><Label>A</Label></TextSymbolizer></Rule>'
+            '<Rule><ElseFilter/><TextSymbolizer><Label>Other</Label></TextSymbolizer></Rule>')
+        self.assertEqual([], ss.arc_label_classes(rules, {}))
+        self.assertEqual(2, len(warnings))
+
     def test_provider_width_and_colors_in_points(self):
         rules, warnings = ss.arc_rules(ss.parse_xml(fixture("vayla_0")), "Polyline")
         self.assertFalse(warnings)
