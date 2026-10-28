@@ -79,7 +79,8 @@ class ExecuteFlowTests(unittest.TestCase):
         self.copies.append((source, name))
         return workspace + "\\" + name
 
-    def _run(self, layers, clip=None, extra_management=None, extra_analysis=None, mml_api_key=""):
+    def _run(self, layers, clip=None, extra_management=None, extra_analysis=None, mml_api_key="",
+             source_names=None):
         shapes = {"pt1": "Point", "pt2": "Point", "pt3": "Point", "pt4": "Point",
                   "poly1": "Polygon", "bad1": "Polyline"}
 
@@ -99,7 +100,8 @@ class ExecuteFlowTests(unittest.TestCase):
             **(extra_management or {})
         )
         parameters = [
-            _param("OpenStreetMap", [["OpenStreetMap"]]),
+            _param(";".join(source_names or ["OpenStreetMap"]),
+                   [[source] for source in (source_names or ["OpenStreetMap"])]),
             _param(""),
             _param(";".join(layers), list(layers)),
             _param("Kunta/Kaupunki"),
@@ -128,6 +130,26 @@ class ExecuteFlowTests(unittest.TestCase):
         )
         self.assertEqual(len(names), len(set(name.casefold() for name in names)))
         self.assertFalse(self.tool._run_had_layer_failures)
+
+    def test_catalog_sources_without_selected_layers_are_not_queried_or_required(self):
+        self.tool._fetch_layer_list = lambda *args, **kwargs: self.fail(
+            "selected layer is already defined; no catalog should be queried")
+        self._run(["Osoitteet - OpenStreetMap (2)"],
+                  source_names=["OpenStreetMap", "Syke", "Aino", "Väylä"])
+        self.assertEqual(2, len(self.copies))
+        self.assertFalse(self.warnings)
+        self.assertFalse(self.tool._run_had_layer_failures)
+
+    def test_unavailable_osm_layer_does_not_block_the_next_selected_layer(self):
+        def fetch(layer_id, boundary):
+            if layer_id == "osm_addresses":
+                raise MODULE.OverpassRequestError("Kaikki OSM-palvelimet ovat tavoittamattomissa")
+            return ["pt3"], 1, 1
+        self.tool._fetch_osm_feature_chunks = fetch
+        self._run(["Osoitteet - OpenStreetMap", "Osoitteet - OpenStreetMap (2)"])
+        self.assertEqual(2, len(self.copies))
+        self.assertTrue(self.tool._run_had_layer_failures)
+        self.assertTrue(any("Kaikki OSM-palvelimet" in warning for warning in self.warnings))
 
     def _run_wfs_with_styles(self):
         tool = self.tool

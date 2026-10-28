@@ -9,6 +9,8 @@ support = importlib.util.module_from_spec(_support_spec)
 _support_spec.loader.exec_module(support)
 CQLRequestRejected = support.CQLRequestRejected
 EPSG_TM35FIN = support.EPSG_TM35FIN
+OVERPASS_REQUEST_TIMEOUT_S = support.OVERPASS_REQUEST_TIMEOUT_S
+OVERPASS_LAYER_TIMEOUT_S = support.OVERPASS_LAYER_TIMEOUT_S
 FORMAT_INDEPENDENT_HTTP_STATUS = support.FORMAT_INDEPENDENT_HTTP_STATUS
 GeofabrikPOIAdapter = support.GeofabrikPOIAdapter
 HttpTransport = support.HttpTransport
@@ -58,6 +60,13 @@ osm_element_geometry = support.osm_element_geometry
 MML_TOPO_VECTOR_TILE_TILEJSON = support.MML_TOPO_VECTOR_TILE_TILEJSON
 MML_PROPERTY_OGC_API_ENDPOINT = support.MML_PROPERTY_OGC_API_ENDPOINT
 MML_PROPERTY_VECTOR_TILE_TILEJSON = support.MML_PROPERTY_VECTOR_TILE_TILEJSON
+
+
+class OverpassRequestError(Exception):
+    def __init__(self, message, retry_grid=False):
+        super().__init__(message)
+        self.retry_grid = retry_grid
+
 
 class Toolbox(object):
     def __init__(self):
@@ -1100,6 +1109,33 @@ class VaylaWFSDownloader(object):
             self._secret_cache_key(self._runtime_aino_token),
         )
 
+    def _ensure_selected_layer_definitions(self, labels, source_names):
+        """Täydennä vain puuttuvat valinnat; säilytä UI:ssa jo haetut määritykset."""
+        known = dict(self._layer_mapping)
+        for mapping in getattr(self, "_layer_mapping_cache", {}).values():
+            for label in labels:
+                if label in mapping and label not in known:
+                    known[label] = mapping[label]
+        self._layer_mapping = known
+        missing = [label for label in labels if not self._lookup_layer_info(label)]
+        if not missing:
+            return
+        # Uusi GP-prosessi voi saada vain parametrit. Hyödynnä myös alkuperäisen
+        # rajapintavalinnan levyvälimuisti ennen uusia palvelupyyntöjä.
+        cached = self._read_layer_disk_cache(self._layer_catalog_cache_key(source_names))
+        if cached is not None:
+            _, mapping = cached
+            for label in missing:
+                if label in mapping:
+                    self._layer_mapping[label] = mapping[label]
+        missing = [label for label in labels if not self._lookup_layer_info(label)]
+        if not missing:
+            return
+        needed = self._sources_for_layers(missing) or source_names
+        known = dict(self._layer_mapping)
+        self._fetch_layer_list(needed, cache_key=self._layer_catalog_cache_key(needed))
+        self._layer_mapping = dict(known, **self._layer_mapping)
+
     @staticmethod
     def _is_layer_placeholder(value):
         """Tunnista UI:n tyhjän hakutuloksen viesti, ei oikea tasovalinta."""
@@ -1901,8 +1937,8 @@ class VaylaWFSDownloader(object):
             else:
                 try:
                     source_entries = self.wfs_registry.get_capabilities(source_name)
-                    for error in getattr(self.wfs_registry, "_capabilities_errors", {}).get(source_name, []):
-                        self._warn("[VAROITUS] {}-tasoluettelo on puutteellinen: {}".format(source_name, error))
+                    # Katalogin puutteet kuuluvat rajapintavalinnan viestiin,
+                    # eivät valitsemattomien aineistojen latausvaroituksiksi.
                 except Exception as ex:
                     self._warn("[VAROITUS] GetCapabilities epäonnistui lähteelle '{}': {}".format(source_name, ex))
                     source_entries = []
@@ -1958,25 +1994,97 @@ class VaylaWFSDownloader(object):
             return True
         return False
 
-    def _fetch_overpass_json(self, query):
+    @staticmethod
+    def _check_overpass_cancelled():
+        if getattr(getattr(arcpy, "env", None), "isCancelled", False):
+            # BaseException ohittaa myös tasosilmukan ja ruudukon varareitit.
+            raise KeyboardInterrupt("OpenStreetMap-haku keskeytettiin.")
+
+    def _read_overpass_response(self, request, timeout):
+        """Odota verkkoa pääsäikeessä; vain verkko ja JSON käsitellään taustalla."""
+        result = concurrent.futures.Future()
+        stopped = threading.Event()
+        started = time.monotonic()
+        deadline = started + timeout
+
+        def read_response():
+            try:
+                with _urlopen(request, timeout=timeout) as response:
+                    chunks, size = [], 0
+                    reader = getattr(response, "read1", response.read)
+                    while not stopped.is_set():
+                        if time.monotonic() >= deadline:
+                            raise TimeoutError("OSM-vastauksen odotusaika ylittyi.")
+                        chunk = reader(min(65536, service_network.MAX_RESPONSE_BYTES + 1 - size))
+                        if not chunk:
+                            break
+                        chunks.append(chunk)
+                        size += len(chunk)
+                        if size > service_network.MAX_RESPONSE_BYTES:
+                            raise ValueError("OSM-vastaus ylittää kokorajan.")
+                    if stopped.is_set():
+                        return
+                    headers = getattr(response, "headers", {})
+                    raw = service_network.decode_body(
+                        b"".join(chunks), headers.get("Content-Encoding"))
+                result.set_result(json.loads(raw.decode("utf-8")))
+            except BaseException as exc:
+                result.set_exception(exc)
+
+        # Daemon ei sido työkalun sulkemista jumittuneeseen verkkoyhteyteen.
+        # Työntekijä ei käytä arcpyä, scratchia eikä lähetä uusia pyyntöjä.
+        threading.Thread(target=read_response, daemon=True, name="suomenvaylat-osm").start()
+        next_notice = started + 10
+        try:
+            while True:
+                self._check_overpass_cancelled()
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError("OSM-palvelin ei vastannut {:.0f} sekunnissa.".format(timeout))
+                try:
+                    return result.result(timeout=min(1, remaining))
+                except concurrent.futures.TimeoutError:
+                    if result.done():
+                        return result.result()
+                now = time.monotonic()
+                if now >= next_notice:
+                    message = "  [INFO] Odotetaan OSM-palvelinta: {:.0f} s, aikarajaan {:.0f} s.".format(
+                        now - started, max(0, deadline - now))
+                    self._msg(message)
+                    self._progress("SetProgressorLabel", message.strip())
+                    next_notice = now + 10
+        finally:
+            stopped.set()
+
+    def _fetch_overpass_json(self, query, deadline=None):
         """Lähetä Overpass-kysely ja vaihda tarvittaessa varapalveluun."""
         overpass_urls = self.wfs_registry.get_endpoints("OpenStreetMap")
         if not overpass_urls:
-            raise Exception("OpenStreetMap Overpass -palveluosoite puuttuu.")
+            raise OverpassRequestError("OpenStreetMap Overpass -palveluosoite puuttuu.")
         post_body = urllib.parse.urlencode({"data": query}).encode("utf-8")
         endpoint_errors = []
-        for overpass_url in overpass_urls:
+        retry_grid = False
+        for index, overpass_url in enumerate(overpass_urls, 1):
+            self._check_overpass_cancelled()
+            timeout = OVERPASS_REQUEST_TIMEOUT_S
+            if deadline is not None:
+                timeout = min(timeout, deadline - time.monotonic())
+            if timeout <= 0:
+                raise OverpassRequestError("OpenStreetMap-haun {:.0f} sekunnin kokonaisaikaraja täyttyi.".format(
+                    OVERPASS_LAYER_TIMEOUT_S))
+            self._msg("  [INFO] OSM-palvelin {}/{}: {} (enintään {:.0f} s).".format(
+                index, len(overpass_urls), self._sanitize_url(overpass_url), timeout))
             try:
                 req = urllib.request.Request(
                     overpass_url, data=post_body,
                     headers={
                         "Content-Type": "application/x-www-form-urlencoded",
-                        "User-Agent": "ArcGISPro-Suomenvaylat-OSM/1.1",
+                        "Accept": "application/json",
+                        "Accept-Encoding": "gzip, deflate",
+                        "User-Agent": "Suomenvaylat-ArcGISPro/1.0 (+https://github.com/roopepalom44/suomenvaylat)",
                     }
                 )
-                with _urlopen(req, timeout=150) as response:
-                    raw = response.read().decode("utf-8", errors="replace")
-                payload = json.loads(raw)
+                payload = self._read_overpass_response(req, timeout)
                 if not isinstance(payload, dict):
                     raise Exception("Overpass palautti odottamattoman JSON-rakenteen.")
 
@@ -1987,27 +2095,38 @@ class VaylaWFSDownloader(object):
                 # kokeile seuraavaa palvelinta ja lopulta pienempää ruudukkoa.
                 remark = str(payload.get("remark") or "").strip()
                 if remark:
-                    raise Exception("Overpass palautti virheen: {}".format(remark[:500]))
+                    raise OverpassRequestError(
+                        "Overpass palautti virheen: {}".format(remark[:500]),
+                        retry_grid=any(word in remark.lower() for word in ("timed out", "timeout", "out of memory")))
                 if not isinstance(payload.get("elements"), list):
                     raise Exception("Overpass-vastauksesta puuttuu elements-taulukko.")
+                self._msg("  [INFO] OSM-vastaus saatu: {} kohdetta.".format(len(payload["elements"])))
                 return payload
             except Exception as ex:
+                retry_grid = retry_grid or getattr(ex, "retry_grid", False)
+                if isinstance(ex, urllib.error.HTTPError):
+                    retry_grid = retry_grid or ex.code == 504
+                    ex.close()
                 endpoint_errors.append("{}: {}".format(
                     self._sanitize_url(overpass_url), ex
                 ))
-        raise Exception(
+                self._msg("  [INFO] OSM-pyyntö epäonnistui: {}.{}".format(
+                    self._redact_secrets(ex),
+                    " Kokeillaan varapalvelinta." if index < len(overpass_urls) else ""))
+        raise OverpassRequestError(
             "Kaikki OpenStreetMap Overpass -yhteydet epäonnistuivat: {}".format(
                 " | ".join(endpoint_errors)
-            )
+            ), retry_grid=retry_grid
         )
 
     def _fetch_osm_feature_chunks(self, layer_id, boundary_fc, max_grid=4):
+        deadline = time.monotonic() + OVERPASS_LAYER_TIMEOUT_S
         bbox_wgs84 = self._extent_bbox_4326(boundary_fc)
         boundary_sr = arcpy.Describe(boundary_fc).spatialReference
 
         def _fetch_one(osm_bbox, batch_size):
             query = OverpassAdapter.build_query(layer_id, osm_bbox)
-            response_data = self._fetch_overpass_json(query)
+            response_data = self._fetch_overpass_json(query, deadline=deadline)
 
             if layer_id == GeofabrikPOIAdapter.LAYER_ID:
                 geojson = GeofabrikPOIAdapter.to_geojson(response_data)
@@ -2107,7 +2226,8 @@ class VaylaWFSDownloader(object):
             grid_levels = [1, 2, 4, max_grid]
         else:
             grid_levels = [1, 2, max_grid]
-        resilience = ResilienceStrategy(max_batch_size=1, grid_levels=grid_levels)
+        resilience = ResilienceStrategy(max_batch_size=1, grid_levels=grid_levels,
+                                        progress_callback=self._msg, cleanup_callback=self._safe_delete)
         return resilience.execute_with_fallback(_fetch_one, bbox_wgs84)
 
     def _is_heavy_layer(self, layer_clean: str) -> bool:
@@ -5546,6 +5666,18 @@ class VaylaWFSDownloader(object):
             if not self._is_layer_placeholder(value)
         ]
 
+        catalog_errors = getattr(self.wfs_registry, "_capabilities_errors", {})
+        incomplete = ["{}: {} palvelua".format(source, len(catalog_errors[source]))
+                      for source in source_values if catalog_errors.get(source)]
+        if incomplete:
+            set_warning = getattr(parameters[0], "setWarningMessage", None)
+            if callable(set_warning):
+                set_warning("Tasovalikoimasta puuttuu palveluja ({}). "
+                            "Tämä koskee tasoluetteloa; löytyneitä tasoja voi ladata.".format(
+                                "; ".join(incomplete)))
+        else:
+            parameters[0].clearMessage()
+
         needs_boundary = self._selected_layers_need_boundary(selected_layers)
         vals = self._parse_multivalue(extent_value_text)
 
@@ -5981,9 +6113,7 @@ class VaylaWFSDownloader(object):
             value for value in self._parse_multivalue_param(parameters[2])
             if not self._is_layer_placeholder(value)
         ]
-        needed_sources = list(dict.fromkeys(
-            source_names + self._sources_for_layers(layers)
-        ))
+        needed_sources = self._sources_for_layers(layers) or source_names
         extent_type = parameters[3].valueAsText
         extent_value_text = parameters[4].valueAsText
         custom_layer = parameters[5].valueAsText
@@ -6004,13 +6134,8 @@ class VaylaWFSDownloader(object):
         if not layers:
             self._error("[VIRHE] Valitse vähintään yksi aineisto tai karttataso.")
             raise arcpy.ExecuteError
-        # Valittujen tasojen lähteet voivat olla poissa nykyisestä rajapintalistasta.
-        # Hae määritykset niitä vastaavalla välimuistiavaimella.
         definitions_start = time.perf_counter()
-        self._fetch_layer_list(
-            needed_sources,
-            cache_key=self._layer_catalog_cache_key(needed_sources),
-        )
+        self._ensure_selected_layer_definitions(layers, source_names)
         self._tool_metrics.set(
             "tasomääritysten muodostaminen", time.perf_counter() - definitions_start
         )

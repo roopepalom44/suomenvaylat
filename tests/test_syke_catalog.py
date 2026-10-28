@@ -101,7 +101,7 @@ class RegistryTests(unittest.TestCase):
         self.assertEqual([], self.registry.get_capabilities("Syke"))
         self.assertEqual(2, len(self.registry._capabilities_errors["Syke"]))
 
-    def test_partial_catalog_warns_and_is_not_written_to_disk(self):
+    def test_partial_catalog_records_errors_without_download_warnings_or_disk_cache(self):
         tool = MODULE.VaylaWFSDownloader()
         tool.wfs_registry = self.registry
         warnings = []
@@ -112,7 +112,8 @@ class RegistryTests(unittest.TestCase):
         self.registry._parse_capabilities = lambda url: [] if url.startswith(GROUNDWATER) else parse(url)
         layers = tool._fetch_layer_list(["Syke"], "test", allow_disk_cache=False)
         self.assertEqual(["Suojelualueet - Syke"], layers)
-        self.assertTrue(any(GROUNDWATER in warning for warning in warnings))
+        self.assertEqual([], warnings)
+        self.assertTrue(any(GROUNDWATER in error for error in self.registry._capabilities_errors["Syke"]))
         self.assertEqual([], writes)
 
     def test_old_twelve_layer_disk_cache_has_a_different_key(self):

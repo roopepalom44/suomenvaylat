@@ -110,6 +110,9 @@ RETRYABLE_HTTP_STATUS = frozenset([408, 425, 429, 500, 502, 503, 504])
 WFS_PAGE_TIMEOUT_S = 300
 # Jätä tilaa palvelimen URL-rajaan: tarkista koko koodattu GET-osoite.
 WFS_CQL_GET_MAX_URL_LENGTH = 6500
+OVERPASS_QUERY_TIMEOUT_S = 45
+OVERPASS_REQUEST_TIMEOUT_S = 60
+OVERPASS_LAYER_TIMEOUT_S = 180
 FORMAT_INDEPENDENT_HTTP_STATUS = frozenset([401, 403, 414])
 RETRYABLE_NETWORK_ERRORS = (
     http.client.IncompleteRead,
@@ -565,7 +568,8 @@ class OverpassAdapter(object):
             return GeofabrikPOIAdapter.build_query(bbox_4326)
         for item in cls.LAYERS:
             if item["id"] == layer_id:
-                return "[out:json][timeout:120];{}".format(item["query"].format(bbox=bbox_4326))
+                return "[out:json][timeout:{}];{}".format(
+                    OVERPASS_QUERY_TIMEOUT_S, item["query"].format(bbox=bbox_4326))
         raise KeyError("Unknown OSM layer id: {}".format(layer_id))
 
     @staticmethod
@@ -648,7 +652,8 @@ class GeofabrikPOIAdapter(object):
             selectors.append(
                 'nwr["{}"~"{}"]({});'.format(key, pattern, bbox_4326)
             )
-        return "[out:json][timeout:120];({});out center;".format("".join(selectors))
+        return "[out:json][timeout:{}];({});out center;".format(
+            OVERPASS_QUERY_TIMEOUT_S, "".join(selectors))
 
     @classmethod
     def classify(cls, tags):
@@ -845,7 +850,7 @@ class ResilienceStrategy(object):
                     if total_tiles > 1:
                         self._log("  [INFO] Ruutu {}/{} valmis, kohteita tähän mennessä: {}".format(
                             tile_idx, total_tiles, current_found))
-            except Exception:
+            except Exception as exc:
                 # Tämä ruudukkotaso epäonnistui (esim. liian iso pyyntö /
                 # aikakatkaisu) -> kokeile hienompaa ruudukkoa, tai nosta
                 # poikkeus jos tämä oli viimeinen taso.
@@ -853,7 +858,7 @@ class ResilienceStrategy(object):
                 # Keskeneräisen tason väliaineistot poistetaan aina: muuten ne
                 # jäisivät scratch-GDB:hen paisuttamaan sitä koko ajon ajaksi.
                 self._discard(current_chunks)
-                if grid_size == last_grid:
+                if grid_size == last_grid or not getattr(exc, "retry_grid", True):
                     raise
                 self._log("  [INFO] Ruudukko {}x{} epäonnistui, kokeillaan hienompaa...".format(grid_size, grid_size))
                 continue

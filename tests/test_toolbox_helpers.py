@@ -1,5 +1,6 @@
 import importlib.machinery
 import importlib.util
+import io
 import os
 import pathlib
 import sys
@@ -1323,6 +1324,7 @@ class ToolboxHelperTests(unittest.TestCase):
         self.assertEqual("osm", poi["kind"])
 
     def test_overpass_connection_falls_back_to_second_endpoint(self):
+        self.tool._msg = lambda message: None
         class Registry:
             @staticmethod
             def get_endpoints(source_name):
@@ -1330,15 +1332,17 @@ class ToolboxHelperTests(unittest.TestCase):
                 return ["https://first.example/api", "https://second.example/api"]
 
         class Response:
+            def __init__(self):
+                self.body = io.BytesIO(b'{"elements": [{"type": "node", "id": 1}]}')
+
             def __enter__(self):
                 return self
 
             def __exit__(self, exc_type, exc, tb):
                 return False
 
-            @staticmethod
-            def read(*args):
-                return b'{"elements": [{"type": "node", "id": 1}]}'
+            def read(self, *args):
+                return self.body.read(*args)
 
         calls = []
 
@@ -1359,13 +1363,14 @@ class ToolboxHelperTests(unittest.TestCase):
         self.assertEqual({"elements": [{"type": "node", "id": 1}]}, result)
         self.assertEqual(
             [
-                ("https://first.example/api", 150),
-                ("https://second.example/api", 150),
+                ("https://first.example/api", 60),
+                ("https://second.example/api", 60),
             ],
             calls,
         )
 
     def test_overpass_remark_is_an_error_and_uses_fallback_endpoint(self):
+        self.tool._msg = lambda message: None
         class Registry:
             @staticmethod
             def get_endpoints(source_name):
@@ -1374,7 +1379,7 @@ class ToolboxHelperTests(unittest.TestCase):
 
         class Response:
             def __init__(self, body):
-                self.body = body
+                self.body = io.BytesIO(body)
 
             def __enter__(self):
                 return self
@@ -1383,7 +1388,7 @@ class ToolboxHelperTests(unittest.TestCase):
                 return False
 
             def read(self, *args):
-                return self.body
+                return self.body.read(*args)
 
         responses = [
             b'{"remark": "runtime error: Query timed out", "elements": []}',
@@ -1414,7 +1419,7 @@ class ToolboxHelperTests(unittest.TestCase):
 
     def test_geofabrik_poi_query_combines_point_and_area_osm_objects(self):
         query = MODULE.GeofabrikPOIAdapter.build_query("60,24,61,25")
-        self.assertIn('[out:json][timeout:120]', query)
+        self.assertIn('[out:json][timeout:45]', query)
         self.assertIn('nwr["amenity"]', query)
         self.assertIn('nwr["shop"]', query)
         self.assertIn('nwr["tourism"]', query)

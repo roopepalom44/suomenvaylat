@@ -15,7 +15,7 @@ MAX_RESPONSE_BYTES = 128 * 1024 * 1024
 RETRYABLE_STATUSES = frozenset((408, 425, 429, 500, 502, 503, 504))
 SENSITIVE_HEADERS = frozenset(("authorization", "proxy-authorization", "cookie"))
 OVERPASS_ENDPOINTS = ("https://overpass-api.de/api/interpreter",
-                      "https://overpass.kumi.systems/api/interpreter")
+                      "https://overpass.private.coffee/api/interpreter")
 
 
 def url_origin(url):
